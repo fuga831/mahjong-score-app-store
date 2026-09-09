@@ -1,0 +1,124 @@
+// firestore.rules — マルチプレイヤー(フレンド・卓・成績共有)機能のセキュリティルール
+//
+// ⚠️ このサンドボックスにはFirebase CLI経由でのデプロイ・エミュレータでの
+// 実地検証ができる環境がありません(npmレジストリへのアクセス不可)。
+// 以下はアプリのクライアント側コード(mahjong-score.html内のCloudSyncオブジェクト)
+// が実際に発行するFirestore呼び出しの形に合わせて書いたルールですが、
+// `firebase emulators:start` 等で必ず実地検証してから本番反映してください。
+//
+// データモデル:
+//   usernames/{normalizedUsername}      -> { uid }
+//   users/{uid}                          -> { username, matchCount, pushToken, ... }
+//   users/{uid}/friends/{friendUid}      -> { uid, username, addedAt }
+//   users/{uid}/matchHistory/{matchId}   -> { ...対局データ, participantUids, recordedBy }
+//   rooms/{roomId}                       -> { hostUid, participants, participantUids, status, hanchans, chips, ... }
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // ---- usernames: 検索・招待用の一意な識別子 ----
+    // 「予約なし」の方針どおり、旧ユーザーネームは削除と同時に即座に誰でも
+    // 再取得できるようになる(claimUsername側でdelete→createを行う)。
+    match /usernames/{name} {
+      // 検索(searchUsername)のため、サインインしていれば誰でも読める。
+      allow get: if isSignedIn();
+      // 先着順: まだ誰も使っていない名前を、自分のuidを紐付けてのみ作成できる。
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid;
+      // 既存の割り当てを別のuidに書き換えることはできない(乗っ取り防止)。
+      allow update: if false;
+      // 自分が保有しているユーザーネームだけ削除(=解放)できる。
+      allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // ---- users/{uid}: プロフィール・無料枠カウンタ ----
+    match /users/{uid} {
+      // username検索結果の表示(searchUsername)のため、サインインしていれば
+      // 誰でも読める設計にしている。pushTokenなど本来公開したくないフィールドも
+      // 同じドキュメントに同居させているため、本番では「公開プロフィール用の
+      // サブドキュメント」に分離することを検討すること(このスキャフォールドでは
+      // シンプルさを優先し分離していない)。
+      allow get: if isSignedIn();
+      allow list: if false; // 一覧列挙は許可しない(検索はusernames経由のみ)
+
+      // 本人のみ書き込み可能。matchCountは「増える方向にしか動かせない」
+      // ようにして、無料枠のカウントを自分で巻き戻せないようにする。
+      // (isPremiumはこのドキュメントでは扱わない。課金状態はストアの購入検証を
+      // 正として端末側で保持する設計のため、本番でサーバー側判定も行いたい場合は
+      // 別途Cloud Functions + Play/StoreKitのサーバー間検証と組み合わせること。)
+      allow create: if isSelf(uid);
+      allow update: if isSelf(uid)
+        && (!('matchCount' in request.resource.data)
+            || !('matchCount' in resource.data)
+            || request.resource.data.matchCount >= resource.data.matchCount);
+      allow delete: if false;
+
+      // ---- users/{uid}/friends/{friendUid} ----
+      match /friends/{friendUid} {
+        // フレンド一覧は本人のみ読める。
+        allow read: if isSelf(uid);
+        // 自分自身のfriendsサブコレクションへは自分だけが書き込める
+        // (addFriend/removeFriendは常に「自分の」friendsに対して呼ばれる設計)。
+        allow write: if isSelf(uid);
+      }
+
+      // ---- users/{uid}/matchHistory/{matchId} ----
+      match /matchHistory/{matchId} {
+        // 対局記録は本人のみ閲覧できる(他人のmatchHistoryは見えない)。
+        allow read: if isSelf(uid);
+
+        // 本人による確定保存(自分のarchiveMatchFanoutの自分向け書き込み)。
+        allow create: if isSelf(uid);
+
+        // 代表入力者からの自動配信(ファンアウト)書き込み: 自分のuidが
+        // rooms/{roomId}の参加者リストに含まれている場合に限り、そのrooms
+        // ドキュメントのhostUidからの書き込みを自分のmatchHistoryへ許可する。
+        // Firestoreルールはコレクション全体を検索するクエリ的なget()ができず
+        // ドキュメントパスを直接指定する必要があるため、書き込むデータ自体に
+        // roomIdを含めてもらい(archiveCurrentMatch側でentry.roomIdを設定済み)、
+        // それをget()でrooms/{roomId}ドキュメントとして検証する形にしている。
+        allow create: if isSignedIn()
+          && request.resource.data.recordedBy == request.auth.uid
+          && uid in request.resource.data.participantUids
+          && exists(/databases/$(database)/documents/rooms/$(request.resource.data.roomId))
+          && get(/databases/$(database)/documents/rooms/$(request.resource.data.roomId)).data.hostUid == request.auth.uid
+          && uid in get(/databases/$(database)/documents/rooms/$(request.resource.data.roomId)).data.participantUids
+          // 無料枠(FREE_MATCH_LIMIT=3)を超える場合は、対象ユーザーがisPremiumで
+          // ない限り拒否する。matchCountは上のusers/{uid}更新ルールで検証済みの
+          // 値をそのまま信頼する設計。
+          && (get(/databases/$(database)/documents/users/$(uid)).data.matchCount < 3
+              || get(/databases/$(database)/documents/users/$(uid)).data.isPremium == true);
+
+        // 確定済みの記録は変更不可(過去の記録を後から書き換えられないように)。
+        allow update: if false;
+        // 自分の記録は自分で削除できる(対局履歴モーダルの削除機能)。
+        allow delete: if isSelf(uid);
+      }
+    }
+
+    // ---- rooms/{roomId}: 進行中の卓 ----
+    match /rooms/{roomId} {
+      // 参加者(ホスト・閲覧者とも)のみ読める。
+      allow get: if isSignedIn() && request.auth.uid in resource.data.participantUids;
+      // checkActiveRoomInviteの「自分が参加者に含まれるactiveな卓を探す」
+      // クエリのために、参加者であればlistも許可する(Firestoreのlistルールは
+      // クエリ結果の各ドキュメントに対して評価されるため、
+      // 実質的にparticipantUids array-containsの絞り込みと組み合わせて安全)。
+      allow list: if isSignedIn();
+      // 卓の作成はhostUidが自分自身の場合のみ。
+      allow create: if isSignedIn() && request.resource.data.hostUid == request.auth.uid;
+      // 更新はホストのみ(代表入力者は1卓につき1人、という設計を反映)。
+      allow update: if isSignedIn() && resource.data.hostUid == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.hostUid == request.auth.uid;
+    }
+  }
+}

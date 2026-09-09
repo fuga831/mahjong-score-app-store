@@ -1,0 +1,18 @@
+{
+  "name": "麻雀点数電卓",
+  "short_name": "点数電卓",
+  "description": "親/子・翻数・アガリの形をタップするだけでロン/ツモの点数をリアルタイム計算する麻雀スコア電卓",
+  "start_url": "./index.html",
+  "scope": "./",
+  "id": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0c2a20",
+  "theme_color": "#0c2a20",
+  "lang": "ja",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

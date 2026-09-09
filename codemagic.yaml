@@ -1,0 +1,161 @@
+# codemagic.yaml — mahjong-score-app (Capacitor) の iOS 自動ビルド・署名・TestFlight配信
+#
+# ⚠️ このサンドボックスにはCodemagicのアカウント・Apple Developer Portalへの
+# アクセス・実際にビルドを走らせられる環境がなく、このファイルを実際に
+# Codemagic上で実行して検証したことは一度もありません。2026年9月時点の
+# Codemagic公式ドキュメント(docs.codemagic.io)・公式サンプルプロジェクト
+# (codemagic-ci-cd/codemagic-sample-projects)の記法に基づいて書いていますが、
+# 必ずご自身のCodemagicプロジェクトで一度ビルドを走らせて検証してください。
+#
+# ---- このファイルを使う前に必要な準備(すべて一度きりの手作業) ----
+#
+# 1. このリポジトリの `ios/` ディレクトリが既にコミットされていること。
+#    Codemagicは `npx cap add ios` を代わりに実行してくれません。お手元のMacで
+#    `ios-snippets/README.md` の手順どおり `npx cap add ios` を実行し、
+#    `ios-snippets/` 以下の差分(Info.plist・entitlements・AppDelegate.swift)を
+#    反映した上で、生成された `ios/` フォルダ一式をgitにコミットしてください。
+#
+# 2. Apple Developer PortalでこのアプリのApp ID(Bundle ID)を作成し、
+#    Sign in with Apple・Push Notifications の2つのCapabilityを**先に**
+#    有効化しておくこと(`ios-snippets/entitlements-additions.md` 参照)。
+#    Codemagicの自動署名は「有効化済みのCapabilityを含むプロファイル」を
+#    取得・生成するだけで、Capability自体を有効化してはくれません。
+#
+# 3. App Store Connectで、このアプリのアプリレコードを作成しておくこと
+#    (TestFlightへのアップロード先として必要)。作成後に払い出される
+#    数字のApple ID(例: 1234567890)を、下の APP_STORE_APPLE_ID に設定します。
+#
+# 4. CodemagicのTeam settings > Integrations で、App Store Connect APIキー
+#    (Issuer ID・Key ID・.p8秘密鍵)を使ってApple Developer Portal連携を作成し、
+#    好きな名前を付けてください(下のyamlでは "codemagic" という名前を
+#    想定しています。別名にした場合は integrations.app_store_connect の
+#    値を合わせて書き換えてください)。この連携が「自動署名」と
+#    「TestFlightへの自動アップロード」の両方の認証基盤になります。
+#
+# 5. capacitor.config.json の appId は現在 "com.example.mahjongscore" という
+#    仮の値です。実際に配信する前に、Apple Developer Portalで登録した
+#    本物のBundle IDに置き換え、この codemagic.yaml の BUNDLE_ID も
+#    合わせて書き換えてください(ios/ を再生成する場合は `npx cap sync ios`
+#    のやり直しが必要です)。
+#
+# 6. (推奨・任意) FirebaseコンソールからダウンロードしたiOS用の
+#    GoogleService-Info.plist を、リポジトリに直接コミットする代わりに
+#    Codemagicの暗号化環境変数として渡したい場合は、下記の変数を設定してください:
+#      GOOGLE_SERVICE_INFO_PLIST_BASE64 = $(base64 -i GoogleService-Info.plist)
+#    の出力を、Codemagicの環境変数設定画面で「Secure」にチェックを入れて
+#    登録してください。リポジトリに直接コミットする場合はこの変数は不要です
+#    (下のスクリプトは未設定なら自動的にスキップされます)。
+#
+# 7. TestFlightの「テスターグループ」に自動配信したい場合は、
+#    App Store Connect側で作成済みのグループ名を beta_groups に列挙してください
+#    (未設定でもアップロード自体は行われ、Codemagicの連携アカウントに
+#    内部テスターとして自動的に見えるようになります)。
+
+workflows:
+  ios-testflight-workflow:
+    name: iOS - Build, Sign & Upload to TestFlight
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+
+    # Apple Developer Portal連携(準備4)。この名前は、CodemagicのTeam
+    # integrations で実際に付けた連携名に合わせて変更してください。
+    integrations:
+      app_store_connect: codemagic
+
+    environment:
+      # ios_signing + 上のintegrationsを組み合わせることで、証明書・
+      # プロビジョニングプロファイルの取得/生成からXcodeプロジェクトへの
+      # 適用まで、Codemagicが自動で行う(=手動でp12/mobileprovisionを
+      # 管理・アップロードする必要がない)「自動署名」になります。
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.example.mahjongscore # 準備5: 本番のBundle IDに置き換える
+
+      vars:
+        XCODE_WORKSPACE: "App.xcworkspace"
+        XCODE_SCHEME: "App"
+        APP_STORE_APPLE_ID: 0000000000 # 準備3: App Store Connect上のアプリの数字ID(Apple ID)に置き換える
+
+      node: 20
+      xcode: latest
+      cocoapods: default
+
+    triggering:
+      # git tag(例: v1.0.0)をpushした時に自動でTestFlightへ上げる想定。
+      # 通常のpush毎に毎回配信したくないため、pushトリガーはコメントアウトしています。
+      # 手動で「Start new build」から実行することもいつでも可能です。
+      events:
+        - tag
+      tag_patterns:
+        - pattern: "v*.*.*"
+          include: true
+
+    scripts:
+      - name: Install npm dependencies
+        script: |
+          cd $CM_BUILD_DIR
+          npm install
+
+      - name: (任意) 暗号化環境変数からGoogleService-Info.plistを書き出す
+        script: |
+          if [ -n "$GOOGLE_SERVICE_INFO_PLIST_BASE64" ]; then
+            echo "$GOOGLE_SERVICE_INFO_PLIST_BASE64" | base64 --decode > "$CM_BUILD_DIR/ios/App/App/GoogleService-Info.plist"
+            echo "GoogleService-Info.plist を書き出しました。"
+          else
+            echo "GOOGLE_SERVICE_INFO_PLIST_BASE64 は未設定です。リポジトリに直接コミット済みのファイルをそのまま使います。"
+          fi
+
+      - name: Update dependencies and copy web assets to native iOS project
+        script: |
+          cd $CM_BUILD_DIR
+          npx cap sync ios
+
+      - name: Install CocoaPods dependencies
+        script: |
+          cd $CM_BUILD_DIR/ios/App
+          pod install
+
+      - name: Set up code signing settings on Xcode project
+        script: |
+          cd $CM_BUILD_DIR/ios/App
+          xcode-project use-profiles
+
+      - name: Increment build number (TestFlightの最新ビルド番号+1)
+        script: |
+          cd $CM_BUILD_DIR/ios/App
+          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" || echo "")
+          if [ -z "$LATEST_BUILD_NUMBER" ]; then
+            # まだ一度もTestFlightにアップロードしたことがない(初回)場合のフォールバック。
+            NEW_BUILD_NUMBER=$BUILD_NUMBER
+          else
+            NEW_BUILD_NUMBER=$(($LATEST_BUILD_NUMBER + 1))
+          fi
+          agvtool new-version -all $NEW_BUILD_NUMBER
+
+      - name: Build ipa for distribution
+        script: |
+          cd $CM_BUILD_DIR/ios/App
+          xcode-project build-ipa \
+            --workspace "$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+
+    artifacts:
+      - ios/App/build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
+
+    publishing:
+      # ビルド失敗時だけ通知したい場合の例。recipientsを実際のメールアドレスに
+      # 置き換えて使ってください(不要ならこのブロックごと削除して構いません)。
+      email:
+        recipients:
+          - you@example.com
+        notify:
+          success: false
+          failure: true
+
+      app_store_connect:
+        auth: integration # 準備4のintegrationsを使って認証する
+        submit_to_testflight: true # ご要望どおり、TestFlightへの自動アップロードまで
+        beta_groups: [] # 準備7: 自動配信したいテスターグループ名があればここに列挙
+        submit_to_app_store: false # App Store本審査への提出は行わない(TestFlightどまり)

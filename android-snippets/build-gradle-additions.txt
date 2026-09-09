@@ -1,0 +1,83 @@
+このファイルも単体では使えません。
+`npx cap add android` 後に生成される android/app/build.gradle に、
+以下を手作業でマージしてください。
+
+────────────────────────────────────────
+1) android/app/build.gradle の android { defaultConfig { ... } } 内に
+   minSdkVersion の確認を追加(AdMob最新SDKはminSdk 21以上が必要な場合があります。
+   Capacitorの標準テンプレートは既に満たしていることが多いですが、
+   実際にビルドしてエラーが出た場合はここを疑ってください):
+
+   defaultConfig {
+       applicationId "com.example.mahjongscore"   // ← capacitor.config.json の appId と一致させる
+       minSdkVersion 22
+       ...
+   }
+
+────────────────────────────────────────
+2) 通常、@capacitor-community/admob と cordova-plugin-purchase は
+   `npx cap sync android` を実行すると、それぞれのプラグインが宣言している
+   ネイティブ依存(Google Play Services Ads, Billing Library など)を
+   自動的にandroidプロジェクトへ反映してくれます(手動でdependenciesブロックに
+   Google Mobile Ads SDKやBilling Libraryの行を足す必要はない設計になっています)。
+
+   もし `npx cap sync android` 後のビルドで
+   「AdMob SDKが見つからない」「BillingClientが見つからない」等のエラーが出た場合のみ、
+   android/app/build.gradle の dependencies { ... } に以下を手動追加してください
+   (バージョンは執筆時点で確認できていないため、必ずご自身の環境で最新版を確認すること。
+   このサンドボックスはnpm/Mavenレジストリへの外部通信が許可されておらず、
+   実際のバージョン確認・ビルド検証ができていません):
+
+   dependencies {
+       implementation 'com.google.android.gms:play-services-ads:23.+'
+       implementation 'com.android.billingclient:billing:6.+'
+   }
+
+────────────────────────────────────────
+3) android/variables.gradle (Capacitor標準テンプレートに存在)の
+   compileSdkVersion / targetSdkVersion が、
+   @capacitor-community/admob の要求バージョンを満たしているか確認してください。
+   (プラグインのREADMEに明記されている最低要求値を確認:
+    https://github.com/capacitor-community/admob )
+
+────────────────────────────────────────
+ここから下は今回のマルチプレイヤー機能(Firebase Auth/Firestore/Messaging)追加分。
+
+4) android/build.gradle (プロジェクトルート、app/ではない方)の
+   dependencies { classpath ... } に、Google Services プラグインを追加:
+
+   buildscript {
+       dependencies {
+           classpath 'com.google.gms:google-services:4.4.+'
+       }
+   }
+
+5) android/app/build.gradle の**ファイル末尾**に、Google Services プラグインの
+   適用を追加(必ずファイルの一番下、他のapply plugin行より後ろに置くこと。
+   google-services.jsonを読み込む処理がこのタイミングで実行されるため):
+
+   apply plugin: 'com.google.gms.google-services'
+
+6) google-services.json の配置:
+   Firebaseコンソールで「Androidアプリを追加」した際にダウンロードできる
+   google-services.json を、android/app/ 直下(build.gradleと同じ階層)に置いてください。
+   (このファイルにはFirebaseプロジェクトの接続情報が入っているので、
+    公開リポジトリにコミットする場合は取り扱いに注意。とはいえ一般的に
+    google-services.json自体はクライアント埋め込み前提の情報なので、
+    Firestoreセキュリティルール側でアクセス制御をきちんと行うことの方が重要です。)
+
+7) Googleログイン(Sign-In)に必要なSHA-1/SHA-256フィングリンプリントの登録:
+   `npx cap sync android` 後、以下のコマンドでデバッグ用の署名鍵のフィンガープリントを
+   確認し、Firebaseコンソール > プロジェクト設定 > 全般 > (該当Androidアプリ) の
+   「SHA証明書フィンガープリント」に追加してください
+   (デバッグビルドと本番リリースビルドで鍵が異なるため、**両方**登録が必要です。
+   これを忘れるとGoogleログインが `DEVELOPER_ERROR` 等で失敗します):
+
+   cd android
+   ./gradlew signingReport
+
+8) @capacitor-firebase/authentication・@capacitor-firebase/firestore・
+   @capacitor-firebase/messaging は、`npx cap sync android` 実行時にそれぞれが
+   要求するFirebase Android SDKの依存を自動的に反映する設計になっています
+   (Firebase BoMのバージョン等を手動でdependenciesに足す必要は通常ありません)。
+   ビルドエラーが出た場合のみ、各プラグインのREADMEを確認してください。

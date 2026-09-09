@@ -1,0 +1,26 @@
+{
+  "appId": "com.example.mahjongscore",
+  "appName": "麻雀点数電卓",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "android": {
+    "allowMixedContent": false
+  },
+  "ios": {
+    "contentInset": "automatic"
+  },
+  "plugins": {
+    "AdMob": {
+      "requestTrackingAuthorization": false,
+      "testingDevices": [],
+      "initializeForTesting": false
+    },
+    "FirebaseAuthentication": {
+      "skipNativeAuth": false,
+      "providers": ["google.com", "apple.com"]
+    },
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    }
+  }
+}

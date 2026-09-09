@@ -1,0 +1,4260 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>麻雀点数電卓</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="theme-color" content="#0c2a20">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="点数電卓">
+<meta name="description" content="親/子・翻数・アガリの形をタップするだけでロン/ツモの点数をリアルタイム計算する麻雀スコア電卓">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --felt-0:#0c2a20;
+    --felt-1:#123a2b;
+    --felt-2:#1a4a37;
+    --line:#2f5f4a;
+    --ivory:#f4eee0;
+    --ivory-dim:#cdd9cd;
+    --ink:#0f2a20;
+    --ink-soft:#9fc2ac;
+    --gold:#d8b26a;
+    --gold-strong:#e9c983;
+    --red:#c14a3d;
+    --red-soft:#e0847a;
+    --shadow: 0 3px 0 rgba(0,0,0,0.28), 0 6px 14px rgba(0,0,0,0.35);
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:
+      radial-gradient(circle at 20% 15%, rgba(255,255,255,0.035) 0, transparent 40%),
+      radial-gradient(circle at 80% 85%, rgba(255,255,255,0.03) 0, transparent 45%),
+      repeating-linear-gradient(135deg, rgba(255,255,255,0.018) 0 2px, transparent 2px 26px),
+      var(--felt-0);
+    color:var(--ivory);
+    font-family:"Noto Sans JP","Zen Maru Gothic",system-ui,sans-serif;
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  .stage{
+    max-width:460px;
+    margin:0 auto;
+    min-height:100vh;
+    padding:18px 14px calc(70px + env(safe-area-inset-bottom, 0px));
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+  }
+
+  h1{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:900;
+    font-size:1.05rem;
+    letter-spacing:.06em;
+    color:var(--gold-strong);
+    margin:2px 4px 0;
+    display:flex;
+    align-items:center;
+    gap:.5em;
+  }
+  h1 .tile{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:1.6em;height:1.6em;
+    background:var(--ivory);
+    color:var(--ink);
+    border-radius:5px;
+    font-size:.75em;
+    box-shadow:var(--shadow);
+  }
+  .title-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+  }
+  .title-row h1{margin:2px 0 0;flex:1;min-width:0;}
+  .hamburger-btn{
+    flex-shrink:0;
+    width:34px;height:34px;
+    border-radius:10px;
+    border:1px solid var(--line);
+    background:var(--felt-1);
+    color:var(--ivory);
+    font-size:1.05rem;
+    line-height:1;
+    cursor:pointer;
+  }
+  .hamburger-btn:active{background:var(--felt-2);}
+
+  /* ---- top control row ---- */
+  .toprow{
+    display:flex;
+    gap:10px;
+    align-items:stretch;
+  }
+  .seg{
+    display:flex;
+    background:var(--felt-1);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:4px;
+    gap:4px;
+  }
+  .seg button{
+    flex:1;
+    border:0;
+    background:transparent;
+    color:var(--ink-soft);
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-size:.92rem;
+    padding:9px 14px;
+    border-radius:9px;
+    cursor:pointer;
+    transition:background .15s, color .15s;
+  }
+  .seg button.active{
+    background:var(--gold);
+    color:var(--ink);
+    box-shadow:0 2px 6px rgba(0,0,0,.3);
+  }
+
+  .kiriage{
+    flex:1;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    background:var(--felt-1);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:8px 12px;
+    cursor:pointer;
+    user-select:none;
+  }
+  .kiriage .label{
+    font-size:.72rem;
+    line-height:1.25;
+    color:var(--ivory-dim);
+  }
+  .kiriage .label b{color:var(--ivory);font-weight:500;}
+  .switch{
+    position:relative;
+    width:38px;height:22px;
+    border-radius:999px;
+    background:var(--felt-2);
+    border:1px solid var(--line);
+    flex-shrink:0;
+    transition:background .15s;
+  }
+  .switch::after{
+    content:"";
+    position:absolute;
+    top:2px;left:2px;
+    width:16px;height:16px;
+    border-radius:50%;
+    background:var(--ivory-dim);
+    transition:transform .15s, background .15s;
+  }
+  .switch.on{background:#3d7a5c;}
+  .switch.on::after{transform:translateX(16px);background:var(--gold-strong);}
+
+  /* ---- result panel ---- */
+  .result{
+    position:relative;
+    background:linear-gradient(180deg, var(--felt-1), var(--felt-2));
+    border:1px solid var(--line);
+    border-radius:16px;
+    padding:16px 18px 14px;
+    box-shadow:var(--shadow);
+    overflow:hidden;
+  }
+  .result::before{
+    content:"";
+    position:absolute;
+    inset:0;
+    border-radius:16px;
+    padding:1px;
+    background:linear-gradient(135deg, rgba(216,178,106,.5), transparent 40%);
+    -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite:xor;
+    mask-composite:exclude;
+    pointer-events:none;
+  }
+  .summary-line{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    margin-bottom:10px;
+  }
+  .summary-line .state{
+    font-size:.78rem;
+    color:var(--ink-soft);
+    letter-spacing:.03em;
+  }
+  .summary-line .state b{
+    color:var(--gold-strong);
+    font-weight:700;
+  }
+  .badge{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-size:.68rem;
+    font-weight:700;
+    color:var(--felt-0);
+    background:var(--red-soft);
+    padding:2px 8px;
+    border-radius:999px;
+    letter-spacing:.04em;
+  }
+  .score-rows{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .score-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:8px 4px 8px 2px;
+  }
+  .score-row + .score-row{
+    border-top:1px dashed var(--line);
+  }
+  .score-row .tag{
+    display:flex;
+    flex-direction:column;
+    gap:1px;
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-size:.85rem;
+    color:var(--ivory-dim);
+    width:4.6em;
+    flex-shrink:0;
+  }
+  .score-row .tag .fusub{
+    font-family:"Noto Sans JP",sans-serif;
+    font-weight:500;
+    font-size:.62rem;
+    color:#7c9d8b;
+    letter-spacing:0;
+  }
+  .score-row .amt{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:900;
+    font-variant-numeric:tabular-nums;
+    color:var(--ivory);
+    font-size:1.9rem;
+    line-height:1;
+    text-align:right;
+    flex:1;
+  }
+  .score-row .amt .pt{
+    font-size:.95rem;
+    font-weight:700;
+    color:var(--ink-soft);
+    margin-left:.15em;
+  }
+  .score-row .amt .all{
+    font-size:.8rem;
+    font-weight:700;
+    color:var(--gold-strong);
+    margin-left:.35em;
+  }
+  .split{
+    display:flex;
+    gap:14px;
+    justify-content:flex-end;
+    align-items:baseline;
+  }
+  .split .item{
+    display:flex;
+    flex-direction:column;
+    align-items:flex-end;
+    gap:1px;
+  }
+  .split .item .who{
+    font-size:.62rem;
+    color:var(--ink-soft);
+    letter-spacing:.05em;
+  }
+  .split .item .num{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:900;
+    font-variant-numeric:tabular-nums;
+    font-size:1.25rem;
+    color:var(--ivory);
+  }
+  .row-ron .amt{color:var(--red-soft);}
+
+  /* ---- section blocks ---- */
+  section{
+    background:var(--felt-1);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:12px 12px 13px;
+    transition:opacity .15s;
+  }
+  section.disabled{
+    opacity:.4;
+    pointer-events:none;
+  }
+  section .sec-title{
+    font-size:.7rem;
+    font-weight:700;
+    color:var(--ink-soft);
+    letter-spacing:.06em;
+    margin-bottom:9px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+  }
+  .sec-title .hint{
+    font-weight:400;
+    color:#7c9d8b;
+  }
+  .sec-title .fu-mode-link{
+    cursor:pointer;
+    text-decoration:underline;
+    color:var(--gold-strong);
+  }
+
+  .grid{
+    display:grid;
+    gap:7px;
+  }
+  .grid.g4{grid-template-columns:repeat(4,1fr);}
+  .grid.g5{grid-template-columns:repeat(3,1fr);}
+  .grid.g2{grid-template-columns:repeat(2,1fr);}
+
+  .tile-btn{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-size:.86rem;
+    color:var(--ink);
+    background:var(--ivory);
+    border:1.5px solid transparent;
+    border-radius:9px;
+    padding:11px 6px;
+    text-align:center;
+    cursor:pointer;
+    box-shadow:0 2px 0 rgba(0,0,0,.25);
+    line-height:1.25;
+    transition:transform .08s, background .12s, box-shadow .12s;
+  }
+  .tile-btn small{display:block;font-size:.65rem;font-weight:500;color:#5a6b60;margin-top:1px;}
+  .tile-btn:active{transform:translateY(1px);box-shadow:0 1px 0 rgba(0,0,0,.25);}
+  .tile-btn.selected{
+    background:var(--gold);
+    border-color:var(--gold-strong);
+    box-shadow:0 2px 0 rgba(0,0,0,.3), 0 0 0 2px rgba(216,178,106,.25);
+  }
+  .tile-btn.selected small{color:#5a4523;}
+  .tile-btn.disabled{
+    opacity:.35;
+    cursor:not-allowed;
+    pointer-events:none;
+  }
+  .tile-btn.tier{background:var(--felt-2);color:var(--ivory);}
+  .tile-btn.tier small{color:var(--ink-soft);}
+  .tile-btn.tier.selected{background:var(--red);color:var(--ivory);border-color:var(--red-soft);}
+  .tile-btn.tier.selected small{color:#f2d4cf;}
+
+  .chip-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:7px;
+  }
+  .chip{
+    font-family:"Noto Sans JP",sans-serif;
+    font-weight:500;
+    font-size:.78rem;
+    color:var(--ivory-dim);
+    background:var(--felt-2);
+    border:1.5px solid var(--line);
+    border-radius:999px;
+    padding:8px 13px;
+    cursor:pointer;
+    transition:all .12s;
+  }
+  .chip .fu{font-weight:700;color:var(--gold-strong);margin-left:.3em;}
+  .chip.on{
+    background:var(--gold);
+    border-color:var(--gold-strong);
+    color:var(--ink);
+  }
+  .chip.on .fu{color:#5a4523;}
+  .chip.disabled{opacity:.35;cursor:not-allowed;pointer-events:none;}
+
+  /* ---- mentsu (triplet / kan) list ---- */
+  .mentsu-list{
+    display:flex;
+    flex-direction:column;
+    gap:7px;
+    margin-top:9px;
+  }
+  .mentsu-empty{
+    font-size:.72rem;
+    color:#7c9d8b;
+  }
+  .mentsu-row{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    gap:6px;
+    background:var(--felt-2);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:7px 8px;
+  }
+  .mseg{
+    display:flex;
+    background:var(--felt-1);
+    border-radius:7px;
+    padding:2px;
+    gap:2px;
+  }
+  .mseg button{
+    border:0;
+    background:transparent;
+    color:var(--ink-soft);
+    font-family:"Noto Sans JP",sans-serif;
+    font-weight:500;
+    font-size:.68rem;
+    padding:5px 8px;
+    border-radius:5px;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+  .mseg button.active{background:var(--gold);color:var(--ink);font-weight:700;}
+  .mentsu-row .mfu{
+    margin-left:auto;
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:900;
+    color:var(--gold-strong);
+    font-size:.85rem;
+    padding-left:4px;
+  }
+  .mentsu-row .mremove{
+    width:22px;height:22px;
+    flex-shrink:0;
+    border-radius:50%;
+    border:1px solid var(--line);
+    background:var(--felt-1);
+    color:var(--ivory-dim);
+    font-size:.78rem;
+    line-height:1;
+    cursor:pointer;
+  }
+  .mentsu-row .mremove:active{background:var(--felt-0);}
+  .mentsu-add{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:6px;
+    width:100%;
+    margin-top:8px;
+    padding:9px;
+    border-radius:10px;
+    border:1.5px dashed var(--line);
+    background:transparent;
+    color:var(--ink-soft);
+    font-family:"Noto Sans JP",sans-serif;
+    font-weight:500;
+    font-size:.8rem;
+    cursor:pointer;
+  }
+  .mentsu-add:active{background:var(--felt-2);}
+  .mentsu-add.disabled{opacity:.35;pointer-events:none;}
+
+  .shanpon-note{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    background:var(--felt-2);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:8px 10px;
+    margin-top:7px;
+  }
+  .shanpon-note .lbl{font-size:.75rem;color:var(--ivory-dim);}
+  .shanpon-note .note{
+    width:100%;
+    font-size:.68rem;
+    color:#7c9d8b;
+  }
+
+  footer{
+    text-align:center;
+    font-size:.65rem;
+    color:#5f8570;
+    margin-top:2px;
+    letter-spacing:.03em;
+  }
+
+  #calcTab, #logTab{
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+  }
+
+  /* ---- bottom nav ---- */
+  .bottom-nav{
+    position:fixed;
+    left:0; right:0; bottom:0;
+    display:flex;
+    gap:8px;
+    padding:8px 14px calc(8px + env(safe-area-inset-bottom, 0px));
+    background:linear-gradient(180deg, rgba(12,42,32,.85), var(--felt-0) 30%);
+    border-top:1px solid var(--line);
+    backdrop-filter:blur(6px);
+    z-index:20;
+  }
+  /* ストアアプリでバナー広告(ネイティブのオーバーレイビュー)を表示している間は、
+     アプリ自身の下部ナビを広告の高さぶん上に逃がし、誤クリックを防ぐための
+     余白も確保する。広告そのものはDOM外(ネイティブ側)に描画される。 */
+  .bottom-nav.with-ad-banner{ bottom:50px; }
+  body.ad-banner-active .stage{ padding-bottom:calc(120px + env(safe-area-inset-bottom, 0px)); }
+  .bottom-nav button{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:2px;
+    border:0;
+    background:transparent;
+    color:var(--ink-soft);
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-size:.68rem;
+    padding:8px 4px 6px;
+    border-radius:12px;
+    cursor:pointer;
+  }
+  .bottom-nav button .ic{font-size:1.2rem;line-height:1;}
+  .bottom-nav button.active{background:var(--felt-1);color:var(--gold-strong);}
+
+  /* ---- sticky totals header (log tab) ---- */
+  .sticky-header{
+    position:sticky;
+    top:0;
+    z-index:10;
+    margin:0 -14px;
+    padding:10px 14px 12px;
+    background:linear-gradient(180deg, var(--felt-0) 70%, rgba(12,42,32,0));
+  }
+  /* 演出モードの発表中/発表後は、順位カードが積み重なって縦に長くなり得るため
+     sticky化すると下のフォーム等を覆い隠してしまう。この状態だけは通常の
+     ブロックとして扱い、スクロールで自然に流れていくようにする。 */
+  .header-block{
+    margin:0 -14px;
+    padding:10px 14px 12px;
+    background:linear-gradient(180deg, var(--felt-0) 70%, rgba(12,42,32,0));
+  }
+  .total-cards{
+    display:grid;
+    grid-auto-flow:column;
+    grid-auto-columns:minmax(84px,1fr);
+    gap:7px;
+    overflow-x:auto;
+    padding-bottom:2px;
+  }
+  .total-card{
+    background:var(--felt-1);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:8px 9px;
+    box-shadow:var(--shadow);
+  }
+  .total-card.top{background:linear-gradient(160deg, var(--felt-2), var(--felt-1));border-color:var(--gold);}
+  .total-card .pname{
+    font-size:.68rem;
+    font-weight:700;
+    color:var(--ivory-dim);
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    display:flex;
+    align-items:center;
+    gap:3px;
+  }
+  .total-card.top .pname{color:var(--gold-strong);}
+  .total-card .pmoney{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:900;
+    font-variant-numeric:tabular-nums;
+    font-size:1.05rem;
+    color:var(--ivory);
+    margin-top:2px;
+    white-space:nowrap;
+  }
+  .total-card .ppt{
+    font-size:.62rem;
+    color:var(--ink-soft);
+    font-variant-numeric:tabular-nums;
+  }
+  .crown{font-size:.7rem;}
+
+  /* ---- 演出モード切り替えスイッチ（画面右上） ---- */
+  .mode-switch-row{
+    display:flex;
+    justify-content:flex-end;
+    align-items:center;
+    gap:6px;
+    padding-bottom:8px;
+  }
+  .mode-switch-row .mode-label{
+    font-size:.66rem;
+    color:var(--ink-soft);
+    letter-spacing:.02em;
+  }
+  .switch.disabled{opacity:.4;cursor:not-allowed;}
+
+  /* ---- マルチプレイヤー: 卓の状態表示 ---- */
+  .room-status-row{
+    font-size:.68rem;
+    color:var(--gold-strong);
+    background:rgba(216,178,106,.12);
+    border:1px solid var(--line);
+    border-radius:9px;
+    padding:6px 9px;
+    margin-bottom:8px;
+  }
+
+  /* ---- 演出モード：終局ボタン・順位発表 ---- */
+  .reveal-btn{
+    display:block;
+    width:100%;
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:900;
+    font-size:.95rem;
+    color:var(--ink);
+    background:linear-gradient(160deg, var(--gold-strong), var(--gold));
+    border:1.5px solid var(--gold-strong);
+    border-radius:12px;
+    padding:13px;
+    cursor:pointer;
+    box-shadow:var(--shadow);
+  }
+  .reveal-btn:disabled{
+    opacity:.4;
+    cursor:not-allowed;
+    box-shadow:none;
+  }
+  .reveal-btn:active{transform:translateY(1px);}
+  .reveal-area{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    margin-bottom:10px;
+  }
+  .reveal-card{
+    background:linear-gradient(180deg, var(--felt-1), var(--felt-2));
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:10px 14px;
+    box-shadow:var(--shadow);
+    animation:reveal-pop .25s ease-out;
+  }
+  .reveal-card.top{border-color:var(--gold);background:linear-gradient(180deg, #2a4a35, var(--felt-2));}
+  @keyframes reveal-pop{
+    from{opacity:0;transform:scale(.92) translateY(4px);}
+    to{opacity:1;transform:scale(1) translateY(0);}
+  }
+  .reveal-rank{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:900;
+    font-size:.78rem;
+    color:var(--gold-strong);
+    letter-spacing:.04em;
+    margin-bottom:4px;
+  }
+  .reveal-card.top .reveal-rank{font-size:.9rem;}
+  .reveal-member{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    gap:8px;
+    padding:3px 0;
+  }
+  .reveal-name{
+    font-weight:700;
+    font-size:.9rem;
+    color:var(--ivory);
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .reveal-money{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:900;
+    font-variant-numeric:tabular-nums;
+    font-size:1.15rem;
+    color:var(--ivory);
+    flex-shrink:0;
+  }
+  .reveal-pt{
+    font-size:.66rem;
+    color:var(--ink-soft);
+    font-variant-numeric:tabular-nums;
+    flex-shrink:0;
+  }
+  .reveal-done{
+    text-align:center;
+    font-size:.72rem;
+    color:var(--ink-soft);
+    padding:4px 0 2px;
+  }
+
+  .share-icon-btn{
+    border:1px solid var(--line);
+    background:var(--felt-1);
+    color:var(--ivory-dim);
+    border-radius:8px;
+    width:26px;height:26px;
+    font-size:.78rem;
+    line-height:1;
+    cursor:pointer;
+    margin-right:auto;
+  }
+  .share-icon-btn:active{background:var(--felt-2);}
+
+  /* ---- 対局を終了する ---- */
+  .end-match-btn{
+    display:block;
+    width:100%;
+    margin-top:9px;
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-size:.82rem;
+    color:var(--ivory-dim);
+    background:transparent;
+    border:1.5px solid var(--line);
+    border-radius:12px;
+    padding:10px;
+    cursor:pointer;
+  }
+  .end-match-btn:active{background:var(--felt-1);}
+  .end-match-confirm{
+    margin-top:9px;
+    background:var(--felt-1);
+    border:1px solid var(--red);
+    border-radius:12px;
+    padding:10px 12px;
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    font-size:.76rem;
+    color:var(--ivory-dim);
+  }
+  .end-match-confirm-btns{display:flex;gap:8px;}
+  .end-match-confirm-btns .preset-btn{flex:1;}
+  .preset-btn.danger{background:var(--red);color:var(--ivory);border-color:var(--red-soft);}
+
+  /* ---- 対局履歴モーダル ---- */
+  .history-modal-overlay{
+    position:fixed;
+    inset:0;
+    background:rgba(5,16,12,.72);
+    z-index:50;
+    display:flex;
+    align-items:flex-end;
+    justify-content:center;
+  }
+  .history-modal{
+    width:100%;
+    max-width:460px;
+    max-height:92vh;
+    background:var(--felt-0);
+    border:1px solid var(--line);
+    border-radius:18px 18px 0 0;
+    box-shadow:var(--shadow);
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+  }
+  .history-modal-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    padding:14px 14px 8px;
+    flex-shrink:0;
+  }
+  .history-modal-title{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:900;
+    font-size:1rem;
+    color:var(--gold-strong);
+  }
+  .history-back{
+    border:0;background:transparent;color:var(--ivory-dim);
+    font-size:.82rem;font-weight:700;cursor:pointer;padding:4px 2px;
+  }
+  .history-close{
+    border:1px solid var(--line);background:var(--felt-1);color:var(--ivory);
+    width:28px;height:28px;border-radius:50%;font-size:.9rem;line-height:1;cursor:pointer;
+  }
+  .history-tabs{
+    display:flex;gap:8px;padding:0 14px 10px;flex-shrink:0;
+  }
+  .history-tabs .preset-btn{flex:1;}
+  .history-modal-body{
+    padding:0 14px 18px;
+    overflow-y:auto;
+  }
+  .history-toolbar{display:flex;gap:8px;margin-bottom:10px;}
+  .history-toolbar .mentsu-add{margin-top:0;}
+  .history-empty{
+    text-align:center;
+    color:var(--ink-soft);
+    font-size:.8rem;
+    padding:28px 0;
+  }
+  .history-reminder{
+    margin-top:10px;
+    font-size:.68rem;
+    color:var(--ink-soft);
+    text-align:center;
+  }
+  .history-list{display:flex;flex-direction:column;gap:8px;}
+  .history-card{
+    background:var(--felt-1);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:10px 12px;
+    cursor:pointer;
+  }
+  .history-card:active{background:var(--felt-2);}
+  .history-card-head{
+    display:flex;justify-content:space-between;align-items:baseline;
+    font-size:.66rem;color:var(--ink-soft);
+  }
+  .history-title{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-size:.88rem;
+    color:var(--ivory);
+    margin-top:3px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .history-winner{
+    margin-top:5px;
+    font-size:.78rem;
+    color:var(--gold-strong);
+    display:flex;align-items:center;gap:6px;
+  }
+  .history-winner-money{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:900;
+    font-variant-numeric:tabular-nums;
+  }
+  .history-detail-title-row{margin-bottom:2px;}
+  .history-detail-title{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:900;
+    font-size:.95rem;
+    color:var(--ivory);
+    cursor:pointer;
+  }
+  .history-detail-meta{
+    font-size:.7rem;
+    color:var(--ink-soft);
+    margin-bottom:10px;
+  }
+  .history-detail-actions{
+    display:flex;flex-direction:column;gap:8px;
+    margin-top:14px;
+  }
+  .danger-text{color:var(--red-soft) !important;border-color:var(--red) !important;}
+
+  .stat-group{margin-bottom:16px;}
+  .stat-group-head{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-size:.82rem;
+    color:var(--ivory-dim);
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    margin-bottom:8px;
+  }
+  .stat-cards{display:flex;flex-direction:column;gap:8px;}
+  .stat-card{
+    background:var(--felt-1);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:9px 12px;
+  }
+  .stat-name{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:900;
+    font-size:.88rem;
+    color:var(--gold-strong);
+    margin-bottom:4px;
+  }
+  .stat-row{
+    font-size:.72rem;
+    color:var(--ivory-dim);
+    display:flex;
+    justify-content:space-between;
+    padding:2px 0;
+  }
+  .stat-row b{color:var(--ivory);font-variant-numeric:tabular-nums;}
+  .share-fallback-toast{
+    margin:0 14px 12px;
+    background:var(--felt-2);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:8px 10px;
+    font-size:.72rem;
+    color:var(--ivory-dim);
+    word-break:break-all;
+  }
+
+  /* ---- 課金ステータス・ペイウォール ---- */
+  .premium-status-row{ margin-bottom:10px; }
+  .premium-badge{
+    display:block;
+    background:rgba(216,178,106,.15);
+    border:1px solid var(--gold);
+    color:var(--gold-strong);
+    border-radius:10px;
+    padding:8px 10px;
+    font-size:.76rem;
+    font-weight:700;
+    text-align:center;
+  }
+  .paywall-copy{
+    font-size:.82rem;
+    color:var(--ivory-dim);
+    line-height:1.6;
+    margin:0 0 10px;
+  }
+  .paywall-benefits{
+    margin:0 0 14px;
+    padding:0;
+    list-style:none;
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+  }
+  .paywall-benefits li{
+    font-size:.8rem;
+    color:var(--ivory);
+    background:var(--felt-1);
+    border:1px solid var(--line);
+    border-radius:9px;
+    padding:8px 10px;
+  }
+  .paywall-note{
+    margin-top:10px;
+    font-size:.68rem;
+    color:var(--ink-soft);
+    text-align:center;
+    line-height:1.5;
+  }
+
+  /* ---- accordion ---- */
+  .accordion{
+    background:var(--felt-1);
+    border:1px solid var(--line);
+    border-radius:14px;
+    overflow:hidden;
+  }
+  .accordion-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:13px 14px;
+    cursor:pointer;
+    user-select:none;
+  }
+  .accordion-head .t{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-size:.88rem;
+    color:var(--ivory);
+  }
+  .accordion-head .t small{
+    display:block;
+    font-family:"Noto Sans JP",sans-serif;
+    font-weight:400;
+    font-size:.68rem;
+    color:var(--ink-soft);
+    margin-top:1px;
+  }
+  .accordion-head .chev{
+    font-size:.8rem;
+    color:var(--ink-soft);
+    transition:transform .15s;
+  }
+  .accordion.open .chev{transform:rotate(180deg);}
+  .accordion-body{
+    padding:0 14px 14px;
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+  }
+
+  .settings-row{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+  }
+  .settings-row .lbl{
+    font-size:.72rem;
+    font-weight:700;
+    color:var(--ivory-dim);
+    letter-spacing:.03em;
+  }
+  .preset-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+  }
+  .preset-btn{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-size:.76rem;
+    color:var(--ink-soft);
+    background:var(--felt-2);
+    border:1.5px solid var(--line);
+    border-radius:9px;
+    padding:7px 11px;
+    cursor:pointer;
+  }
+  .preset-btn.active{background:var(--gold);color:var(--ink);border-color:var(--gold-strong);}
+  .num-input{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-variant-numeric:tabular-nums;
+    font-size:.92rem;
+    color:var(--ivory);
+    background:var(--felt-2);
+    border:1.5px solid var(--line);
+    border-radius:9px;
+    padding:9px 11px;
+    width:100%;
+  }
+  .num-input:focus{outline:none;border-color:var(--gold);}
+  /* タップミスで±100点などが加算される入力欄標準の増減ボタンを消す */
+  .num-input::-webkit-outer-spin-button,
+  .num-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+  .num-input{-moz-appearance:textfield;}
+  .text-input{
+    font-family:"Noto Sans JP",sans-serif;
+    font-weight:500;
+    font-size:.86rem;
+    color:var(--ivory);
+    background:var(--felt-2);
+    border:1.5px solid var(--line);
+    border-radius:9px;
+    padding:9px 11px;
+    width:100%;
+  }
+  .text-input:focus{outline:none;border-color:var(--gold);}
+  .inline-fields{display:flex;gap:8px;}
+  .inline-fields > div{flex:1;}
+  .preview-line{
+    font-size:.72rem;
+    color:var(--ink-soft);
+    background:var(--felt-2);
+    border-radius:8px;
+    padding:7px 9px;
+    line-height:1.5;
+  }
+  .preview-line b{color:var(--gold-strong);font-weight:700;}
+
+  .name-edit-row{display:flex;flex-direction:column;gap:6px;}
+  .name-edit-item{display:flex;align-items:center;gap:8px;}
+  .name-edit-item .num{
+    width:1.6em;flex-shrink:0;
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;color:var(--ink-soft);font-size:.8rem;text-align:center;
+  }
+  .link-badge{
+    flex-shrink:0;
+    max-width:6.5em;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    font-family:"Noto Sans JP",sans-serif;
+    font-size:.68rem;
+    font-weight:700;
+    color:var(--ink-soft);
+    background:var(--felt-2);
+    border:1.5px solid var(--line);
+    border-radius:999px;
+    padding:6px 9px;
+    cursor:pointer;
+  }
+  .link-badge.linked{background:var(--gold);color:var(--ink);border-color:var(--gold-strong);}
+
+  /* ---- hanchan input form ---- */
+  .score-scale-hint{
+    font-size:.68rem;
+    color:var(--ink-soft);
+    margin:-2px 0 8px;
+  }
+  .score-scale-hint b{color:var(--ivory-dim);}
+  .score-input-grid{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .score-input-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .score-input-row .pname{
+    width:5.2em;
+    flex-shrink:0;
+    font-size:.8rem;
+    font-weight:700;
+    color:var(--ivory-dim);
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .score-input-row select.buster-select{
+    flex-shrink:0;
+    max-width:6.5em;
+  }
+  .check-banner{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    border-radius:10px;
+    padding:9px 11px;
+    font-size:.78rem;
+    font-weight:700;
+  }
+  .check-banner.ok{background:rgba(61,122,92,.25);color:#9fe0bd;border:1px solid #3d7a5c;}
+  .check-banner.bad{background:rgba(193,74,61,.2);color:var(--red-soft);border:1px solid var(--red);}
+  .record-btn{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:900;
+    font-size:.95rem;
+    color:var(--ink);
+    background:var(--gold);
+    border:0;
+    border-radius:12px;
+    padding:13px;
+    cursor:pointer;
+    box-shadow:var(--shadow);
+  }
+  .record-btn:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;}
+
+  /* ---- hanchan log cards ---- */
+  .hanchan-card{
+    background:var(--felt-1);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:10px 12px;
+  }
+  .hanchan-card .hc-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin-bottom:7px;
+  }
+  .hanchan-card .hc-title{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-size:.78rem;
+    color:var(--gold-strong);
+  }
+  .hanchan-card .hc-actions{display:flex;gap:6px;}
+  .hanchan-card .hc-actions button{
+    width:24px;height:24px;
+    border-radius:50%;
+    border:1px solid var(--line);
+    background:var(--felt-2);
+    color:var(--ivory-dim);
+    font-size:.72rem;
+    cursor:pointer;
+  }
+  .hc-rows{display:flex;flex-direction:column;gap:4px;}
+  .hc-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:.8rem;
+  }
+  .hc-row .hc-rank{
+    width:1.6em;flex-shrink:0;
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:900;
+    color:var(--ink-soft);
+    text-align:center;
+  }
+  .hc-row.rank1 .hc-rank{color:var(--gold-strong);}
+  .hc-row .hc-name{flex:1;color:var(--ivory-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .hc-row .hc-score{
+    width:5em;text-align:right;
+    font-variant-numeric:tabular-nums;
+    color:var(--ivory);
+  }
+  .hc-row .hc-pt{
+    width:4.2em;text-align:right;
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-variant-numeric:tabular-nums;
+  }
+  .hc-pt.plus{color:#9fe0bd;}
+  .hc-pt.minus{color:var(--red-soft);}
+  .log-empty{
+    text-align:center;
+    font-size:.78rem;
+    color:#7c9d8b;
+    padding:18px 0;
+  }
+
+  .chip-input-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .chip-input-row .pname{width:5.2em;flex-shrink:0;font-size:.8rem;font-weight:700;color:var(--ivory-dim);}
+  .chip-stepper{display:flex;align-items:center;gap:6px;flex:1;}
+  .chip-stepper button{
+    width:30px;height:30px;border-radius:50%;
+    border:1px solid var(--line);background:var(--felt-2);color:var(--ivory);
+    font-size:1rem;font-weight:700;cursor:pointer;flex-shrink:0;
+  }
+  .chip-stepper .val{
+    flex:1;text-align:center;
+    font-family:"Zen Maru Gothic",sans-serif;font-weight:900;
+    font-variant-numeric:tabular-nums;font-size:.95rem;color:var(--ivory);
+    cursor:pointer;
+    border-radius:6px;
+  }
+  .chip-stepper .val:active{background:var(--felt-2);}
+  .chip-stepper .chip-val-input{
+    flex:1;text-align:center;
+    padding:6px 4px;
+    margin:0;
+  }
+</style>
+
+<div class="stage">
+  <div class="title-row">
+    <h1 id="appTitle"><span class="tile">🀄</span>麻雀点数電卓</h1>
+    <button class="hamburger-btn" id="accountMenuBtn" onclick="openAccountModal()" title="アカウント・フレンド" style="display:none;">👤</button>
+    <button class="hamburger-btn" id="historyMenuBtn" onclick="openHistoryModal()" title="対局履歴" style="display:none;">☰</button>
+  </div>
+
+  <div id="calcTab">
+    <div class="toprow">
+      <div class="seg" id="dealerSeg"></div>
+      <div class="kiriage" id="kiriageToggle" onclick="toggleKiriage()">
+        <span class="label">切り上げ<br><b>満貫</b></span>
+        <span class="switch" id="kiriageSwitch"></span>
+      </div>
+    </div>
+
+    <div class="result" id="resultPanel"></div>
+
+    <section id="hanSection">
+      <div class="sec-title">翻数<span class="hint fu-mode-link" id="fuModeHint" onclick="toggleFuDirectMode()"></span></div>
+      <div class="grid g4" id="hanGrid1"></div>
+      <div class="grid g5" id="hanGrid2" style="margin-top:7px;"></div>
+    </section>
+
+    <section id="keitaiSection">
+      <div class="sec-title">アガリの形<span class="hint" id="keitaiHint"></span></div>
+      <div class="grid g2" id="keitaiGrid"></div>
+    </section>
+
+    <section id="fuSection">
+      <div class="sec-title">待ちの形</div>
+      <div class="grid g5" id="machiGrid"></div>
+      <div id="shanponSub"></div>
+
+      <div class="sec-title" style="margin-top:11px;">雀頭の形</div>
+      <div class="chip-row" id="chipRow"></div>
+
+      <div class="sec-title" style="margin:11px 0 2px;">刻子・槓<span class="hint">シャンポンの組は含めない</span></div>
+      <div class="mentsu-list" id="mentsuList"></div>
+      <button class="mentsu-add" id="mentsuAddBtn" onclick="addMentsu()">＋ 刻子・槓を追加</button>
+    </section>
+
+    <section id="fuDirectSection" style="display:none;">
+      <div class="sec-title">符数<span class="hint">中級者・上級者向け</span></div>
+      <input class="num-input" id="manualFuInput" type="number" step="10" inputmode="numeric" placeholder="符数（例: 40）" onchange="setManualFu(parseInt(this.value,10)||0)">
+    </section>
+
+    <footer>符は自動で10の位に切り上げ・支払いは100点に切り上げ</footer>
+  </div>
+
+  <div id="logTab" style="display:none;"></div>
+</div>
+
+<nav class="bottom-nav" id="bottomNav"></nav>
+<div id="historyModalRoot"></div>
+<div id="paywallModalRoot"></div>
+<div id="accountModalRoot"></div>
+<div id="friendPickerModalRoot"></div>
+<div id="loginPromptModalRoot"></div>
+<div id="friendsListModalRoot"></div>
+<div id="addFriendModalRoot"></div>
+<div id="notifyBannerRoot"></div>
+<input type="file" id="importFileInput" accept="application/json,.json" style="display:none;" onchange="handleImportFile(this.files)">
+
+<script>
+/* =========================================================================
+   MahjongScore module — pure calculation logic.
+   (In a full project this would live in utils/mahjongScore.ts, independent
+   of the UI below, so it can be unit tested on its own.)
+   ========================================================================= */
+const HAN_TIER_INFO = {
+  mangan:     { minHan: 5,  name: '満貫',   sub: '5翻' },
+  haneman:    { minHan: 6,  name: '跳満',   sub: '6〜7翻' },
+  baiman:     { minHan: 8,  name: '倍満',   sub: '8〜10翻' },
+  sanbaiman:  { minHan: 11, name: '三倍満', sub: '11〜12翻' },
+  yakuman:    { minHan: 13, name: '役満',   sub: '13翻〜' },
+};
+
+function roundUpTo(n, unit){ return Math.ceil(n / unit) * unit; }
+
+// Fu (符) calculation from the simplified UI state.
+// Base fu is always built additively — 20(副底) + the situational bonus for
+// how the hand was completed — and rounded up only once, at the very end.
+const FU_BASE = 20;
+const FU_MENZEN_RON_BONUS = 10; // only when the hand is closed AND won by ron
+const FU_TSUMO_BONUS = 2;       // whenever won by tsumo, open or closed
+
+// One 刻子(triplet) or 槓(kan) set's fu, from its three independent traits.
+// 刻子・明・中張 = 2 is the unit value; 暗(concealed) doubles it, 幺九牌(1/9/字)
+// doubles it again, and 槓(kan) multiplies the whole thing by 4.
+// This single formula reproduces all 8 official values:
+//   明刻2-8=2  明刻19字=4   暗刻2-8=4  暗刻19字=8
+//   明槓2-8=8  明槓19字=16  暗槓2-8=16 暗槓19字=32
+function mentsuFu(m){
+  return 2 * (m.ankou ? 2 : 1) * (m.terminal ? 2 : 1) * (m.isKan ? 4 : 1);
+}
+
+// シャンポン待ち (shanpon wait) special case: the wait itself is worth 0 fu,
+// but the pair that actually completes into a triplet is scored as a
+// minko(明刻) if won by ron (the winning tile came from someone's discard,
+// just like a call) and as an ankou(暗刻) if won by tsumo (self-drawn).
+// So the same shanpon pair contributes a *different* fu depending on ron vs
+// tsumo — this is the one case where a hand's ron-fu and tsumo-fu genuinely
+// diverge beyond the usual +10/+2 base difference.
+function shanponRonFu(terminal){ return terminal ? 4 : 2; }   // = minko value
+function shanponTsumoFu(terminal){ return terminal ? 8 : 4; } // = ankou value
+
+// calcFuPair(state) -> { fuRon, fuTsumo } computed independently, because a
+// hand's fu is not always the same for both winning methods (menzen-ron
+// bonus only applies to ron; tsumo bonus only applies to tsumo; and a
+// shanpon-completed set flips between minko/ankou — see above).
+function calcFuPair(s){
+  if (s.keitai === 'chiitoitsu') return { fuRon: 25, fuTsumo: 25 };
+  if (s.keitai === 'pinfu')      return { fuRon: 30, fuTsumo: 20 }; // pinfu locks both fixed values
+
+  const isClosed = s.keitai !== 'naki';
+  const waitBonus = s.machi === 'bad' ? 2 : 0; // ryanmen and shanpon both add 0 here
+  const shared = waitBonus + (s.yakuhaiHead?2:0) + s.mentsuList.reduce((sum, m) => sum + mentsuFu(m), 0);
+  const shanponRon = s.machi === 'shanpon' ? shanponRonFu(s.shanponTerminal) : 0;
+  const shanponTsumo = s.machi === 'shanpon' ? shanponTsumoFu(s.shanponTerminal) : 0;
+
+  let fuRon = roundUpTo(FU_BASE + (isClosed ? FU_MENZEN_RON_BONUS : 0) + shared + shanponRon, 10);
+  let fuTsumo = roundUpTo(FU_BASE + FU_TSUMO_BONUS + shared + shanponTsumo, 10);
+
+  // 鳴きで加符が何も無い形（いわゆる喰い平和形）は20符になってしまうが、
+  // 実戦のルールでは30符が最低ラインとして扱われる。
+  if (!isClosed) {
+    fuRon = Math.max(fuRon, 30);
+    fuTsumo = Math.max(fuTsumo, 30);
+  }
+  return { fuRon, fuTsumo };
+}
+
+// calcBase(han, fu, isKiriageMangan) -> the 基本点(A) for one han/fu pair.
+function calcBase(han, fu, isKiriageMangan){
+  let base;
+  let cappedToMangan = false;
+  if (han >= 13)      base = 8000;
+  else if (han >= 11) base = 6000;
+  else if (han >= 8)  base = 4000;
+  else if (han >= 6)  base = 3000;
+  else if (han >= 5)  base = 2000;
+  else {
+    base = fu * Math.pow(2, han + 2);
+    if (base > 2000) { base = 2000; cappedToMangan = true; }
+    else if (isKiriageMangan && base >= 1920 && base < 2000) { base = 2000; cappedToMangan = true; }
+  }
+  return { base, cappedToMangan };
+}
+
+// calcScore(isDealer, han, fuRon, fuTsumo, isKiriageMangan) -> pure, no UI
+// dependency. Ron and Tsumo each get their own 基本点 because fuRon and
+// fuTsumo can differ (see calcFuPair).
+function calcScore(isDealer, han, fuRon, fuTsumo, isKiriageMangan){
+  const ronBase = calcBase(han, fuRon, isKiriageMangan);
+  const tsumoBase = calcBase(han, fuTsumo, isKiriageMangan);
+  const ron = isDealer ? roundUpTo(ronBase.base * 6, 100) : roundUpTo(ronBase.base * 4, 100);
+  const tsumo = isDealer
+    ? { all: roundUpTo(tsumoBase.base * 2, 100) }
+    : { fromDealer: roundUpTo(tsumoBase.base * 2, 100), fromNonDealer: roundUpTo(tsumoBase.base * 1, 100) };
+  return { ron, tsumo, ronCapped: ronBase.cappedToMangan, tsumoCapped: tsumoBase.cappedToMangan };
+}
+
+/* =========================================================================
+   ScoreSheet module — pure settlement logic for the 得点記録票 tab.
+   (Would live in utils/scoreSheet.ts alongside mahjongScore.ts.)
+   ========================================================================= */
+
+// Rounds |x| (x is in units of "hundreds of raw points") to the nearest 10,
+// i.e. rounds the raw score to the nearest 1000 (=1pt), per the chosen
+// convention, then restores the sign so negative diffs round symmetrically.
+function roundTensDigit(x, mode) {
+  const sign = x < 0 ? -1 : 1;
+  const abs = Math.abs(x);
+  const tens = Math.floor(abs / 10) * 10;
+  const rem = abs - tens;
+  let roundedAbs;
+  if (mode === 'floor') roundedAbs = tens;                       // 切り捨て
+  else if (mode === 'roundHalfUp') roundedAbs = rem >= 5 ? tens + 10 : tens; // 四捨五入
+  else roundedAbs = rem >= 6 ? tens + 10 : tens;                  // 五捨六入(default)
+  return sign * roundedAbs;
+}
+
+// diffRaw: (素点 - 返し点). Returns the result in pt (1pt = 1000点).
+function applyRounding(diffRaw, mode) {
+  const hundreds = Math.round(diffRaw / 100);
+  return roundTensDigit(hundreds, mode) / 10;
+}
+
+// entries: [{name, score}] -> same array with loRank/hiRank/tieCount added.
+// Ties share the same [loRank,hiRank] band so uma/oka can be split evenly.
+function rankPlayers(entries) {
+  const sorted = [...entries].sort((a, b) => b.score - a.score);
+  const result = [];
+  let i = 0;
+  while (i < sorted.length) {
+    let j = i;
+    while (j + 1 < sorted.length && sorted[j + 1].score === sorted[i].score) j++;
+    for (let k = i; k <= j; k++) {
+      result.push({ ...sorted[k], loRank: i + 1, hiRank: j + 1, tieCount: j - i + 1 });
+    }
+    i = j + 1;
+  }
+  return result;
+}
+
+function umaForExactRank(rank, uma, playerCount) {
+  if (playerCount === 3) {
+    const [C] = uma;
+    if (rank === 1) return C;
+    if (rank === 2) return 0;
+    return -C;
+  }
+  const [A, B] = uma;
+  if (rank === 1) return B;
+  if (rank === 2) return A;
+  if (rank === 3) return -A;
+  return -B;
+}
+// Averages the uma of every integer rank spanned by a tie so a tied group
+// splits it evenly (works for 2-way, 3-way, or all-4-tied groups alike).
+function umaForTieGroup(loRank, hiRank, uma, playerCount) {
+  let sum = 0, count = 0;
+  for (let r = loRank; r <= hiRank; r++) { sum += umaForExactRank(r, uma, playerCount); count++; }
+  return sum / count;
+}
+
+// calcHanchanResult(hanchan, settings) -> { pt: {name: ptDelta}, ranked }
+// pt is this hanchan's own contribution only (not a running total).
+function calcHanchanResult(hanchan, settings) {
+  const { players, startPoints, returnPoints, playerCount, umaEnabled, uma,
+          tobiEnabled, tobiPoints, tobiRecipient } = settings;
+  const entries = players.map(p => ({ name: p, score: hanchan.scores[p] }));
+  const ranked = rankPlayers(entries);
+  const oka = (returnPoints - startPoints) * playerCount / 1000;
+  const topGroup = ranked.filter(r => r.loRank === 1);
+
+  const pt = {};
+  players.forEach(p => { pt[p] = 0; });
+
+  ranked.forEach(r => {
+    pt[r.name] += applyRounding(r.score - returnPoints, settings.roundingMode);
+    if (umaEnabled) pt[r.name] += umaForTieGroup(r.loRank, r.hiRank, uma, playerCount);
+    if (r.loRank === 1) pt[r.name] += oka / topGroup.length;
+  });
+
+  if (tobiEnabled) {
+    players.forEach(p => {
+      if (hanchan.scores[p] < 0) {
+        pt[p] -= tobiPoints;
+        if (tobiRecipient === 'buster' && hanchan.busterOf && hanchan.busterOf[p]) {
+          pt[hanchan.busterOf[p]] += tobiPoints;
+        } else {
+          topGroup.forEach(r => { pt[r.name] += tobiPoints / topGroup.length; });
+        }
+      }
+    });
+  }
+
+  return { pt, ranked };
+}
+
+// calcTotals(hanchans, chips, settings) -> per-player running pt/yen totals.
+function calcTotals(hanchans, chips, settings) {
+  const totals = {};
+  settings.players.forEach(p => { totals[p] = 0; });
+  hanchans.forEach(h => {
+    const { pt } = calcHanchanResult(h, settings);
+    settings.players.forEach(p => { totals[p] += pt[p]; });
+  });
+  const chipSum = settings.players.reduce((s, p) => s + (chips[p] || 0), 0);
+  const money = {};
+  settings.players.forEach(p => {
+    money[p] = totals[p] * settings.rate + (chips[p] || 0) * settings.chipUnitYen;
+  });
+  return { pt: totals, money, chipImbalance: chipSum !== 0, chipSum };
+}
+
+/* ========================================================================= */
+
+const state = {
+  isDealer: false,
+  kiriageMangan: true,
+  hanTier: 3,      // 1 | 2 | 3 | 4 | 'mangan' | 'haneman' | 'baiman' | 'sanbaiman' | 'yakuman'
+  keitai: 'menzen', // 'menzen' | 'naki' | 'pinfu' | 'chiitoitsu'
+  machi: 'ryanmen', // 'ryanmen' | 'bad' | 'shanpon'
+  shanponTerminal: false, // only used when machi==='shanpon'
+  yakuhaiHead: false,
+  mentsuList: [], // { id, ankou:bool(暗/明), terminal:bool(1・9・字/中張), isKan:bool(槓/刻子) } — excludes the shanpon set
+  fuDirectMode: false, // 中級者・上級者向け: 符数を直接入力するモード
+  manualFu: 30,
+};
+let mentsuSeq = 1;
+
+// 別のボタンへのタップが、テキスト入力のonchange(blur)によるDOM作り直しと
+// 同じ一連の操作の中で競合して消えてしまうのを防ぐため、render()も
+// （得点記録タブのrenderAppと同様に）1フレームだけ遅らせて呼び出す。
+let _renderQueued = false;
+function scheduleRender(){
+  if (_renderQueued) return;
+  _renderQueued = true;
+  requestAnimationFrame(() => { _renderQueued = false; render(); });
+}
+
+function setDealer(v){ state.isDealer = v; scheduleRender(); }
+function toggleKiriage(){ state.kiriageMangan = !state.kiriageMangan; scheduleRender(); }
+function toggleFuDirectMode(){ state.fuDirectMode = !state.fuDirectMode; scheduleRender(); }
+function setManualFu(v){ state.manualFu = Math.max(0, v); scheduleRender(); }
+// 符は常に10の位に切り上げ（七対子の25符だけ例外）というルールを、
+// 直接入力された値にも適用する。
+function normalizeManualFu(v){ return v === 25 ? 25 : roundUpTo(v, 10); }
+
+function selectHanTier(tier){
+  state.hanTier = tier;
+  scheduleRender();
+}
+
+function selectKeitai(k){
+  if (state.hanTier !== 1 && state.hanTier !== 2 && state.hanTier !== 3 && state.hanTier !== 4) return;
+  state.keitai = k;
+  // 七対子は役だけで2翻あるため1翻はあり得ない（ピンフはロンなら1翻もあり得るので制限しない）
+  if (k === 'chiitoitsu' && state.hanTier === 1) state.hanTier = 2;
+  scheduleRender();
+}
+
+function toggleChip(name){
+  state[name] = !state[name];
+  scheduleRender();
+}
+function setMachi(key){ state.machi = key; scheduleRender(); }
+function setShanponTerminal(v){ state.shanponTerminal = v; scheduleRender(); }
+
+const MAX_MENTSU = 4; // a hand has at most 4 sets besides the pair
+function addMentsu(){
+  if (state.mentsuList.length >= MAX_MENTSU) return;
+  state.mentsuList.push({ id: mentsuSeq++, ankou: true, terminal: false, isKan: false });
+  scheduleRender();
+}
+function setMentsuField(id, field, value){
+  const m = state.mentsuList.find(x => x.id === id);
+  if (m) m[field] = value;
+  scheduleRender();
+}
+function removeMentsu(id){
+  state.mentsuList = state.mentsuList.filter(x => x.id !== id);
+  scheduleRender();
+}
+
+function isTierHan(h){ return h === 1 || h === 2 || h === 3 || h === 4; }
+
+function fmt(n){ return n.toLocaleString('ja-JP'); }
+
+function render(){
+  // dealer segment
+  document.getElementById('dealerSeg').innerHTML = `
+    <button class="${!state.isDealer?'':'active'}" onclick="setDealer(true)">親</button>
+    <button class="${!state.isDealer?'active':''}" onclick="setDealer(false)">子</button>
+  `;
+  const sw = document.getElementById('kiriageSwitch');
+  sw.className = 'switch' + (state.kiriageMangan ? ' on' : '');
+
+  // han grids
+  const hanRow1 = [1,2,3,4].map(h=>{
+    const disabled = h===1 && state.keitai==='chiitoitsu';
+    const selected = state.hanTier===h;
+    return `<div class="tile-btn ${selected?'selected':''} ${disabled?'disabled':''}" onclick="selectHanTier(${h})">${h}翻</div>`;
+  }).join('');
+  document.getElementById('hanGrid1').innerHTML = hanRow1;
+
+  const tierKeys = ['mangan','haneman','baiman','sanbaiman','yakuman'];
+  document.getElementById('hanGrid2').innerHTML = tierKeys.map(k=>{
+    const info = HAN_TIER_INFO[k];
+    const selected = state.hanTier===k;
+    return `<div class="tile-btn tier ${selected?'selected':''}" onclick="selectHanTier('${k}')">${info.name}<small>${info.sub}</small></div>`;
+  }).join('');
+
+  // 符数を直接入力するモード（中級者・上級者向け）への切り替えリンク
+  const keitaiActive = isTierHan(state.hanTier);
+  document.getElementById('fuModeHint').textContent = state.fuDirectMode ? '← ガイドで選ぶ' : '符数を直接入力 →';
+  document.getElementById('keitaiSection').style.display = (keitaiActive && state.fuDirectMode) ? 'none' : '';
+  document.getElementById('fuSection').style.display = (keitaiActive && state.fuDirectMode) ? 'none' : '';
+  document.getElementById('fuDirectSection').style.display = (keitaiActive && state.fuDirectMode) ? '' : 'none';
+  if (keitaiActive && state.fuDirectMode) {
+    document.getElementById('manualFuInput').value = state.manualFu;
+  }
+
+  // keitai section
+  document.getElementById('keitaiSection').classList.toggle('disabled', !keitaiActive);
+  document.getElementById('keitaiHint').textContent = keitaiActive ? '' : '（満貫以上は不要）';
+  const keitaiOptions = [
+    ['menzen','門前','ポン・チーなし'],
+    ['naki','鳴き','ポン・チーあり'],
+    ['pinfu','ピンフ','形が固定'],
+    ['chiitoitsu','七対子','対子が7組'],
+  ];
+  document.getElementById('keitaiGrid').innerHTML = keitaiOptions.map(([key,label,sub])=>{
+    const disabled = key==='chiitoitsu' && state.hanTier===1;
+    const selected = state.keitai===key;
+    return `<div class="tile-btn ${selected?'selected':''} ${disabled?'disabled':''}" onclick="selectKeitai('${key}')">${label}<small>${sub}</small></div>`;
+  }).join('');
+
+  // fu section
+  const fuLocked = state.keitai==='chiitoitsu' || state.keitai==='pinfu' || !state.keitai;
+  document.getElementById('fuSection').classList.toggle('disabled', !keitaiActive || fuLocked);
+
+  // 待ちの形（良形・悪形・シャンポン）
+  const machiOptions = [
+    ['ryanmen','良形','±0符'],
+    ['bad','カンチャン・ペンチャン・単騎','+2符'],
+    ['shanpon','シャンポン','待ちは±0'],
+  ];
+  document.getElementById('machiGrid').innerHTML = machiOptions.map(([key,label,sub])=>{
+    const selected = state.machi===key;
+    return `<div class="tile-btn ${selected?'selected':''}" onclick="setMachi('${key}')">${label}<small>${sub}</small></div>`;
+  }).join('');
+
+  const shanponSub = document.getElementById('shanponSub');
+  if (state.machi === 'shanpon') {
+    shanponSub.innerHTML = `
+      <div class="shanpon-note">
+        <span class="lbl">シャンポンの牌の種類</span>
+        <div class="mseg">
+          <button class="${!state.shanponTerminal?'active':''}" onclick="setShanponTerminal(false)">中張</button>
+          <button class="${state.shanponTerminal?'active':''}" onclick="setShanponTerminal(true)">1・9・字</button>
+        </div>
+        <span class="note">※ロンなら明刻扱い(+${shanponRonFu(state.shanponTerminal)}符)、ツモなら暗刻扱い(+${shanponTsumoFu(state.shanponTerminal)}符)。この組は下の「刻子・槓」に追加不要です。</span>
+      </div>`;
+  } else {
+    shanponSub.innerHTML = '';
+  }
+
+  const chipDefs = [
+    ['yakuhaiHead','アタマが役牌','+2', false, state.yakuhaiHead],
+  ];
+  document.getElementById('chipRow').innerHTML = chipDefs.map(([key,label,fu,dis,on])=>{
+    return `<div class="chip ${on?'on':''} ${dis?'disabled':''}" onclick="toggleChip('${key}')">${label}<span class="fu">${fu}</span></div>`;
+  }).join('');
+
+  // mentsu (triplet/kan) list — each row: 暗/明 × 刻子/槓 × 中張/1・9・字
+  const mentsuHtml = state.mentsuList.map(m=>{
+    const fu = mentsuFu(m);
+    return `
+      <div class="mentsu-row">
+        <div class="mseg">
+          <button class="${!m.ankou?'active':''}" onclick="setMentsuField(${m.id},'ankou',false)">明</button>
+          <button class="${m.ankou?'active':''}" onclick="setMentsuField(${m.id},'ankou',true)">暗</button>
+        </div>
+        <div class="mseg">
+          <button class="${!m.isKan?'active':''}" onclick="setMentsuField(${m.id},'isKan',false)">刻子</button>
+          <button class="${m.isKan?'active':''}" onclick="setMentsuField(${m.id},'isKan',true)">槓</button>
+        </div>
+        <div class="mseg">
+          <button class="${!m.terminal?'active':''}" onclick="setMentsuField(${m.id},'terminal',false)">中張</button>
+          <button class="${m.terminal?'active':''}" onclick="setMentsuField(${m.id},'terminal',true)">1・9・字</button>
+        </div>
+        <span class="mfu">+${fu}符</span>
+        <button class="mremove" onclick="removeMentsu(${m.id})">×</button>
+      </div>`;
+  }).join('');
+  document.getElementById('mentsuList').innerHTML = mentsuHtml || `<div class="mentsu-empty">刻子・槓が無ければそのまま</div>`;
+  document.getElementById('mentsuAddBtn').classList.toggle('disabled', state.mentsuList.length >= MAX_MENTSU);
+
+  // ---- result ----
+  const panel = document.getElementById('resultPanel');
+  if (!keitaiActive) {
+    const info = HAN_TIER_INFO[state.hanTier];
+    const r = calcScore(state.isDealer, info.minHan, 0, 0, state.kiriageMangan);
+    panel.innerHTML = resultHtml(`${info.name}（${info.sub}）`, null, null, r);
+  } else {
+    const { fuRon, fuTsumo } = state.fuDirectMode
+      ? (() => { const f = normalizeManualFu(state.manualFu); return { fuRon: f, fuTsumo: f }; })()
+      : calcFuPair(state);
+    const r = calcScore(state.isDealer, state.hanTier, fuRon, fuTsumo, state.kiriageMangan);
+    const ronFuLabel = r.ronCapped ? `${fuRon}符→満貫` : `${fuRon}符`;
+    const tsumoFuLabel = r.tsumoCapped ? `${fuTsumo}符→満貫` : `${fuTsumo}符`;
+    panel.innerHTML = resultHtml(`${state.hanTier}翻`, ronFuLabel, tsumoFuLabel, r);
+  }
+}
+
+function resultHtml(stateLabel, ronFuLabel, tsumoFuLabel, r){
+  const tsumoHtml = r.tsumo.all !== undefined
+    ? `<span class="pt">${fmt(r.tsumo.all)}</span><span class="all">ALL</span>`
+    : `<span class="split">
+         <span class="item"><span class="who">子から</span><span class="num">${fmt(r.tsumo.fromNonDealer)}</span></span>
+         <span class="item"><span class="who">親から</span><span class="num">${fmt(r.tsumo.fromDealer)}</span></span>
+       </span>`;
+  return `
+    <div class="summary-line">
+      <span class="state">現在: <b>${stateLabel}</b></span>
+    </div>
+    <div class="score-rows">
+      <div class="score-row row-ron">
+        <span class="tag">ロン${ronFuLabel ? `<span class="fusub">${ronFuLabel}</span>` : ''}</span>
+        <span class="amt">${fmt(r.ron)}<span class="pt">点</span></span>
+      </div>
+      <div class="score-row row-tsumo">
+        <span class="tag">ツモ${tsumoFuLabel ? `<span class="fusub">${tsumoFuLabel}</span>` : ''}</span>
+        <span class="amt">${tsumoHtml}</span>
+      </div>
+    </div>
+  `;
+}
+
+/* =========================================================================
+   マネタイズ(広告・課金) — ネイティブ橋渡し層
+   ここで言う「ネイティブ」とは、Capacitorでラップしたストア配信版アプリの中で
+   動いている状態のこと。このArtifactプレビューや素のブラウザ・GitHub Pages版
+   (window.Capacitorが存在しない環境)では、Nativeの全メソッドが安全に
+   何もしない(no-op)。広告・課金はストアアプリの中だけで有効になる。
+   実際にCapacitorプロジェクトへ組み込む手順は mahjong-app/CAPACITOR_SETUP.md
+   を参照(このサンドボックス環境ではnpm installやAndroidビルドができないため、
+   ネイティブ側の実機動作はまだ検証できていない)。
+   ========================================================================= */
+
+const FREE_MATCH_LIMIT = 3; // 無料で保存できる対局数の上限(マジックナンバー化しない)
+
+const MONETIZATION_CONFIG = {
+  // ▼▼▼ 実際のAdMob/Play Consoleの値に差し替えてください(初期値はダミー) ▼▼▼
+  admobAppId: 'ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY',
+  admobBannerUnitId: 'ca-app-pub-XXXXXXXXXXXXXXXX/BANNERID',
+  admobInterstitialUnitId: 'ca-app-pub-XXXXXXXXXXXXXXXX/INTERSTITIALID',
+  billingProductId: 'remove_ads_unlock_history', // Play Consoleの管理対象商品(買い切り)ID
+  // ▲▲▲ ここまで ▲▲▲
+  fallbackPriceLabel: '¥400', // Billing APIから価格が取得できない場合の表示用(実価格はストア設定に従う)
+};
+
+let _billingReady = false;
+let _pendingPurchaseResolvers = [];
+function _resolvePendingPurchase(success){
+  const resolvers = _pendingPurchaseResolvers.splice(0);
+  resolvers.forEach(r => r(success));
+}
+
+const Native = {
+  isNativeApp(){
+    try { return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); }
+    catch (e) { return false; }
+  },
+  /* ---- 広告(AdMob, @capacitor-community/admob想定) ---- */
+  async initAds(){
+    if (!this.isNativeApp()) return;
+    try {
+      const AdMob = window.Capacitor.Plugins && window.Capacitor.Plugins.AdMob;
+      if (AdMob && AdMob.initialize) await AdMob.initialize({});
+    } catch (e) { /* 広告SDKの初期化に失敗しても本体機能は止めない */ }
+  },
+  async showBanner(){
+    if (!this.isNativeApp() || isPremiumUnlocked()) return;
+    try {
+      const AdMob = window.Capacitor.Plugins && window.Capacitor.Plugins.AdMob;
+      if (AdMob && AdMob.showBanner) {
+        await AdMob.showBanner({
+          adId: MONETIZATION_CONFIG.admobBannerUnitId,
+          adSize: 'BANNER',
+          position: 'BOTTOM_CENTER',
+          margin: 0,
+        });
+      }
+    } catch (e) { /* オフライン等での読み込み失敗は握りつぶし、通常の操作を妨げない */ }
+  },
+  async hideBanner(){
+    if (!this.isNativeApp()) return;
+    try {
+      const AdMob = window.Capacitor.Plugins && window.Capacitor.Plugins.AdMob;
+      if (AdMob && AdMob.hideBanner) await AdMob.hideBanner();
+    } catch (e) { /* 失敗しても無視 */ }
+  },
+  async showInterstitial(){
+    if (!this.isNativeApp() || isPremiumUnlocked()) return;
+    try {
+      const AdMob = window.Capacitor.Plugins && window.Capacitor.Plugins.AdMob;
+      if (!AdMob || !AdMob.prepareInterstitial) return;
+      await AdMob.prepareInterstitial({ adId: MONETIZATION_CONFIG.admobInterstitialUnitId });
+      await AdMob.showInterstitial();
+    } catch (e) { /* 未読込・オフライン時は何もしない(対局終了フロー自体は止めない) */ }
+  },
+  /* ---- 課金(Google Play Billing, cordova-plugin-purchase想定) ----
+     https://purchase.cordova.fovea.cc/ のイベント駆動API(v13系)を前提にした実装例。
+     プラグインのバージョンによりAPIが変わることがあるため、実機ビルド時は
+     公式ドキュメントで最新のAPIを確認してください(このサンドボックスでは
+     Android実機・Play Billingサンドボックスでの検証ができていません)。 */
+  async initBilling(){
+    if (!this.isNativeApp() || _billingReady) return;
+    try {
+      const store = window.CdvPurchase && window.CdvPurchase.store;
+      if (!store) return;
+      _billingReady = true;
+      store.register([{
+        id: MONETIZATION_CONFIG.billingProductId,
+        type: store.ProductType.NON_CONSUMABLE,
+        platform: store.Platform.GOOGLE_PLAY,
+      }]);
+      store.when().approved(transaction => transaction.verify());
+      store.when().verified(receipt => receipt.finish());
+      store.when().productUpdated(() => {
+        const product = store.get(MONETIZATION_CONFIG.billingProductId);
+        const owned = !!(product && product.owned);
+        if (owned && !logState.settings.isPremium) {
+          logState.settings.isPremium = true;
+          saveLogState();
+          Native.hideBanner();
+          scheduleRenderApp();
+        }
+        if (owned) _resolvePendingPurchase(true);
+      });
+      await store.initialize([store.GOOGLE_PLAY]);
+    } catch (e) { /* 課金SDK初期化に失敗しても無料枠のまま安全に継続する */ }
+  },
+  // 戻り値: true(有効な購入あり) / false(購入なし) / null(判定できなかった＝
+  // 非ネイティブ環境か通信エラー等。呼び出し側は既存のisPremium値を維持すること)。
+  async restorePurchases(){
+    if (!this.isNativeApp()) return null;
+    try {
+      const store = window.CdvPurchase && window.CdvPurchase.store;
+      if (!store) return null;
+      await this.initBilling();
+      await store.restorePurchases();
+      const product = store.get(MONETIZATION_CONFIG.billingProductId);
+      return !!(product && product.owned);
+    } catch (e) { return null; }
+  },
+  async purchasePremium(){
+    if (!this.isNativeApp()) return false;
+    try {
+      const store = window.CdvPurchase && window.CdvPurchase.store;
+      if (!store) return false;
+      await this.initBilling();
+      const product = store.get(MONETIZATION_CONFIG.billingProductId);
+      const offer = product && product.getOffer && product.getOffer();
+      if (!offer) return false;
+      const resultPromise = new Promise(resolve => {
+        _pendingPurchaseResolvers.push(resolve);
+        // 60秒経ってもイベントが来なければ諦める(ユーザーがストアのダイアログを
+        // キャンセルした場合など、approvedイベントが永遠に来ないケースの保険)。
+        setTimeout(() => {
+          _pendingPurchaseResolvers = _pendingPurchaseResolvers.filter(r => r !== resolve);
+          resolve(false);
+        }, 60000);
+      });
+      await offer.order();
+      return await resultPromise;
+    } catch (e) { return false; }
+  },
+  getPriceLabel(){
+    try {
+      const store = window.CdvPurchase && window.CdvPurchase.store;
+      const product = store && store.get(MONETIZATION_CONFIG.billingProductId);
+      const offer = product && product.getOffer && product.getOffer();
+      return (offer && offer.pricing && offer.pricing.price) || MONETIZATION_CONFIG.fallbackPriceLabel;
+    } catch (e) { return MONETIZATION_CONFIG.fallbackPriceLabel; }
+  },
+};
+
+// ストアアプリ以外(このプレビューや素のブラウザ・GitHub Pages版)では常にtrue、
+// つまり「常に無制限・広告なし」を返す。ユーザーの指示により、広告/課金/対局数
+// 制限はCapacitorでラップしたストア配信版アプリの中だけに適用するため。
+function isPremiumUnlocked(){
+  if (!Native.isNativeApp()) return true;
+  return !!logState.settings.isPremium;
+}
+
+/* =========================================================================
+   マルチプレイヤー(フレンド・卓・成績共有) — ネイティブ橋渡し層
+   ---------------------------------------------------------------------
+   広告・課金のNativeオブジェクトと同じ設計思想: CloudSync.isAvailable()が
+   falseの間(=このプレビュー・素のブラウザ・GitHub Pages版)は全メソッドが
+   安全にno-opし、これまで通りローカル単独モードのまま動作する。
+   「対象: mahjong-score-app(Capacitorラップ版)」という今回の依頼どおり、
+   マルチプレイヤー機能もストアアプリの中だけで有効になる。
+
+   @capacitor-firebase/authentication, @capacitor-firebase/firestore,
+   @capacitor-firebase/messaging という3つのCapacitorネイティブプラグイン
+   (window.Capacitor.Plugins.FirebaseAuthentication / FirebaseFirestore /
+   FirebaseMessaging)を呼び出す設計で書いている。これらプラグインのAPI形状は
+   公式ドキュメントに基づく著者の知識であり、このサンドボックスにはnpm
+   レジストリへのアクセスもiOS/Androidのネイティブビルド環境も無いため、
+   実際にインストール・ビルド・実機確認はできていない(前回のcordova-plugin-
+   purchase統合と同じ制約)。MULTIPLAYER_SETUP.mdと各プラグインの公式READMEを
+   必ず確認してから本番導入すること。
+   ========================================================================= */
+
+function normalizeUsername(name){
+  return String(name || '').trim().toLowerCase().replace(/\s+/g, '');
+}
+// 半角英数字とアンダースコアのみ、3〜20文字。招待・検索用の識別子として
+// 曖昧さが出ないように制限する(絵文字・全角文字は不可)。
+function isValidUsernameFormat(name){
+  return /^[a-z0-9_]{3,20}$/.test(normalizeUsername(name));
+}
+
+const CloudSync = {
+  isAvailable(){
+    // 広告/課金と同じく、マルチプレイヤーもストアアプリの中でのみ有効。
+    return Native.isNativeApp();
+  },
+
+  _authListenerAdded: false,
+  async init(){
+    if (!this.isAvailable()) return;
+    try {
+      const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
+      if (!Auth) return;
+      if (!this._authListenerAdded) {
+        this._authListenerAdded = true;
+        Auth.addListener('authStateChange', (result) => {
+          const user = result && result.user;
+          if (user) {
+            logState.account.uid = user.uid;
+            logState.account.isAnonymous = !!user.isAnonymous;
+            saveLogState();
+          }
+        });
+      }
+      let current = null;
+      try { current = await Auth.getCurrentUser(); } catch (e) {}
+      if (current && current.user) {
+        logState.account.uid = current.user.uid;
+        logState.account.isAnonymous = !!current.user.isAnonymous;
+      } else {
+        // 初回起動時は匿名認証でそのまま使い始められるようにし、ログインを強制しない。
+        const signed = await Auth.signInAnonymously();
+        const user = signed && signed.user;
+        if (user) { logState.account.uid = user.uid; logState.account.isAnonymous = true; }
+      }
+      saveLogState();
+      await this.refreshFriends();
+      await this.syncIncomingMatchHistory();
+      if (logState.room && logState.room.roomId) {
+        this.subscribeRoom(logState.room.roomId);
+      } else {
+        await this.checkActiveRoomInvite();
+      }
+    } catch (e) { /* オフライン等では静かに諦め、ローカル単独モードとして動作継続 */ }
+  },
+
+  // 匿名のままでは困る操作(フレンド追加・複数端末利用)をしようとしたタイミングで
+  // 呼び出す想定。成功時はaccount.isAnonymousがfalseになり、uidは維持される
+  // (匿名ユーザーへのプロバイダlinkとして扱われる設計を想定)。
+  async linkGoogle(){
+    if (!this.isAvailable()) return false;
+    try {
+      const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
+      if (!Auth || !Auth.signInWithGoogle) return false;
+      const result = await Auth.signInWithGoogle();
+      if (result && result.user) {
+        logState.account.uid = result.user.uid;
+        logState.account.isAnonymous = false;
+        logState.account.linkedProviders.google = true;
+        saveLogState();
+        return true;
+      }
+      return false;
+    } catch (e) { return false; }
+  },
+  // App Store Review Guideline 4.8対応: Googleログインを提供する場合、
+  // Sign in with Appleも同格の選択肢として必ず用意する。
+  async linkApple(){
+    if (!this.isAvailable()) return false;
+    try {
+      const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
+      if (!Auth || !Auth.signInWithApple) return false;
+      const result = await Auth.signInWithApple();
+      if (result && result.user) {
+        logState.account.uid = result.user.uid;
+        logState.account.isAnonymous = false;
+        logState.account.linkedProviders.apple = true;
+        saveLogState();
+        return true;
+      }
+      return false;
+    } catch (e) { return false; }
+  },
+
+  // ユーザーネームは一意。usernames/{normalized}ドキュメントの有無で申請の
+  // 成否を判定する(先着順)。変更時、旧ユーザーネームは予約せず即座に解放する
+  // (検討の結果、シンプルさを優先する方針で決定)。
+  async claimUsername(name){
+    if (!this.isAvailable()) return { ok: false, error: 'unavailable' };
+    if (!isValidUsernameFormat(name)) return { ok: false, error: 'invalid' };
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      if (!Firestore) return { ok: false, error: 'unavailable' };
+      const norm = normalizeUsername(name);
+      const existing = await Firestore.getDocument({ reference: `usernames/${norm}` }).catch(() => null);
+      const existingUid = existing && existing.snapshot && existing.snapshot.data && existing.snapshot.data.uid;
+      if (existingUid && existingUid !== logState.account.uid) {
+        return { ok: false, error: 'taken' };
+      }
+      const oldNorm = logState.account.username ? normalizeUsername(logState.account.username) : null;
+      await Firestore.setDocument({ reference: `usernames/${norm}`, data: { uid: logState.account.uid } });
+      await Firestore.setDocument({ reference: `users/${logState.account.uid}`, data: { username: name }, merge: true });
+      if (oldNorm && oldNorm !== norm) {
+        await Firestore.deleteDocument({ reference: `usernames/${oldNorm}` }).catch(() => {});
+      }
+      logState.account.username = name;
+      saveLogState();
+      return { ok: true };
+    } catch (e) { return { ok: false, error: 'network' }; }
+  },
+
+  async searchUsername(name){
+    if (!this.isAvailable()) return null;
+    if (!isValidUsernameFormat(name)) return null;
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      const norm = normalizeUsername(name);
+      const doc = await Firestore.getDocument({ reference: `usernames/${norm}` });
+      const uid = doc && doc.snapshot && doc.snapshot.data && doc.snapshot.data.uid;
+      if (!uid) return null;
+      if (uid === logState.account.uid) return { uid, username: name, isSelf: true };
+      const userDoc = await Firestore.getDocument({ reference: `users/${uid}` });
+      const username = userDoc && userDoc.snapshot && userDoc.snapshot.data && userDoc.snapshot.data.username;
+      return { uid, username: username || name };
+    } catch (e) { return null; }
+  },
+
+  // 同卓に指定した瞬間、確認フローなしで即座にフレンド関係になる(初対面でも)。
+  async addFriend(uid, username){
+    if (!this.isAvailable() || !uid) return false;
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      await Firestore.setDocument({ reference: `users/${logState.account.uid}/friends/${uid}`, data: { uid, username, addedAt: Date.now() } });
+      if (!logState.friends.some(f => f.uid === uid)) {
+        logState.friends.push({ uid, username });
+        saveLogState();
+      }
+      return true;
+    } catch (e) { return false; }
+  },
+  async removeFriend(uid){
+    if (!this.isAvailable() || !uid) return false;
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      await Firestore.deleteDocument({ reference: `users/${logState.account.uid}/friends/${uid}` });
+      logState.friends = logState.friends.filter(f => f.uid !== uid);
+      saveLogState();
+      return true;
+    } catch (e) { return false; }
+  },
+  async refreshFriends(){
+    if (!this.isAvailable()) return;
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      const res = await Firestore.getCollection({ reference: `users/${logState.account.uid}/friends` });
+      const docs = (res && res.snapshots) || [];
+      logState.friends = docs.map(d => d.data);
+      saveLogState();
+    } catch (e) { /* オフライン時はローカルキャッシュのfriendsをそのまま使う */ }
+  },
+
+  // 起動時にクラウド側のmatchHistoryを取り込み、ローカルにまだ無いもの(=自分が
+  // オフラインの間に他の代表入力者から自動配信されたもの)があれば追加する。
+  // recordedByが自分以外のものは、通知トーストの対象にする(金額・詳細は含めない)。
+  async syncIncomingMatchHistory(){
+    if (!this.isAvailable()) return;
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      const myUid = logState.account.uid;
+      const res = await Firestore.getCollection({ reference: `users/${myUid}/matchHistory` });
+      const docs = (res && res.snapshots) || [];
+      const existingIds = new Set(logState.matchHistory.map(m => m.id));
+      const newlyAddedByOthers = [];
+      docs.forEach(d => {
+        const entry = d.data;
+        if (!entry || !entry.id || existingIds.has(entry.id)) return;
+        logState.matchHistory.push(entry);
+        existingIds.add(entry.id);
+        if (entry.recordedBy && entry.recordedBy !== myUid) newlyAddedByOthers.push(entry);
+      });
+      if (docs.length > 0) {
+        logState.matchHistory.sort((a, b) => new Date(b.endedAt || b.startedAt || 0) - new Date(a.endedAt || a.startedAt || 0));
+        saveLogState();
+      }
+      if (newlyAddedByOthers.length > 0 && logState.account.notifyOnAutoRecord) {
+        logState.ui.notifyBanner = newlyAddedByOthers.length === 1
+          ? '対局記録が追加されました'
+          : `対局記録が${newlyAddedByOthers.length}件追加されました`;
+      }
+    } catch (e) { /* オフライン時はローカルのmatchHistoryのみで継続 */ }
+  },
+
+  // 自分が同卓者として指定され、既に進行中の卓があれば(自分がその時アプリを
+  // 開いていなくても構わない設計のため)、次に開いた時に見つけて閲覧モードで参加する。
+  async checkActiveRoomInvite(){
+    if (!this.isAvailable() || logState.room) return;
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      const myUid = logState.account.uid;
+      const res = await Firestore.getCollection({
+        reference: 'rooms',
+        compositeFilter: { type: 'and', queryConstraints: [
+          { type: 'where', fieldPath: 'participantUids', opStr: 'array-contains', value: myUid },
+          { type: 'where', fieldPath: 'status', opStr: '==', value: 'active' },
+        ] },
+      });
+      const docs = (res && res.snapshots) || [];
+      if (docs.length === 0) return;
+      const roomDoc = docs[0];
+      const data = roomDoc.data;
+      if (data.hostUid === myUid) return; // 自分がホストの卓は対象外(通常はここに来ない)
+      logState.room = { roomId: roomDoc.id, isHost: false, hostUid: data.hostUid, participants: data.participants };
+      logState.hanchans = data.hanchans || [];
+      logState.chips = data.chips || {};
+      logState.ui.revealActive = !!data.revealActive;
+      logState.ui.revealStep = data.revealStep || 0;
+      saveLogState();
+      await this.subscribeRoom(roomDoc.id);
+    } catch (e) { /* オフライン時は次回起動時に再試行される */ }
+  },
+
+  // participants: [{ slot, uid, name, isGuest }]
+  async createRoom(participants){
+    if (!this.isAvailable()) return null;
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      const roomId = 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      const participantUids = participants.filter(p => p.uid).map(p => p.uid);
+      await Firestore.setDocument({
+        reference: `rooms/${roomId}`,
+        data: {
+          hostUid: logState.account.uid,
+          participants, participantUids,
+          status: 'active', createdAt: Date.now(),
+          settings: logState.settings, hanchans: logState.hanchans, chips: logState.chips,
+          revealActive: false, revealStep: 0,
+        },
+      });
+      return roomId;
+    } catch (e) { return null; }
+  },
+  // 代表入力者が半荘記録・演出発表するたびに呼ぶ。閲覧者側はsubscribeRoomの
+  // コールバックで受け取るだけで、自分では書き込まない(代表入力者は1卓につき1人)。
+  async updateRoom(roomId, patch){
+    if (!this.isAvailable() || !roomId) return;
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      await Firestore.updateDocument({ reference: `rooms/${roomId}`, data: patch });
+    } catch (e) { /* オフライン時は諦める。代表入力者の手元の記録自体は失われない */ }
+  },
+  _roomListenerId: null,
+  async subscribeRoom(roomId){
+    if (!this.isAvailable() || !roomId) return;
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      if (this._roomListenerId) {
+        await Firestore.removeSnapshotListener({ callbackId: this._roomListenerId }).catch(() => {});
+        this._roomListenerId = null;
+      }
+      const listener = await Firestore.addDocumentSnapshotListener({ reference: `rooms/${roomId}` }, (event) => {
+        if (!event || !event.snapshot || !event.snapshot.data) return;
+        if (!logState.room || logState.room.roomId !== roomId) return; // 卓を離れた後の遅延イベントは無視
+        const data = event.snapshot.data;
+        if (!logState.room.isHost) {
+          if (data.status === 'ended') {
+            // 代表入力者が対局を終了した。閲覧者側もこの卓から離れ、単独モードに戻る。
+            // 自動配信された確定記録は、次のmatchHistory同期(次回起動時など)で届く。
+            logState.room = null;
+            saveLogState();
+            this.leaveRoom();
+            this.syncIncomingMatchHistory().then(() => scheduleRenderApp());
+            return;
+          }
+          // 閲覧者は受信データをそのまま反映するのみ(自分では書き込まない)
+          logState.hanchans = data.hanchans || [];
+          logState.chips = data.chips || {};
+          logState.ui.revealActive = !!data.revealActive;
+          logState.ui.revealStep = data.revealStep || 0;
+        }
+        logState.room.participants = data.participants || logState.room.participants;
+        scheduleRenderApp();
+      });
+      this._roomListenerId = listener && listener.callbackId;
+    } catch (e) { /* リアルタイム購読に失敗しても、代表入力者側の操作自体は継続できる */ }
+  },
+  async leaveRoom(){
+    if (!this._roomListenerId) return;
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      await Firestore.removeSnapshotListener({ callbackId: this._roomListenerId });
+    } catch (e) {}
+    this._roomListenerId = null;
+  },
+
+  // 代表入力者自身のmatchHistoryへの保存はarchiveCurrentMatch側で既にローカルへ
+  // 反映済み。ここでは(1)自分自身のクラウド側への複製と、(2)自分以外の同卓者
+  // (uidを持つ人のみ・ゲスト除く)のmatchHistoryへの自動配信を行う。
+  // 1人分の書き込み失敗が他の人の保存を妨げないよう、それぞれ独立に試行する。
+  async archiveMatchFanout(entry, participantUids){
+    if (!this.isAvailable()) return;
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      const myUid = logState.account.uid;
+      const targets = [myUid, ...participantUids.filter(uid => uid && uid !== myUid)];
+      for (const uid of targets) {
+        await Firestore.setDocument({
+          reference: `users/${uid}/matchHistory/${entry.id}`,
+          data: { ...entry, participantUids, recordedBy: myUid },
+        }).catch(() => {});
+        // 無料枠(累計3対局)のサーバー側カウンタ。各自の`users/{uid}.matchCount`を
+        // 正として扱い(端末変更時にリセットされないようにするため)、Firestore
+        // ルール側でmatchCount>=3かつisPremiumでない場合は書き込みを拒否する設計
+        // (firestore.rules参照)。ここでの読み取り→+1書き戻しは簡易的な実装で、
+        // 同時書き込みが重なった場合の競合(race condition)には対応していない。
+        // 本番では読み取り→書き込みをFirestoreのトランザクションで包むか、
+        // Cloud Function側でトリガー処理する方が安全(MULTIPLAYER_SETUP.md参照)。
+        try {
+          const userDoc = await Firestore.getDocument({ reference: `users/${uid}` });
+          const currentCount = (userDoc.snapshot.data && userDoc.snapshot.data.matchCount) || 0;
+          await Firestore.updateDocument({ reference: `users/${uid}`, data: { matchCount: currentCount + 1 } });
+        } catch (e) {}
+      }
+    } catch (e) { /* オフライン時はローカル保存のみで継続。再送はスコープ外 */ }
+  },
+
+  // プッシュ通知の許可は、アプリ起動直後などではなく「同卓者を指定する」
+  // 操作を最初に行ったタイミングまで遅らせてリクエストする(iOSは許可
+  // ダイアログの提示タイミングに厳しく、文脈のない状態で求めると拒否されやすい)。
+  async requestPushPermissionIfNeeded(){
+    if (!this.isAvailable() || logState.account.pushPermissionRequested) return;
+    logState.account.pushPermissionRequested = true;
+    saveLogState();
+    try {
+      const Messaging = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseMessaging;
+      if (!Messaging) return;
+      const perm = await Messaging.requestPermissions();
+      const granted = perm && (perm.receive === 'granted' || perm.receive === true);
+      if (granted) {
+        const tokenRes = await Messaging.getToken();
+        if (tokenRes && tokenRes.token) {
+          const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+          await Firestore.updateDocument({ reference: `users/${logState.account.uid}`, data: { pushToken: tokenRes.token } }).catch(() => {});
+        }
+      }
+    } catch (e) { /* 許可拒否・非対応でも通常機能には影響させない */ }
+  },
+
+  // 通知ON/OFF設定は、Cloud Functions側(notifyOnAutoRecordedMatch)が
+  // サーバーで判定できるよう users/{uid} にもミラーしておく
+  // (ローカルのlogState.account.notifyOnAutoRecordだけだとFunctions側から
+  // 参照できないため)。失敗してもローカル設定はそのまま有効に使う。
+  async setNotifyOnAutoRecord(v){
+    if (!this.isAvailable() || !logState.account.uid) return;
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      if (!Firestore) return;
+      await Firestore.updateDocument({ reference: `users/${logState.account.uid}`, data: { notifyOnAutoRecord: !!v } });
+    } catch (e) { /* オフライン時はローカル設定のみで継続 */ }
+  },
+};
+
+/* =========================================================================
+   得点記録票タブ — state, handlers, rendering
+   ========================================================================= */
+
+const LOG_STORAGE_KEY = 'mahjong-log-v2';
+const LOG_STORAGE_KEY_V1 = 'mahjong-log-v1'; // 旧バージョン。存在すればv2へ読み替えて移行する。
+
+function defaultLogState(){
+  return {
+    _activeTab: 'calc', // 'calc' | 'log'
+    settings: {
+      playerCount: 4,
+      playerNames: ['P1','P2','P3','P4'],
+      startPoints: 25000,
+      returnPoints: 30000,
+      umaEnabled: true,
+      uma: [10, 30],
+      tobiEnabled: true,
+      tobiPoints: 10,
+      tobiRecipient: 'topPlace', // 'topPlace' | 'buster'
+      rate: 100,                // 1000点 = ◯◯（換算値。単位は付けない）
+      roundingMode: 'gosharokunyuu', // 'gosharokunyuu' | 'roundHalfUp' | 'floor'
+      chipUnitYen: 1000,
+      presentationMode: false, // 演出モード: 終局ボタンを押すまで順位・収支を隠す
+      isPremium: false, // 広告削除+記録し放題(買い切り課金)が有効か。ストアアプリのみ意味を持つ
+      participantLinks: {}, // { プレイヤー名: {uid, username} } 同卓者としてアカウント紐付けされている場合のみ存在
+    },
+    hanchans: [], // 進行中の対局のみ。{ id, scores:{name:val}, busterOf:{bustedName:busterName} }
+    chips: {},    // 進行中の対局のみ。name -> 最終枚数
+    hanchanSeq: 1,
+    currentMatchStartedAt: null, // 進行中の対局の最初の半荘を記録した時刻(ISO文字列)
+    matchHistory: [], // 「対局を終了する」で確定・保存された過去の対局一覧(新しい順)
+    // { id, startedAt, endedAt, title, settingsSnapshot, hanchans, chips, participantUids?, recordedBy? }
+    account: {
+      uid: null,
+      isAnonymous: true,
+      username: null,
+      linkedProviders: { google: false, apple: false },
+      notifyOnAutoRecord: true,     // 自分以外の操作で記録が追加された時に通知するか(初期値ON)
+      pushPermissionRequested: false, // 通知許可を一度リクエスト済みか(タイミング制御用)
+    },
+    friends: [], // [{ uid, username }] ローカルキャッシュ(正はusers/{uid}/friends)
+    room: null,  // 進行中の卓。null=単独モード。
+    // { roomId, isHost, hostUid, participants: [{ slot, uid, name, isGuest }] }
+    ui: {
+      settingsOpen: true,
+      chipsOpen: false,
+      startAdvancedOpen: false,
+      editingHanchanId: null,
+      formScores: {},
+      formBuster: {},
+      revealActive: false, // 演出モードで「終局」ボタンを押したか
+      revealStep: 0,       // 発表済みの順位グループ数
+      confirmEndMatch: false,   // 「対局を終了する」の誤タップ防止確認中か
+      historyOpen: false,       // 対局履歴モーダルを開いているか
+      historyView: 'list',      // 'list' | 'detail' | 'stats'
+      historyDetailId: null,
+      editingArchiveTitleId: null,
+      confirmDeleteArchiveId: null,
+      importResultMsg: null,
+      shareFallbackMsg: null,
+      editingChipFor: null, // タップでチップ枚数を直接編集中のプレイヤー名
+      paywallOpen: false,       // 無料枠(FREE_MATCH_LIMIT)超過時のペイウォール表示中か
+      paywallPurchasing: false,
+      paywallErrorMsg: null,
+      billingMsg: null,         // 「購入を復元」結果などの短いメッセージ
+      accountModalOpen: false,     // ユーザーネーム設定・ログイン連携モーダル
+      usernameInput: '',
+      usernameError: null,
+      usernameChecking: false,
+      friendPickerOpen: false,     // 同卓者指定(ユーザーネーム検索/フレンド選択/ゲスト)モーダル
+      friendPickerSlot: null,      // どの参加枠を指定中か
+      friendSearchInput: '',
+      friendSearchResult: null,
+      friendSearchError: null,
+      friendSearchChecking: false,
+      friendsListOpen: false,      // フレンド一覧・解除モーダル
+      confirmRemoveFriendUid: null,
+      loginPromptOpen: false,      // 匿名のままでは困る操作をした時のログイン誘導モーダル
+      loginPromptReason: null,
+      notifyBanner: null,          // 「〇〇さんとの対局記録が追加されました」の簡易トースト
+      addFriendOpen: false,        // 同卓者指定を介さない、単独の「フレンドを追加」モーダル
+      addFriendSearchInput: '',
+      addFriendSearchResult: null,
+      addFriendSearchError: null,
+      addFriendSearchChecking: false,
+      historyFriendFilter: null,   // { uid, username } — フレンド一覧から「この人との戦歴」を見ている間だけ設定される絞り込み
+    },
+  };
+}
+
+// 保存されているデータ(v2、無ければ旧v1)をパースしてdefaultLogState()にマージする、
+// v1/v2共通の下地処理。matchHistoryはv1データに存在しないため自然に[]で補完される。
+function mergeParsedLogState(parsed){
+  const base = defaultLogState();
+  return {
+    ...base,
+    ...parsed,
+    settings: { ...base.settings, ...(parsed.settings || {}) },
+    matchHistory: Array.isArray(parsed.matchHistory) ? parsed.matchHistory : [],
+    account: {
+      ...base.account,
+      ...(parsed.account || {}),
+      linkedProviders: { ...base.account.linkedProviders, ...((parsed.account || {}).linkedProviders || {}) },
+    },
+    friends: Array.isArray(parsed.friends) ? parsed.friends : [],
+    room: parsed.room || null,
+    ui: base.ui, // 開閉状態・入力途中のフォームは復元しない
+  };
+}
+
+function loadLogState(){
+  try {
+    const raw = localStorage.getItem(LOG_STORAGE_KEY);
+    if (raw) return mergeParsedLogState(JSON.parse(raw));
+    // v2キーが無ければ旧v1キーを探し、あれば読み替えて移行する（matchHistoryは[]で補完）。
+    const rawV1 = localStorage.getItem(LOG_STORAGE_KEY_V1);
+    if (rawV1) return mergeParsedLogState(JSON.parse(rawV1));
+    return defaultLogState();
+  } catch (e) {
+    return defaultLogState(); // localStorageが使えない環境でもメモリ上で動く
+  }
+}
+
+function saveLogState(){
+  try {
+    const { settings, hanchans, chips, hanchanSeq, currentMatchStartedAt, matchHistory, account, friends, room } = logState;
+    localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify({ settings, hanchans, chips, hanchanSeq, currentMatchStartedAt, matchHistory, account, friends, room }));
+  } catch (e) { /* 保存できない環境ではメモリ上のみで継続 */ }
+}
+
+const logState = loadLogState();
+if (logState.hanchans.length > 0) logState.ui.settingsOpen = false;
+saveLogState(); // v1からの移行時などに、v2キーへ即座に書き直しておく
+
+// 起動時に必ずPlay Billingへ購入履歴を問い合わせて上書きする。ローカル保存の
+// isPremiumだけに頼ると、端末変更・再インストール時に無料枠へ戻ってしまうため。
+// (非ネイティブ環境ではrestorePurchases()がnullを返し、何も上書きしない。)
+Native.initAds();
+(async () => {
+  const restored = await Native.restorePurchases();
+  if (restored !== null && restored !== logState.settings.isPremium) {
+    logState.settings.isPremium = restored;
+    saveLogState();
+    scheduleRenderApp();
+  }
+})();
+// マルチプレイヤー(フレンド・卓)機能の起動処理。匿名認証を確立し、フレンド
+// 一覧を最新化し、前回終了時に進行中の卓があれば再購読する。
+CloudSync.init().then(() => scheduleRenderApp());
+
+function activePlayers(){
+  return logState.settings.playerNames.slice(0, logState.settings.playerCount);
+}
+// calcHanchanResult/calcTotals expect a `players` array on the settings
+// object; logState.settings only stores playerNames+playerCount, so merge
+// the derived active-player list in whenever calling into that pure logic.
+function settingsWithPlayers(){
+  return { ...logState.settings, players: activePlayers() };
+}
+
+/* ---- マルチプレイヤー: 卓(room)のライフサイクル ---- */
+// 現在アクティブなプレイヤー枠のうち、アカウント紐付け(participantLinks)が
+// されている人のuidだけを返す(ゲスト・未紐付けの枠は含まない)。
+function activeParticipantUids(){
+  const links = logState.settings.participantLinks || {};
+  return activePlayers().map(p => links[p] && links[p].uid).filter(Boolean);
+}
+function isMultiplayerMatch(){
+  return activeParticipantUids().length > 0;
+}
+// 自分が閲覧のみの同卓者(=誰かが代表入力者として卓を立てていて、自分はホストでない)かどうか。
+function isRoomViewerOnly(){
+  return !!(logState.room && !logState.room.isHost);
+}
+// 半荘を最初に記録した瞬間に、アカウント紐付けされた参加者がいれば卓(room)を
+// Firestore上に作成する。非ネイティブ環境やCloudSync利用不可時は何もしない
+// (=これまで通りローカル単独モードのまま動作する)。
+async function ensureRoomForCurrentMatch(){
+  if (!CloudSync.isAvailable()) return;
+  if (logState.room && logState.room.roomId) return; // 既に卓がある(ホスト・閲覧者いずれでも)
+  if (!isMultiplayerMatch()) return;
+  const links = logState.settings.participantLinks || {};
+  const participants = activePlayers().map((p, i) => ({
+    slot: i, name: p, isGuest: !links[p], uid: links[p] ? links[p].uid : null,
+  }));
+  const roomId = await CloudSync.createRoom(participants);
+  if (roomId) {
+    logState.room = { roomId, isHost: true, hostUid: logState.account.uid, participants };
+    saveLogState();
+    scheduleRenderApp();
+    CloudSync.subscribeRoom(roomId);
+  }
+}
+// 代表入力者が半荘記録・チップ入力・演出発表するたびに呼び、卓ドキュメントを
+// 最新の進行中データで更新する(閲覧者側は自分では書き込まない)。
+function syncRoomState(){
+  if (!logState.room || !logState.room.isHost || !logState.room.roomId) return;
+  CloudSync.updateRoom(logState.room.roomId, {
+    hanchans: logState.hanchans, chips: logState.chips,
+    revealActive: logState.ui.revealActive, revealStep: logState.ui.revealStep,
+  });
+}
+
+function resetFormScores(){
+  logState.ui.formScores = {};
+  logState.ui.formBuster = {};
+  activePlayers().forEach(p => { logState.ui.formScores[p] = ''; });
+}
+resetFormScores();
+
+function escapeHtml(str){
+  return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function escKey(str){ return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+function formatMoney(n){
+  const sign = n > 0 ? '+' : n < 0 ? '-' : '';
+  return `${sign}${Math.abs(Math.round(n)).toLocaleString('ja-JP')}`;
+}
+function formatPt(n){
+  const sign = n > 0 ? '+' : n < 0 ? '-' : '';
+  return `${sign}${Math.abs(n).toFixed(1)}`;
+}
+
+/* ---- tab switching ---- */
+function setActiveTab(tab){ logState._activeTab = tab; scheduleRenderApp(); }
+
+/* ---- settings handlers ---- */
+function setPlayerCount(n){
+  logState.settings.playerCount = n;
+  if (n === 3 && logState.settings.uma.length !== 1) logState.settings.uma = [15];
+  if (n === 4 && logState.settings.uma.length !== 2) logState.settings.uma = [10, 30];
+  resetFormScores();
+  saveLogState(); scheduleRenderApp();
+}
+function renamePlayerEverywhere(oldName, newName){
+  if (oldName === newName) return;
+  logState.hanchans.forEach(h => {
+    if (Object.prototype.hasOwnProperty.call(h.scores, oldName)) {
+      h.scores[newName] = h.scores[oldName];
+      delete h.scores[oldName];
+    }
+    if (h.busterOf) {
+      Object.keys(h.busterOf).forEach(k => { if (h.busterOf[k] === oldName) h.busterOf[k] = newName; });
+      if (Object.prototype.hasOwnProperty.call(h.busterOf, oldName)) {
+        h.busterOf[newName] = h.busterOf[oldName];
+        delete h.busterOf[oldName];
+      }
+    }
+  });
+  if (Object.prototype.hasOwnProperty.call(logState.chips, oldName)) {
+    logState.chips[newName] = logState.chips[oldName];
+    delete logState.chips[oldName];
+  }
+  [logState.ui.formScores, logState.ui.formBuster].forEach(obj => {
+    Object.keys(obj).forEach(k => { if (obj[k] === oldName) obj[k] = newName; });
+    if (Object.prototype.hasOwnProperty.call(obj, oldName)) {
+      obj[newName] = obj[oldName];
+      delete obj[oldName];
+    }
+  });
+  const links = logState.settings.participantLinks;
+  if (links && Object.prototype.hasOwnProperty.call(links, oldName)) {
+    links[newName] = links[oldName];
+    delete links[oldName];
+  }
+}
+function setPlayerName(i, value){
+  const oldName = logState.settings.playerNames[i];
+  const newName = (value || '').trim() || `P${i+1}`;
+  logState.settings.playerNames[i] = newName;
+  renamePlayerEverywhere(oldName, newName);
+  saveLogState(); scheduleRenderApp();
+}
+function setStartPointsPreset(v){
+  // オカのあり/なし（返し点との差が+5,000点かどうか）はそのまま保って、
+  // 持ち点だけを切り替える。
+  const okaOn = logState.settings.returnPoints > logState.settings.startPoints;
+  logState.settings.startPoints = v;
+  logState.settings.returnPoints = v + (okaOn ? 5000 : 0);
+  saveLogState(); scheduleRenderApp();
+}
+function setOkaEnabled(v){
+  logState.settings.returnPoints = logState.settings.startPoints + (v ? 5000 : 0);
+  saveLogState(); scheduleRenderApp();
+}
+function setStartPoints(v){ logState.settings.startPoints = v; saveLogState(); scheduleRenderApp(); }
+function setReturnPoints(v){ logState.settings.returnPoints = v; saveLogState(); scheduleRenderApp(); }
+function setUmaEnabled(v){ logState.settings.umaEnabled = v; saveLogState(); scheduleRenderApp(); }
+function setUmaPreset(...vals){ logState.settings.uma = vals; saveLogState(); scheduleRenderApp(); }
+function setTobiEnabled(v){ logState.settings.tobiEnabled = v; saveLogState(); scheduleRenderApp(); }
+function setTobiPoints(v){ logState.settings.tobiPoints = v; saveLogState(); scheduleRenderApp(); }
+function setTobiRecipient(v){ logState.settings.tobiRecipient = v; saveLogState(); scheduleRenderApp(); }
+function setRate(v){ logState.settings.rate = v; saveLogState(); scheduleRenderApp(); }
+function setRoundingMode(v){ logState.settings.roundingMode = v; saveLogState(); scheduleRenderApp(); }
+function setChipUnitYen(v){ logState.settings.chipUnitYen = v; saveLogState(); scheduleRenderApp(); }
+function toggleAccordion(key){ logState.ui[key] = !logState.ui[key]; scheduleRenderApp(); }
+
+/* ---- 演出モード（終局まで順位・収支を隠す） ---- */
+function togglePresentationMode(){
+  logState.settings.presentationMode = !logState.settings.presentationMode;
+  logState.ui.revealActive = false;
+  logState.ui.revealStep = 0;
+  logState.ui.confirmEndMatch = false;
+  saveLogState(); scheduleRenderApp();
+}
+// 発表順は「2位→3位→…→1位」。1位（優勝）を最後にとっておくことで、
+// 途中の順位から先に発表して最後に一番の見せ場を持ってくる演出。
+function revealOrderFor(playerCount){
+  return playerCount === 3 ? [2, 3, 1] : [2, 3, 4, 1];
+}
+function startReveal(){
+  if (isRoomViewerOnly()) return; // 発表の進行は代表入力者だけが操作できる
+  if (logState.hanchans.length === 0) return; // 対局ログが無い状態では発表しても意味が無いので何もしない
+  logState.ui.revealActive = true;
+  logState.ui.revealStep = 1; // 「終局」を押した瞬間に最初の順位（2位）まで発表する
+  scheduleRenderApp();
+  syncRoomState();
+}
+function revealNext(totalGroups){
+  if (isRoomViewerOnly()) return;
+  if (logState.ui.revealStep < totalGroups) logState.ui.revealStep++;
+  scheduleRenderApp();
+  syncRoomState();
+}
+
+/* ---- 対局を終了する（現在の進行中対局をmatchHistoryへアーカイブしてリセット） ---- */
+function requestEndMatch(){
+  if (isRoomViewerOnly()) return; // 対局の終了(確定保存)も代表入力者だけができる
+  if (logState.hanchans.length === 0) return;
+  logState.ui.confirmEndMatch = true;
+  scheduleRenderApp();
+}
+function cancelEndMatch(){
+  logState.ui.confirmEndMatch = false;
+  scheduleRenderApp();
+}
+function confirmEndMatch(){
+  logState.ui.confirmEndMatch = false;
+  // 無料枠(FREE_MATCH_LIMIT)を超えて新規保存しようとした場合は、保存フローに進まず
+  // ペイウォールを表示する。半荘データ(hanchans)はここでは一切消さない。
+  if (!isPremiumUnlocked() && logState.matchHistory.length >= FREE_MATCH_LIMIT) {
+    logState.ui.paywallOpen = true;
+    logState.ui.paywallErrorMsg = null;
+    scheduleRenderApp();
+    return;
+  }
+  archiveCurrentMatch();
+}
+// 進行中のhanchans/chips/settingsをスナップショットとしてmatchHistoryへ保存し、
+// 進行中データ(hanchans/chips/hanchanSeq/演出状態)だけをリセットする。
+// settingsは次の対局にそのまま引き継ぐため、ここではリセットしない。
+function archiveCurrentMatch(){
+  if (isRoomViewerOnly()) return;
+  if (logState.hanchans.length === 0) return;
+  const participantUids = activeParticipantUids();
+  const entry = {
+    id: 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+    startedAt: logState.currentMatchStartedAt || new Date().toISOString(),
+    endedAt: new Date().toISOString(),
+    title: '',
+    settingsSnapshot: JSON.parse(JSON.stringify(logState.settings)),
+    hanchans: JSON.parse(JSON.stringify(logState.hanchans)),
+    chips: JSON.parse(JSON.stringify(logState.chips)),
+  };
+  if (participantUids.length > 0) {
+    entry.participantUids = participantUids;
+    entry.recordedBy = logState.account.uid;
+    // Firestoreセキュリティルールがrooms/{roomId}のhostUid/participantUidsと
+    // 突き合わせて自動配信を検証できるよう、対象の卓IDを記録に含める。
+    if (logState.room && logState.room.roomId) entry.roomId = logState.room.roomId;
+  }
+  logState.matchHistory.unshift(entry);
+  // 同卓者としてアカウント紐付けされていた全員(ゲスト除く)のmatchHistoryにも
+  // 同じ内容を自動配信する。各自の無料枠は独立にカウントされる(Firestore側で判定)。
+  if (participantUids.length > 0) {
+    CloudSync.archiveMatchFanout(entry, participantUids);
+  }
+  // 卓を閉じる(代表入力者以外はこれ以降このroomIdをリアルタイム購読しない)。
+  if (logState.room && logState.room.roomId) {
+    CloudSync.updateRoom(logState.room.roomId, { status: 'ended' });
+    CloudSync.leaveRoom();
+    logState.room = null;
+  }
+  logState.hanchans = [];
+  logState.chips = {};
+  logState.hanchanSeq = 1;
+  logState.currentMatchStartedAt = null;
+  logState.ui.revealActive = false;
+  logState.ui.revealStep = 0;
+  logState.ui.confirmEndMatch = false;
+  cancelEditHanchan_noRender();
+  saveLogState();
+  scheduleRenderApp();
+  // 1つの対局が終わった区切りの良いタイミングでだけインタースティシャルを挟む
+  // (半荘記録のたびには出さない)。非ネイティブ環境・購入済みの場合は内部でno-op。
+  Native.showInterstitial();
+}
+
+/* ---- ペイウォール(無料枠超過時) ---- */
+async function purchaseFromPaywall(){
+  logState.ui.paywallPurchasing = true;
+  logState.ui.paywallErrorMsg = null;
+  scheduleRenderApp();
+  const success = await Native.purchasePremium();
+  logState.ui.paywallPurchasing = false;
+  if (success) {
+    logState.settings.isPremium = true;
+    logState.ui.paywallOpen = false;
+    saveLogState();
+    Native.hideBanner();
+    // ユーザーにもう一度ボタンを押させず、そのまま保存まで完了させる。
+    archiveCurrentMatch();
+  } else {
+    logState.ui.paywallErrorMsg = '購入を完了できませんでした。通信環境をご確認のうえ、もう一度お試しください。';
+    scheduleRenderApp();
+  }
+}
+function closePaywall(){
+  logState.ui.paywallOpen = false;
+  logState.ui.paywallErrorMsg = null;
+  scheduleRenderApp();
+}
+async function restorePurchasesFromMenu(){
+  logState.ui.billingMsg = '購入情報を確認しています…';
+  scheduleRenderApp();
+  const restored = await Native.restorePurchases();
+  if (restored === true) {
+    logState.settings.isPremium = true;
+    saveLogState();
+    Native.hideBanner();
+    logState.ui.billingMsg = '購入情報を復元しました。広告が削除され、記録し放題になりました。';
+  } else if (restored === false) {
+    logState.ui.billingMsg = '有効な購入が見つかりませんでした。';
+  } else {
+    logState.ui.billingMsg = '購入情報を確認できませんでした。通信環境をご確認のうえ、もう一度お試しください。';
+  }
+  scheduleRenderApp();
+}
+// cancelEditHanchan()相当だがscheduleRenderAppを二重に呼ばないための内部版
+function cancelEditHanchan_noRender(){
+  logState.ui.editingHanchanId = null;
+  resetFormScores();
+}
+
+/* ---- hanchan form handlers ---- */
+function setFormScore(name, value){ logState.ui.formScores[name] = value; scheduleRenderApp(); }
+function setFormBuster(bustedName, busterName){ logState.ui.formBuster[bustedName] = busterName; scheduleRenderApp(); }
+
+// 素点は必ず100点単位（下2桁は常に00）なので、入力フォームでは下2桁を省略した
+// 「100点単位の値」を打ってもらい、実際の素点にする時だけ100倍する。
+// 例: 入力欄に "350" → 実際の素点は 35,000。
+const SCORE_INPUT_SCALE = 100;
+function formScoreActual(p){
+  const raw = parseFloat(logState.ui.formScores[p]);
+  return isNaN(raw) ? NaN : Math.round(raw * SCORE_INPUT_SCALE);
+}
+function formTotal(){
+  return activePlayers().reduce((sum, p) => {
+    const v = formScoreActual(p);
+    return sum + (isNaN(v) ? 0 : v);
+  }, 0);
+}
+function formIsValid(){
+  const players = activePlayers();
+  if (players.some(p => logState.ui.formScores[p] === '' || isNaN(formScoreActual(p)))) return false;
+  if (formTotal() !== logState.settings.startPoints * logState.settings.playerCount) return false;
+  if (logState.settings.tobiEnabled && logState.settings.tobiRecipient === 'buster') {
+    for (const p of players) {
+      if ((formScoreActual(p) || 0) < 0 && !logState.ui.formBuster[p]) return false;
+    }
+  }
+  return true;
+}
+function recordHanchan(){
+  if (isRoomViewerOnly()) return; // 閲覧のみの同卓者は記録できない(代表入力者は1卓につき1人)
+  if (!formIsValid()) return;
+  const players = activePlayers();
+  const scores = {};
+  players.forEach(p => { scores[p] = formScoreActual(p); });
+  const busterOf = {};
+  players.forEach(p => { if (scores[p] < 0 && logState.ui.formBuster[p]) busterOf[p] = logState.ui.formBuster[p]; });
+
+  if (logState.ui.editingHanchanId !== null) {
+    const h = logState.hanchans.find(x => x.id === logState.ui.editingHanchanId);
+    if (h) { h.scores = scores; h.busterOf = busterOf; }
+    logState.ui.editingHanchanId = null;
+  } else {
+    // この対局で最初の半荘を記録した瞬間の時刻を、あとで履歴に保存する時の
+    // startedAtとして使う（既に記録中ならそのまま）。
+    if (logState.hanchans.length === 0 && !logState.currentMatchStartedAt) {
+      logState.currentMatchStartedAt = new Date().toISOString();
+    }
+    logState.hanchans.unshift({ id: logState.hanchanSeq++, scores, busterOf });
+  }
+  logState.ui.confirmEndMatch = false;
+  resetFormScores();
+  // 演出モード中に新しい半荘を記録したら、対局が続いている証拠なので
+  // 発表済みの結果はまた隠しておく（次の「終局」まで再びネタバレしない）。
+  if (logState.settings.presentationMode) {
+    logState.ui.revealActive = false;
+    logState.ui.revealStep = 0;
+  }
+  saveLogState();
+  scheduleRenderApp();
+  // 卓を立てた人(代表入力者)が半荘を記録するたびに、進行中の卓ドキュメントを
+  // Firestore上に作成/更新する(同卓者がアプリを開いていればリアルタイムに届く)。
+  ensureRoomForCurrentMatch().then(syncRoomState);
+}
+function editHanchan(id){
+  const h = logState.hanchans.find(x => x.id === id);
+  if (!h) return;
+  logState.ui.editingHanchanId = id;
+  logState.ui.formScores = {};
+  logState.ui.formBuster = {};
+  activePlayers().forEach(p => {
+    // 保存されている実際の素点(例:35,000)を、入力欄用の100点単位の表記(例:350)に戻す。
+    logState.ui.formScores[p] = h.scores[p] === undefined ? '' : String(h.scores[p] / SCORE_INPUT_SCALE);
+    if (h.busterOf && h.busterOf[p]) logState.ui.formBuster[p] = h.busterOf[p];
+  });
+  scheduleRenderApp(() => {
+    const el = document.getElementById('hanchanFormAnchor');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+}
+function cancelEditHanchan(){
+  logState.ui.editingHanchanId = null;
+  resetFormScores();
+  scheduleRenderApp();
+}
+function deleteHanchan(id){
+  if (isRoomViewerOnly()) return;
+  logState.hanchans = logState.hanchans.filter(x => x.id !== id);
+  if (logState.ui.editingHanchanId === id) cancelEditHanchan();
+  saveLogState();
+  scheduleRenderApp();
+  syncRoomState();
+}
+function chipStep(name, delta){
+  if (isRoomViewerOnly()) return;
+  logState.chips[name] = (logState.chips[name] || 0) + delta;
+  saveLogState(); scheduleRenderApp();
+  syncRoomState();
+}
+// 枚数が多い時に＋/−ボタンを連打しなくて済むよう、数値表示部分をタップすると
+// 直接入力できるようにする(ステッパー自体は残したまま追加する導線)。
+function startEditChip(name){
+  logState.ui.editingChipFor = name;
+  scheduleRenderApp(() => {
+    const el = document.getElementById('chipEditInput');
+    if (el) { el.focus(); el.select(); }
+  });
+}
+function setChipAbsolute(name, value){
+  if (isRoomViewerOnly()) return;
+  if (logState.ui.editingChipFor !== name) return; // 二重発火(change+blur)による重複保存を防ぐ
+  const n = parseInt(value, 10);
+  logState.chips[name] = isNaN(n) ? 0 : n;
+  logState.ui.editingChipFor = null;
+  saveLogState(); scheduleRenderApp();
+  syncRoomState();
+}
+function cancelEditChip(){
+  logState.ui.editingChipFor = null;
+  scheduleRenderApp();
+}
+
+/* =========================================================================
+   マルチプレイヤー: アカウント・フレンド・同卓者指定 UIハンドラ
+   ========================================================================= */
+
+/* ---- ログイン誘導(匿名のままでは困る操作をした時) ---- */
+// 「フレンドを追加する」等の操作をしようとしたタイミングでのみ表示する。
+// 連携は必須ではないため、スキップしてそのまま進める導線も必ず用意する。
+function needsLoginPromptFirst(){
+  const p = logState.account.linkedProviders;
+  return logState.account.isAnonymous && !p.google && !p.apple;
+}
+function openLoginPrompt(reason, afterAction){
+  // ログイン誘導は常に単独の最前面モーダルとして表示する。「フレンド一覧を
+  // 見ている最中にフレンドを追加しようとした」場合のように、既に別のモーダルを
+  // 開いた状態からこの誘導が挟まれることがあるため、先に他のモーダルを閉じて
+  // 重なり表示(タップ判定のズレ)を防ぐ。呼び出し元は afterAction 側で必要な
+  // モーダルを改めて開き直す設計になっている。
+  logState.ui.accountModalOpen = false;
+  logState.ui.friendPickerOpen = false;
+  logState.ui.friendsListOpen = false;
+  logState.ui.addFriendOpen = false;
+  logState.ui.loginPromptOpen = true;
+  logState.ui.loginPromptReason = reason;
+  logState.ui._loginPromptAfterAction = afterAction; // ログイン後 or スキップ後に続ける処理
+  scheduleRenderApp();
+}
+function closeLoginPrompt(){
+  logState.ui.loginPromptOpen = false;
+  logState.ui.loginPromptReason = null;
+  logState.ui._loginPromptAfterAction = null;
+  scheduleRenderApp();
+}
+async function loginPromptContinue(provider){
+  const after = logState.ui._loginPromptAfterAction;
+  if (provider === 'google') await CloudSync.linkGoogle();
+  else if (provider === 'apple') await CloudSync.linkApple();
+  // 連携に失敗しても(オフライン等)、匿名のまま続行できるようにする。
+  closeLoginPrompt();
+  if (after) after();
+}
+
+/* ---- ユーザーネーム設定・アカウントモーダル ---- */
+function openAccountModal(){
+  logState.ui.accountModalOpen = true;
+  logState.ui.usernameInput = logState.account.username || '';
+  logState.ui.usernameError = null;
+  scheduleRenderApp();
+}
+function closeAccountModal(){
+  logState.ui.accountModalOpen = false;
+  scheduleRenderApp();
+}
+function setUsernameInput(v){ logState.ui.usernameInput = v; scheduleRenderApp(); }
+async function submitUsername(){
+  const name = (logState.ui.usernameInput || '').trim();
+  if (!isValidUsernameFormat(name)) {
+    logState.ui.usernameError = '半角英数字・アンダースコアのみ、3〜20文字で入力してください';
+    scheduleRenderApp();
+    return;
+  }
+  logState.ui.usernameChecking = true;
+  logState.ui.usernameError = null;
+  scheduleRenderApp();
+  const result = await CloudSync.claimUsername(name);
+  logState.ui.usernameChecking = false;
+  if (result.ok) {
+    logState.ui.accountModalOpen = false;
+    scheduleRenderApp();
+  } else {
+    logState.ui.usernameError = result.error === 'taken'
+      ? 'そのユーザーネームは既に使われています'
+      : result.error === 'unavailable'
+        ? 'この画面はストアアプリ内でのみ利用できます'
+        : '通信環境をご確認のうえ、もう一度お試しください';
+    scheduleRenderApp();
+  }
+}
+async function loginFromAccountModal(provider){
+  if (provider === 'google') await CloudSync.linkGoogle();
+  else await CloudSync.linkApple();
+  scheduleRenderApp();
+}
+
+/* ---- 同卓者指定(ユーザーネーム検索/フレンド選択/ゲストのまま) ---- */
+function openFriendPicker(playerName){
+  // プッシュ通知の許可は、ユーザーが初めて「同卓者を指定する」操作を行った
+  // タイミングまで遅らせてリクエストする(iOSの許可ダイアログ提示タイミング対策)。
+  CloudSync.requestPushPermissionIfNeeded();
+  const doOpen = () => {
+    logState.ui.friendPickerOpen = true;
+    logState.ui.friendPickerSlot = playerName;
+    logState.ui.friendSearchInput = '';
+    logState.ui.friendSearchResult = null;
+    logState.ui.friendSearchError = null;
+    scheduleRenderApp();
+  };
+  if (needsLoginPromptFirst()) {
+    openLoginPrompt('friend_link', doOpen);
+  } else {
+    doOpen();
+  }
+}
+function closeFriendPicker(){
+  logState.ui.friendPickerOpen = false;
+  logState.ui.friendPickerSlot = null;
+  scheduleRenderApp();
+}
+function setFriendSearchInput(v){
+  logState.ui.friendSearchInput = v;
+  logState.ui.friendSearchResult = null;
+  logState.ui.friendSearchError = null;
+  scheduleRenderApp();
+}
+async function searchFriendByUsername(){
+  const name = (logState.ui.friendSearchInput || '').trim();
+  if (!isValidUsernameFormat(name)) {
+    logState.ui.friendSearchError = 'ユーザーネームを入力してください';
+    scheduleRenderApp();
+    return;
+  }
+  logState.ui.friendSearchChecking = true;
+  logState.ui.friendSearchError = null;
+  scheduleRenderApp();
+  const result = await CloudSync.searchUsername(name);
+  logState.ui.friendSearchChecking = false;
+  if (!result) {
+    logState.ui.friendSearchError = '見つかりませんでした';
+  } else if (result.isSelf) {
+    logState.ui.friendSearchError = '自分自身は指定できません';
+  } else {
+    logState.ui.friendSearchResult = result;
+  }
+  scheduleRenderApp();
+}
+// 同卓者に指定した瞬間、確認フローなしで即座に処理を進め、同時に自動でフレンド関係になる。
+async function linkParticipant(uid, username){
+  const slot = logState.ui.friendPickerSlot;
+  if (!slot) return;
+  logState.settings.participantLinks[slot] = { uid, username };
+  saveLogState();
+  closeFriendPicker();
+  await CloudSync.addFriend(uid, username);
+  scheduleRenderApp();
+}
+function unlinkParticipant(){
+  const slot = logState.ui.friendPickerSlot;
+  if (!slot) return;
+  delete logState.settings.participantLinks[slot];
+  saveLogState();
+  closeFriendPicker();
+}
+
+/* ---- 単独のフレンド追加(同卓者指定を介さずに、ユーザーネーム検索だけで追加する) ---- */
+// 「フレンド登録してから同卓者に設定してもいいし、同卓者に設定したらフレンドに
+// 登録してもいい」のご要望どおり、こちらは同卓者指定(openFriendPicker)とは
+// 独立した入口。フレンドになった後は、同卓者指定画面の「フレンドから選ぶ」欄に
+// すぐ出てくるようになる。
+function openAddFriend(){
+  const doOpen = () => {
+    logState.ui.addFriendOpen = true;
+    logState.ui.addFriendSearchInput = '';
+    logState.ui.addFriendSearchResult = null;
+    logState.ui.addFriendSearchError = null;
+    scheduleRenderApp();
+  };
+  // フレンド追加も「匿名のままでは困る操作」の一つなので、同卓者指定と同じく
+  // ログイン誘導(スキップ可)を先に挟む。
+  if (needsLoginPromptFirst()) {
+    openLoginPrompt('friend_add', doOpen);
+  } else {
+    doOpen();
+  }
+}
+function closeAddFriend(){
+  logState.ui.addFriendOpen = false;
+  scheduleRenderApp();
+}
+function setAddFriendSearchInput(v){
+  logState.ui.addFriendSearchInput = v;
+  logState.ui.addFriendSearchResult = null;
+  logState.ui.addFriendSearchError = null;
+  scheduleRenderApp();
+}
+async function searchAddFriend(){
+  const name = (logState.ui.addFriendSearchInput || '').trim();
+  if (!isValidUsernameFormat(name)) {
+    logState.ui.addFriendSearchError = 'ユーザーネームを入力してください';
+    scheduleRenderApp();
+    return;
+  }
+  logState.ui.addFriendSearchChecking = true;
+  logState.ui.addFriendSearchError = null;
+  scheduleRenderApp();
+  const result = await CloudSync.searchUsername(name);
+  logState.ui.addFriendSearchChecking = false;
+  if (!result) {
+    logState.ui.addFriendSearchError = '見つかりませんでした';
+  } else if (result.isSelf) {
+    logState.ui.addFriendSearchError = '自分自身は追加できません';
+  } else if (logState.friends.some(f => f.uid === result.uid)) {
+    logState.ui.addFriendSearchError = '既にフレンドです';
+  } else {
+    logState.ui.addFriendSearchResult = result;
+  }
+  scheduleRenderApp();
+}
+async function confirmAddFriend(uid, username){
+  await CloudSync.addFriend(uid, username);
+  closeAddFriend();
+  openFriendsList(); // 追加した結果が分かるよう、そのままフレンド一覧に戻す
+}
+
+/* ---- フレンド一覧・解除 ---- */
+function openFriendsList(){
+  logState.ui.friendsListOpen = true;
+  scheduleRenderApp();
+}
+function closeFriendsList(){
+  logState.ui.friendsListOpen = false;
+  logState.ui.confirmRemoveFriendUid = null;
+  scheduleRenderApp();
+}
+function requestRemoveFriend(uid){
+  logState.ui.confirmRemoveFriendUid = uid;
+  scheduleRenderApp();
+}
+function cancelRemoveFriend(){
+  logState.ui.confirmRemoveFriendUid = null;
+  scheduleRenderApp();
+}
+// フレンド関係を解除しても、過去のmatchHistory(対局記録)は消さない(自然な挙動として維持)。
+async function confirmRemoveFriend(uid){
+  await CloudSync.removeFriend(uid);
+  logState.ui.confirmRemoveFriendUid = null;
+  scheduleRenderApp();
+}
+function toggleNotifyOnAutoRecord(v){
+  logState.account.notifyOnAutoRecord = v;
+  saveLogState();
+  scheduleRenderApp();
+  CloudSync.setNotifyOnAutoRecord(v);
+}
+function dismissNotifyBanner(){
+  logState.ui.notifyBanner = null;
+  scheduleRenderApp();
+}
+
+/* ---- rendering ---- */
+function renderSettingsAccordion(){
+  const s = logState.settings;
+  const open = logState.ui.settingsOpen;
+  const umaPresets4 = [[5,10],[10,20],[10,30],[20,30]];
+  const umaPresets3 = [[10],[15],[20]];
+  const umaPreview = s.playerCount === 3
+    ? `1位+${s.uma[0]} / 2位±0 / 3位-${s.uma[0]}`
+    : `1位+${s.uma[1]} / 2位+${s.uma[0]} / 3位-${s.uma[0]} / 4位-${s.uma[1]}`;
+  const oka = (s.returnPoints - s.startPoints) * s.playerCount / 1000;
+
+  return `
+    <div class="accordion ${open?'open':''}">
+      <div class="accordion-head" onclick="toggleAccordion('settingsOpen')">
+        <div class="t">対局ルール設定<small>${s.playerCount}人打ち・${s.startPoints.toLocaleString()}持ち${s.returnPoints.toLocaleString()}返し</small></div>
+        <div class="chev">▾</div>
+      </div>
+      ${open ? `
+      <div class="accordion-body">
+        <div class="settings-row">
+          <div class="lbl">人数</div>
+          <div class="preset-row">
+            <button class="preset-btn ${s.playerCount===4?'active':''}" onclick="setPlayerCount(4)">4人打ち</button>
+            <button class="preset-btn ${s.playerCount===3?'active':''}" onclick="setPlayerCount(3)">3人打ち</button>
+          </div>
+        </div>
+
+        <div class="settings-row">
+          <div class="lbl">プレイヤー名</div>
+          <div class="name-edit-row">
+            ${activePlayers().map((p,i)=>{
+              const link = logState.settings.participantLinks[p];
+              const linkBtnHtml = CloudSync.isAvailable() ? (
+                link
+                  ? `<button class="link-badge linked" onclick="openFriendPicker('${escKey(p)}')" title="同卓者: ${escapeHtml(link.username)}">🔗 ${escapeHtml(link.username)}</button>`
+                  : `<button class="link-badge" onclick="openFriendPicker('${escKey(p)}')" title="同卓者を指定">🔗 指定</button>`
+              ) : '';
+              return `
+              <div class="name-edit-item">
+                <span class="num">${i+1}</span>
+                <input class="text-input" value="${escapeHtml(p)}" onchange="setPlayerName(${i}, this.value)">
+                ${linkBtnHtml}
+              </div>`;
+            }).join('')}
+          </div>
+          ${CloudSync.isAvailable() ? `<div class="preview-line" style="margin-top:2px;">🔗でユーザーネーム・フレンドを指定すると、対局終了時にその人の端末にも自動で結果が届きます</div>` : ''}
+        </div>
+
+        <div class="settings-row">
+          <div class="lbl">配給原点（最初の持ち点）</div>
+          <div class="preset-row">
+            ${[25000,30000,35000].map(v=>`<button class="preset-btn ${s.startPoints===v?'active':''}" onclick="setStartPointsPreset(${v})">${v.toLocaleString()}点</button>`).join('')}
+          </div>
+          <label style="font-weight:400;font-size:.72rem;display:flex;align-items:center;gap:5px;margin-top:9px;color:var(--ivory-dim);">
+            <input type="checkbox" ${s.returnPoints>s.startPoints?'checked':''} onchange="setOkaEnabled(this.checked)"> オカあり（トップの取り分に+5,000点）
+          </label>
+          <div class="preview-line">返し点（自動計算）: <b>${s.returnPoints.toLocaleString()}点</b></div>
+          <div class="preview-line">オカ（1位への上乗せ）: <b>${oka>=0?'+':''}${oka.toFixed(1)}pt</b></div>
+          <button class="mentsu-add" style="margin-top:8px;" onclick="toggleAccordion('startAdvancedOpen')">${logState.ui.startAdvancedOpen?'▴ 細かい指定を閉じる':'▾ 持ち点・返し点を自分で細かく指定する'}</button>
+          ${logState.ui.startAdvancedOpen ? `
+            <div class="inline-fields" style="margin-top:8px;">
+              <div><input class="num-input" type="number" step="1000" value="${s.startPoints}" onchange="setStartPoints(parseInt(this.value,10)||0)"></div>
+              <div><input class="num-input" type="number" step="1000" value="${s.returnPoints}" onchange="setReturnPoints(parseInt(this.value,10)||0)"></div>
+            </div>` : ''}
+        </div>
+
+        <div class="settings-row">
+          <div class="lbl" style="display:flex;justify-content:space-between;align-items:center;">
+            <span>ウマ</span>
+            <label style="font-weight:400;font-size:.72rem;display:flex;align-items:center;gap:5px;">
+              <input type="checkbox" ${s.umaEnabled?'checked':''} onchange="setUmaEnabled(this.checked)"> 有効
+            </label>
+          </div>
+          ${s.umaEnabled ? `
+            <div class="preset-row">
+              ${(s.playerCount===3?umaPresets3:umaPresets4).map(preset=>{
+                const active = JSON.stringify(preset)===JSON.stringify(s.uma);
+                const label = preset.length===1 ? `±${preset[0]}` : `${preset[0]}-${preset[1]}`;
+                return `<button class="preset-btn ${active?'active':''}" onclick="setUmaPreset(${preset.join(',')})">${label}</button>`;
+              }).join('')}
+            </div>
+            <div class="preview-line">配分: <b>${umaPreview}</b></div>
+          ` : ''}
+        </div>
+
+        <div class="settings-row">
+          <div class="lbl" style="display:flex;justify-content:space-between;align-items:center;">
+            <span>飛び賞</span>
+            <label style="font-weight:400;font-size:.72rem;display:flex;align-items:center;gap:5px;">
+              <input type="checkbox" ${s.tobiEnabled?'checked':''} onchange="setTobiEnabled(this.checked)"> 有効
+            </label>
+          </div>
+          ${s.tobiEnabled ? `
+            <input class="num-input" type="number" step="1" value="${s.tobiPoints}" onchange="setTobiPoints(parseFloat(this.value)||0)" placeholder="pt">
+            <div class="preset-row">
+              <button class="preset-btn ${s.tobiRecipient==='topPlace'?'active':''}" onclick="setTobiRecipient('topPlace')">1位にまとめて加算</button>
+              <button class="preset-btn ${s.tobiRecipient==='buster'?'active':''}" onclick="setTobiRecipient('buster')">飛ばした人に加算</button>
+            </div>
+          ` : ''}
+        </div>
+
+        <div class="settings-row">
+          <div class="lbl">レート（1000点あたりの換算値）</div>
+          <div class="preview-line">現在のレート: <b>1000点＝${s.rate}</b></div>
+          <input class="num-input" type="number" step="10" value="${s.rate}" onchange="setRate(parseFloat(this.value)||0)" placeholder="1000点あたりの換算値">
+        </div>
+
+        <div class="settings-row">
+          <div class="lbl">端数処理</div>
+          <div class="preset-row">
+            <button class="preset-btn ${s.roundingMode==='gosharokunyuu'?'active':''}" onclick="setRoundingMode('gosharokunyuu')">五捨六入</button>
+            <button class="preset-btn ${s.roundingMode==='roundHalfUp'?'active':''}" onclick="setRoundingMode('roundHalfUp')">四捨五入</button>
+            <button class="preset-btn ${s.roundingMode==='floor'?'active':''}" onclick="setRoundingMode('floor')">切り捨て</button>
+          </div>
+        </div>
+      </div>` : ''}
+    </div>`;
+}
+
+function renderChipsAccordion(){
+  const s = logState.settings;
+  const open = logState.ui.chipsOpen;
+  const players = activePlayers();
+  const chipSum = players.reduce((sum,p)=> sum + (logState.chips[p]||0), 0);
+  return `
+    <div class="accordion ${open?'open':''}">
+      <div class="accordion-head" onclick="toggleAccordion('chipsOpen')">
+        <div class="t">チップ精算<small>全対局終了後にまとめて入力</small></div>
+        <div class="chev">▾</div>
+      </div>
+      ${open ? `
+      <div class="accordion-body">
+        <div class="settings-row">
+          <div class="lbl">チップ単価</div>
+          <input class="num-input" type="number" step="100" value="${s.chipUnitYen}" onchange="setChipUnitYen(parseFloat(this.value)||0)">
+        </div>
+        ${players.map(p=>`
+          <div class="chip-input-row">
+            <span class="pname">${escapeHtml(p)}</span>
+            <div class="chip-stepper">
+              <button onclick="chipStep('${escKey(p)}',-1)">−</button>
+              ${logState.ui.editingChipFor === p
+                ? `<input id="chipEditInput" class="num-input chip-val-input" type="number" step="1" inputmode="numeric"
+                     value="${logState.chips[p]||0}"
+                     onchange="setChipAbsolute('${escKey(p)}', this.value)"
+                     onblur="setChipAbsolute('${escKey(p)}', this.value)">`
+                : `<span class="val" onclick="startEditChip('${escKey(p)}')">${logState.chips[p]||0}枚</span>`}
+              <button onclick="chipStep('${escKey(p)}',1)">＋</button>
+            </div>
+          </div>`).join('')}
+        <div class="check-banner ${chipSum===0?'ok':'bad'}">
+          ${chipSum===0 ? '✓ 合計 ±0枚' : `⚠ 合計 ${chipSum>0?'+':''}${chipSum}枚（ゼロサムになっていません）`}
+        </div>
+      </div>` : ''}
+    </div>`;
+}
+
+function renderHanchanForm(){
+  if (isRoomViewerOnly()) {
+    const hostName = (logState.room.participants.find(p => p.uid === logState.room.hostUid) || {}).name;
+    return `<section><div class="sec-title">半荘の結果を入力<span class="hint">閲覧のみ</span></div>
+      <div class="log-empty">${hostName ? escapeHtml(hostName) + 'さん' : '代表入力者'}が記録中です。この端末では入力できません。</div>
+    </section>`;
+  }
+  const s = logState.settings;
+  const players = activePlayers();
+  const total = formTotal();
+  const expected = s.startPoints * s.playerCount;
+  const allFilled = players.every(p => logState.ui.formScores[p] !== '' && !isNaN(formScoreActual(p)));
+  const bustedPlayers = players.filter(p => (formScoreActual(p)||0) < 0);
+  const needsBuster = s.tobiEnabled && s.tobiRecipient === 'buster';
+  const busterOk = !needsBuster || bustedPlayers.every(p => logState.ui.formBuster[p]);
+  const valid = allFilled && total === expected && busterOk;
+  const editing = logState.ui.editingHanchanId !== null;
+  // 「第◯半荘」は作成時の連番(id)ではなく、削除後も欠番が出ないよう
+  // 現在残っている対局ログの中での順番（古い方から1,2,3...）で数え直す。
+  const editingIdx = editing ? logState.hanchans.findIndex(x => x.id === logState.ui.editingHanchanId) : -1;
+  const editingDispNum = editingIdx >= 0 ? logState.hanchans.length - editingIdx : '';
+
+  return `
+    <section id="hanchanFormAnchor">
+      <div class="sec-title">${editing?`第${editingDispNum}半荘を編集中`:'半荘の結果を入力'}<span class="hint">${editing?'':`第${logState.hanchans.length+1}半荘`}</span></div>
+      <div class="score-scale-hint">下2桁(00)は省略できます　例: 25,000点 → <b>250</b></div>
+      <div class="score-input-grid">
+        ${players.map(p=>{
+          const val = formScoreActual(p);
+          const busted = !isNaN(val) && val < 0;
+          return `
+          <div class="score-input-row">
+            <span class="pname">${escapeHtml(p)}</span>
+            <input class="num-input" type="number" step="1" inputmode="numeric" placeholder="例:250"
+              value="${logState.ui.formScores[p]}" onchange="setFormScore('${escKey(p)}', this.value)">
+            ${busted && needsBuster ? `
+              <select class="text-input buster-select" onchange="setFormBuster('${escKey(p)}', this.value)">
+                <option value="">誰が飛ばした？</option>
+                ${players.filter(x=>x!==p).map(x=>`<option value="${escapeHtml(x)}" ${logState.ui.formBuster[p]===x?'selected':''}>${escapeHtml(x)}</option>`).join('')}
+              </select>` : ''}
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="check-banner ${(allFilled && total===expected)?'ok':'bad'}" style="margin-top:9px;">
+        ${!allFilled ? '素点を入力してください' : total===expected ? `✓ 合計 ${total.toLocaleString()}点` : `⚠ 合計 ${total.toLocaleString()}点（${total-expected>0?'+':''}${(total-expected).toLocaleString()}点のズレ）`}
+      </div>
+      <button class="record-btn" style="margin-top:9px;width:100%;" ${valid?'':'disabled'} onclick="recordHanchan()">${editing?'この内容で更新する':'この半荘を記録'}</button>
+      ${editing ? `<button class="mentsu-add" style="margin-top:7px;" onclick="cancelEditHanchan()">編集をキャンセル</button>` : ''}
+    </section>`;
+}
+
+// hanchansList/sは対局履歴の詳細画面からも(settingsSnapshotを渡して)再利用できるよう
+// パラメータ化してある。opts.readOnly=trueで編集・削除ボタンを非表示にする
+// (過去の確定済み対局は書き換えさせない)。
+function renderHanchanLog(hanchansList, s, opts){
+  opts = opts || {};
+  const readOnly = !!opts.readOnly;
+  if (hanchansList.length === 0) {
+    return `<section><div class="sec-title">対局ログ</div><div class="log-empty">まだ記録がありません</div></section>`;
+  }
+  // 「第◯半荘」は作成時の連番(id)ではなく、削除しても欠番が出ないよう
+  // 現在残っている対局ログの中での順番（一番古いものを1として数え直す）で表示する。
+  const cards = hanchansList.map((h, idx)=>{
+    const dispNum = hanchansList.length - idx;
+    const { pt, ranked } = calcHanchanResult(h, s);
+    const rows = [...ranked].sort((a,b)=>a.loRank-b.loRank).map(r=>`
+      <div class="hc-row ${r.loRank===1?'rank1':''}">
+        <span class="hc-rank">${r.loRank===r.hiRank ? r.loRank : `${r.loRank}-${r.hiRank}`}</span>
+        <span class="hc-name">${escapeHtml(r.name)}</span>
+        <span class="hc-score">${r.score.toLocaleString()}</span>
+        <span class="hc-pt ${pt[r.name]>=0?'plus':'minus'}">${formatPt(pt[r.name])}</span>
+      </div>`).join('');
+    return `
+      <div class="hanchan-card">
+        <div class="hc-head">
+          <span class="hc-title">第${dispNum}半荘</span>
+          ${readOnly ? '' : `<span class="hc-actions">
+            <button onclick="editHanchan(${h.id})">✎</button>
+            <button onclick="deleteHanchan(${h.id})">×</button>
+          </span>`}
+        </div>
+        <div class="hc-rows">${rows}</div>
+      </div>`;
+  }).join('');
+  return `<section><div class="sec-title">対局ログ<span class="hint">${hanchansList.length}半荘</span></div><div style="display:flex;flex-direction:column;gap:8px;">${cards}</div></section>`;
+}
+
+function totalCardsHtml(order, totals, topMoney){
+  return `
+    <div class="total-cards">
+      ${order.map(p=>{
+        const isTop = totals.money[p]===topMoney && topMoney > 0;
+        return `
+        <div class="total-card ${isTop?'top':''}">
+          <div class="pname">${isTop?'<span class="crown">👑</span>':''}${escapeHtml(p)}</div>
+          <div class="pmoney">${formatMoney(totals.money[p])}</div>
+          <div class="ppt">${formatPt(totals.pt[p])}pt</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+// 演出モード用: 現在の合計収支(円)で順位グループ(同着はまとめる)を作り、
+// 「2位→3位→…→1位」の順に並べ替える。同着で複数の順位にまたがる場合は
+// そのグループのいちばん良い方の順位（loRank）を発表順の基準にする。
+function revealGroupsFor(players, totals, playerCount){
+  const entries = players.map(p => ({ name: p, score: Math.round((totals.money[p]||0) * 100) / 100 }));
+  const ranked = rankPlayers(entries);
+  const order = revealOrderFor(playerCount);
+  const seen = new Set();
+  const groups = [];
+  ranked.forEach(r => {
+    const key = `${r.loRank}-${r.hiRank}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    groups.push({ loRank: r.loRank, hiRank: r.hiRank, members: ranked.filter(x => x.loRank===r.loRank && x.hiRank===r.hiRank) });
+  });
+  groups.sort((a,b) => order.indexOf(a.loRank) - order.indexOf(b.loRank));
+  return groups;
+}
+function revealGroupCardHtml(group, totals){
+  const rankLabel = group.loRank===group.hiRank ? `${group.loRank}位` : `${group.loRank}〜${group.hiRank}位`;
+  const isTop = group.loRank === 1;
+  return `
+    <div class="reveal-card ${isTop?'top':''}">
+      <div class="reveal-rank">${isTop?'👑 ':''}${rankLabel}</div>
+      ${group.members.map(m => `
+        <div class="reveal-member">
+          <span class="reveal-name">${escapeHtml(m.name)}</span>
+          <span class="reveal-money">${formatMoney(totals.money[m.name])}</span>
+          <span class="reveal-pt">${formatPt(totals.pt[m.name])}pt</span>
+        </div>`).join('')}
+    </div>`;
+}
+
+// 「対局を終了する」系のボタン・確認UI。isPresentationDone=trueの時だけ
+// 「対局を終了して履歴に保存」の文言・演出後の見た目にする(演出モードでは
+// 発表が終わるまでこのボタン自体を出さない＝呼び出し側で制御)。
+function renderEndMatchControls(isPresentationDone){
+  if (isRoomViewerOnly()) return ''; // 対局の終了(確定保存)は代表入力者だけの操作
+  if (logState.hanchans.length === 0) return '';
+  if (logState.ui.confirmEndMatch) {
+    return `
+      <div class="end-match-confirm">
+        <span>この対局を終了して履歴に保存しますか？</span>
+        <div class="end-match-confirm-btns">
+          <button class="preset-btn" onclick="cancelEndMatch()">キャンセル</button>
+          <button class="preset-btn danger" onclick="confirmEndMatch()">終了して保存</button>
+        </div>
+      </div>`;
+  }
+  const label = isPresentationDone ? '🏁 対局を終了して履歴に保存' : '対局を終了する';
+  return `<button class="end-match-btn" onclick="requestEndMatch()">${label}</button>`;
+}
+
+function renderRoomStatusHtml(){
+  if (!logState.room) return '';
+  if (isRoomViewerOnly()) {
+    const hostP = logState.room.participants.find(p => p.uid === logState.room.hostUid);
+    return `<div class="room-status-row">👀 ${hostP ? escapeHtml(hostP.name) + 'さん' : '代表入力者'}の卓に参加中(閲覧のみ・リアルタイム更新)</div>`;
+  }
+  const linkedCount = (logState.room.participants || []).filter(p => p.uid).length;
+  return `<div class="room-status-row">🔴 卓を公開中・同卓${linkedCount}人にリアルタイム配信中</div>`;
+}
+
+function renderStickyHeader(s, totals){
+  const players = activePlayers();
+  const presentation = logState.settings.presentationMode;
+  const viewerOnly = isRoomViewerOnly();
+  const modeSwitchHtml = `
+    <div class="mode-switch-row">
+      <button class="share-icon-btn" onclick="shareCurrentResult()" title="現在の収支をシェア">📤</button>
+      <span class="mode-label">演出モード</span>
+      <span class="switch ${presentation?'on':''} ${viewerOnly?'disabled':''}" onclick="${viewerOnly?'':'togglePresentationMode()'}"></span>
+    </div>`;
+  const roomStatusHtml = renderRoomStatusHtml();
+
+  if (!presentation) {
+    const order = [...players].sort((a,b)=> totals.money[b]-totals.money[a]);
+    const topMoney = order.length ? totals.money[order[0]] : 0;
+    return `<div class="sticky-header">${roomStatusHtml}${modeSwitchHtml}${totalCardsHtml(order, totals, topMoney)}${renderEndMatchControls(false)}</div>`;
+  }
+
+  if (!logState.ui.revealActive) {
+    const noLog = logState.hanchans.length === 0;
+    return `<div class="sticky-header">${roomStatusHtml}${modeSwitchHtml}
+      <button class="reveal-btn" ${(noLog||viewerOnly) ? 'disabled' : ''} onclick="startReveal()">🎤 終局！結果を発表する</button>
+    </div>`;
+  }
+
+  const groups = revealGroupsFor(players, totals, logState.settings.playerCount);
+  const done = logState.ui.revealStep >= groups.length;
+  const shownGroups = done ? [...groups].sort((a,b)=>a.loRank-b.loRank) : groups.slice(0, logState.ui.revealStep);
+
+  // 発表中〜発表後は順位カードが積み重なって縦に長くなり得るため、sticky解除
+  // (header-block)にして、スクロール時に下のフォームなどを覆い隠さないようにする。
+  return `<div class="header-block">${roomStatusHtml}${modeSwitchHtml}
+    <div class="reveal-area">
+      ${shownGroups.map(g => revealGroupCardHtml(g, totals)).join('')}
+    </div>
+    ${done
+      ? `<div class="reveal-done">🎉 発表終了！次の半荘を記録するとまた隠れます</div>${renderEndMatchControls(true)}`
+      : `<button class="reveal-btn" onclick="revealNext(${groups.length})">次の順位を発表 →</button>`}
+  </div>`;
+}
+
+function renderLog(){
+  const s = settingsWithPlayers();
+  const totals = calcTotals(logState.hanchans, logState.chips, s);
+  const headerHtml = renderStickyHeader(s, totals);
+
+  document.getElementById('logTab').innerHTML =
+    headerHtml + renderSettingsAccordion() + renderChipsAccordion() + renderHanchanForm()
+    + renderHanchanLog(logState.hanchans, s, { readOnly: isRoomViewerOnly() });
+}
+
+/* =========================================================================
+   対局履歴モーダル（ハンバーガーメニュー）
+   ========================================================================= */
+
+function memberKey(names){ return [...names].slice().sort().join('・'); }
+
+function formatMatchDate(startedAt, endedAt){
+  const d = new Date(endedAt || startedAt || Date.now());
+  if (isNaN(d.getTime())) return '';
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/* ---- open/close/navigation ---- */
+function openHistoryModal(){
+  logState.ui.historyOpen = true;
+  logState.ui.historyView = 'list';
+  logState.ui.historyDetailId = null;
+  logState.ui.historyFriendFilter = null; // ハンバーガーメニューからは常に全履歴を表示する
+  logState.ui.importResultMsg = null;
+  scheduleRenderApp();
+}
+// フレンド一覧の「この人との戦歴」から呼ばれる。対局履歴モーダルを、
+// このフレンドが同卓していた対局だけに絞り込んだ状態で開く。
+function viewFriendMatchHistory(uid, username){
+  logState.ui.historyFriendFilter = { uid, username };
+  logState.ui.historyOpen = true;
+  logState.ui.historyView = 'list';
+  logState.ui.historyDetailId = null;
+  logState.ui.friendsListOpen = false;
+  scheduleRenderApp();
+}
+function clearFriendHistoryFilter(){
+  logState.ui.historyFriendFilter = null;
+  logState.ui.historyView = 'list';
+  scheduleRenderApp();
+}
+function closeHistoryModal(){
+  logState.ui.historyOpen = false;
+  logState.ui.editingArchiveTitleId = null;
+  logState.ui.confirmDeleteArchiveId = null;
+  scheduleRenderApp();
+}
+function openHistoryDetail(id){
+  logState.ui.historyView = 'detail';
+  logState.ui.historyDetailId = id;
+  scheduleRenderApp();
+}
+function backToHistoryList(){
+  logState.ui.historyView = 'list';
+  logState.ui.historyDetailId = null;
+  logState.ui.editingArchiveTitleId = null;
+  logState.ui.confirmDeleteArchiveId = null;
+  scheduleRenderApp();
+}
+function openHistoryStats(){
+  logState.ui.historyView = 'stats';
+  scheduleRenderApp();
+}
+
+/* ---- フレンド絞り込み: このuidが参加者に含まれる対局だけを返す ---- */
+function filterMatchHistoryByFriend(matchHistory, filter){
+  if (!filter) return matchHistory;
+  return matchHistory.filter(m => Array.isArray(m.participantUids) && m.participantUids.includes(filter.uid));
+}
+
+/* ---- 一覧 ---- */
+function renderHistoryList(){
+  const filter = logState.ui.historyFriendFilter;
+  const list = filterMatchHistoryByFriend(logState.matchHistory, filter);
+  if (list.length === 0) {
+    return filter
+      ? `<div class="history-empty">${escapeHtml(filter.username)}さんと同卓した対局はまだありません<br>同卓者に指定して対局すると、ここに記録が残ります</div>`
+      : `<div class="history-empty">まだ保存された対局はありません<br>「対局を終了する」を押すと、ここに記録が残ります</div>`;
+  }
+  const cards = list.map(m => {
+    const s = m.settingsSnapshot;
+    const players = s.playerNames.slice(0, s.playerCount);
+    const totals = calcTotals(m.hanchans, m.chips, { ...s, players });
+    const order = [...players].sort((a,b)=>totals.money[b]-totals.money[a]);
+    const winner = order[0];
+    return `
+      <div class="history-card" onclick="openHistoryDetail('${escKey(m.id)}')">
+        <div class="history-card-head">
+          <span>${formatMatchDate(m.startedAt, m.endedAt)}</span>
+          <span>${m.hanchans.length}半荘</span>
+        </div>
+        <div class="history-title">${m.title ? escapeHtml(m.title) : escapeHtml(players.join('・'))}</div>
+        ${winner ? `<div class="history-winner">🏆 ${escapeHtml(winner)}<span class="history-winner-money">${formatMoney(totals.money[winner])}</span></div>` : ''}
+      </div>`;
+  }).join('');
+  return `<div class="history-list">${cards}</div>`;
+}
+
+/* ---- 詳細 ---- */
+function renderHistoryDetail(id){
+  const m = logState.matchHistory.find(x => x.id === id);
+  if (!m) return `<div class="history-empty">見つかりませんでした</div>`;
+  const s = m.settingsSnapshot;
+  const players = s.playerNames.slice(0, s.playerCount);
+  const settingsForCalc = { ...s, players };
+  const totals = calcTotals(m.hanchans, m.chips, settingsForCalc);
+  const order = [...players].sort((a,b)=>totals.money[b]-totals.money[a]);
+  const topMoney = order.length ? totals.money[order[0]] : 0;
+  const editingTitle = logState.ui.editingArchiveTitleId === id;
+  const chipSum = players.reduce((sum,p)=> sum + (m.chips[p]||0), 0);
+
+  const titleHtml = editingTitle
+    ? `<input class="text-input" id="archiveTitleInput" value="${escapeHtml(m.title||'')}" placeholder="対局メモ・タイトル（例: 〇〇杯 第3戦）" onchange="saveArchiveTitle('${escKey(id)}', this.value)" onblur="saveArchiveTitle('${escKey(id)}', this.value)">`
+    : `<div class="history-detail-title" onclick="startEditArchiveTitle('${escKey(id)}')">${m.title ? escapeHtml(m.title) : '📝 タイトル・メモを追加'}</div>`;
+
+  const deleteHtml = logState.ui.confirmDeleteArchiveId === id
+    ? `<div class="end-match-confirm">
+        <span>この対局の記録を削除しますか？元に戻せません。</span>
+        <div class="end-match-confirm-btns">
+          <button class="preset-btn" onclick="cancelDeleteArchive()">キャンセル</button>
+          <button class="preset-btn danger" onclick="confirmDeleteArchive('${escKey(id)}')">削除する</button>
+        </div>
+      </div>`
+    : `<button class="mentsu-add danger-text" onclick="requestDeleteArchive('${escKey(id)}')">🗑 この記録を削除</button>`;
+
+  return `
+    <div class="history-detail">
+      <div class="history-detail-title-row">${titleHtml}</div>
+      <div class="history-detail-meta">${formatMatchDate(m.startedAt, m.endedAt)}・${escapeHtml(players.join('・'))}</div>
+      ${totalCardsHtml(order, totals, topMoney)}
+      ${chipSum !== 0 ? `<div class="check-banner bad" style="margin-top:8px;">⚠ チップ合計 ${chipSum>0?'+':''}${chipSum}枚（ゼロサムになっていません）</div>` : ''}
+      ${renderHanchanLog(m.hanchans, settingsForCalc, { readOnly: true })}
+      <div class="history-detail-actions">
+        <button class="mentsu-add" onclick="shareMatchResult('${escKey(id)}')">📤 結果をシェア</button>
+        ${deleteHtml}
+      </div>
+    </div>`;
+}
+
+function startEditArchiveTitle(id){
+  logState.ui.editingArchiveTitleId = id;
+  scheduleRenderApp(() => {
+    const el = document.getElementById('archiveTitleInput');
+    if (el) { el.focus(); el.select(); }
+  });
+}
+function saveArchiveTitle(id, value){
+  if (logState.ui.editingArchiveTitleId !== id) return; // 二重発火(change+blur)による重複保存を防ぐ
+  const m = logState.matchHistory.find(x => x.id === id);
+  if (m) m.title = (value || '').trim();
+  logState.ui.editingArchiveTitleId = null;
+  saveLogState();
+  scheduleRenderApp();
+}
+function requestDeleteArchive(id){
+  logState.ui.confirmDeleteArchiveId = id;
+  scheduleRenderApp();
+}
+function cancelDeleteArchive(){
+  logState.ui.confirmDeleteArchiveId = null;
+  scheduleRenderApp();
+}
+function confirmDeleteArchive(id){
+  logState.matchHistory = logState.matchHistory.filter(x => x.id !== id);
+  logState.ui.confirmDeleteArchiveId = null;
+  if (logState.ui.historyDetailId === id) {
+    logState.ui.historyView = 'list';
+    logState.ui.historyDetailId = null;
+  }
+  saveLogState();
+  scheduleRenderApp();
+}
+
+/* ---- 通算成績 ---- */
+// matchHistory中、playerNameが参加していた全対局の全半荘を対象に集計する。
+// 「試合数」は半荘数（1半荘あたりの平均収支などと単位を揃えるため）。
+function calcCareerStats(matchHistory, playerName){
+  const relevant = matchHistory.filter(m => {
+    const s = m.settingsSnapshot;
+    return s && s.playerNames.slice(0, s.playerCount).includes(playerName);
+  });
+  if (relevant.length === 0) return null;
+
+  let games = 0, rankSum = 0, top1 = 0, top2 = 0, last = 0, tobiCount = 0, moneySum = 0, maxScore = -Infinity;
+  relevant.forEach(m => {
+    const s = m.settingsSnapshot;
+    const players = s.playerNames.slice(0, s.playerCount);
+    const settingsForCalc = { ...s, players };
+    m.hanchans.forEach(h => {
+      if (!(playerName in h.scores)) return;
+      games++;
+      const entries = players.map(p => ({ name: p, score: h.scores[p] }));
+      const ranked = rankPlayers(entries);
+      const me = ranked.find(r => r.name === playerName);
+      rankSum += (me.loRank + me.hiRank) / 2; // 同着は帯の平均順位として数える
+      if (me.loRank === 1) top1++;
+      if (me.hiRank <= 2) top2++;
+      if (me.hiRank === s.playerCount) last++;
+      if (h.scores[playerName] < 0) tobiCount++;
+      if (h.scores[playerName] > maxScore) maxScore = h.scores[playerName];
+      const { pt } = calcHanchanResult(h, settingsForCalc);
+      moneySum += pt[playerName] * s.rate;
+    });
+    moneySum += ((m.chips && m.chips[playerName]) || 0) * s.chipUnitYen;
+  });
+  if (games === 0) return null;
+
+  return {
+    games,
+    avgRank: rankSum / games,
+    topRate: top1 / games,
+    top2Rate: top2 / games,     // 連対率（4人打ち用）
+    lastRate: last / games,
+    lastAvoidRate: 1 - (last / games), // ラス回避率（3人打ち用）
+    maxScore: maxScore === -Infinity ? 0 : maxScore,
+    avgMoneyPerHanchan: moneySum / games,
+    totalMoney: moneySum,
+    tobiCount,
+  };
+}
+
+function renderHistoryStats(){
+  const filter = logState.ui.historyFriendFilter;
+  const source = filterMatchHistoryByFriend(logState.matchHistory, filter);
+  if (source.length === 0) {
+    return filter
+      ? `<div class="history-empty">${escapeHtml(filter.username)}さんと同卓した対局はまだありません</div>`
+      : `<div class="history-empty">まだ成績データがありません<br>対局を終了すると、ここに通算成績が表示されます</div>`;
+  }
+  // メンバー構成（参加者の名前の組み合わせ）ごとにグループ分けする。
+  const groups = {};
+  source.forEach(m => {
+    const s = m.settingsSnapshot;
+    const players = s.playerNames.slice(0, s.playerCount);
+    const key = memberKey(players);
+    if (!groups[key]) groups[key] = { players, playerCount: s.playerCount, matches: [] };
+    groups[key].matches.push(m);
+  });
+  const groupList = Object.values(groups).sort((a,b) => b.matches.length - a.matches.length);
+
+  return groupList.map(g => {
+    const totalHanchans = g.matches.reduce((sum,m)=>sum+m.hanchans.length, 0);
+    const cards = g.players.map(p => {
+      const st = calcCareerStats(g.matches, p);
+      if (!st) return '';
+      const primaryLine = g.playerCount === 4
+        ? `<div class="stat-row">連対率 <b>${(st.top2Rate*100).toFixed(0)}%</b></div>`
+        : `<div class="stat-row">トップ率 <b>${(st.topRate*100).toFixed(0)}%</b> ／ ラス回避率 <b>${(st.lastAvoidRate*100).toFixed(0)}%</b></div>`;
+      const secondaryLine = g.playerCount === 4
+        ? `<div class="stat-row">トップ率 <b>${(st.topRate*100).toFixed(0)}%</b> ／ ラス率 <b>${(st.lastRate*100).toFixed(0)}%</b></div>`
+        : `<div class="stat-row">ラス率 <b>${(st.lastRate*100).toFixed(0)}%</b></div>`;
+      const moneyColor = v => v >= 0 ? '#9fe0bd' : 'var(--red-soft)';
+      return `
+        <div class="stat-card">
+          <div class="stat-name">${escapeHtml(p)}</div>
+          <div class="stat-row">平均順位 <b>${st.avgRank.toFixed(2)}</b></div>
+          <div class="stat-row">試合数 <b>${st.games}半荘</b></div>
+          ${primaryLine}
+          ${secondaryLine}
+          <div class="stat-row">MAX得点 <b>${st.maxScore.toLocaleString()}</b></div>
+          <div class="stat-row">飛んだ回数 <b>${st.tobiCount}回</b></div>
+          <div class="stat-row">平均収支(半荘あたり) <b style="color:${moneyColor(st.avgMoneyPerHanchan)}">${formatMoney(st.avgMoneyPerHanchan)}</b></div>
+          <div class="stat-row">通算収支 <b style="color:${moneyColor(st.totalMoney)}">${formatMoney(st.totalMoney)}</b></div>
+        </div>`;
+    }).join('');
+    return `
+      <div class="stat-group">
+        <div class="stat-group-head"><span>${escapeHtml(g.players.join('・'))}</span><span class="hint">${g.matches.length}対局・${totalHanchans}半荘</span></div>
+        <div class="stat-cards">${cards}</div>
+      </div>`;
+  }).join('');
+}
+
+/* ---- エクスポート / インポート / シェア ---- */
+async function exportMatchHistory(includeInProgress){
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    appVersion: 'mahjong-score-log-v2',
+    matchHistory: logState.matchHistory,
+  };
+  if (includeInProgress && logState.hanchans.length > 0) {
+    payload.inProgress = {
+      settings: logState.settings,
+      hanchans: logState.hanchans,
+      chips: logState.chips,
+      startedAt: logState.currentMatchStartedAt,
+    };
+  }
+  const json = JSON.stringify(payload, null, 2);
+  const filename = `mahjong-log-${new Date().toISOString().slice(0,10)}.json`;
+  const blob = new Blob([json], { type: 'application/json' });
+
+  if (navigator.share && navigator.canShare) {
+    try {
+      const file = new File([blob], filename, { type: 'application/json' });
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: '麻雀対局履歴' });
+        return;
+      }
+    } catch (e) { /* キャンセル・失敗時は下のダウンロードにフォールバック */ }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+function triggerImport(){
+  const el = document.getElementById('importFileInput');
+  if (el) el.click();
+}
+function handleImportFile(files){
+  const file = files && files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      const incoming = Array.isArray(data.matchHistory) ? data.matchHistory
+        : Array.isArray(data) ? data : [];
+      const existingIds = new Set(logState.matchHistory.map(m => m.id));
+      let added = 0, skipped = 0;
+      incoming.forEach(m => {
+        if (!m || !m.id || !m.settingsSnapshot || !Array.isArray(m.hanchans)) { skipped++; return; }
+        if (existingIds.has(m.id)) { skipped++; return; }
+        existingIds.add(m.id);
+        logState.matchHistory.push(m);
+        added++;
+      });
+      logState.matchHistory.sort((a,b) => new Date(b.endedAt||b.startedAt||0) - new Date(a.endedAt||a.startedAt||0));
+      saveLogState();
+      logState.ui.importResultMsg = `${added}件を読み込みました${skipped>0?`（${skipped}件は重複・不正な形式のためスキップ）`:''}`;
+    } catch (e) {
+      logState.ui.importResultMsg = '読み込みに失敗しました。ファイル形式を確認してください。';
+    }
+    scheduleRenderApp();
+  };
+  reader.readAsText(file);
+  const el = document.getElementById('importFileInput');
+  if (el) el.value = '';
+}
+
+function buildShareText(players, totals, headerLine){
+  const order = [...players].sort((a,b)=>totals.money[b]-totals.money[a]);
+  const lines = order.map((p,i) => `${i+1}位 ${p}　${formatMoney(totals.money[p])}`);
+  return `${headerLine ? headerLine + '\n\n' : ''}${lines.join('\n')}`;
+}
+async function shareText(text, title){
+  if (navigator.share) {
+    try {
+      await navigator.share({ text, title: title || '麻雀対局結果' });
+      return;
+    } catch (e) { /* キャンセル・未対応時は下のフォールバックへ */ }
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    logState.ui.shareFallbackMsg = 'クリップボードにコピーしました';
+  } catch (e) {
+    logState.ui.shareFallbackMsg = text; // コピーもできない環境ではテキストをそのまま表示する
+  }
+  scheduleRenderApp();
+  setTimeout(() => { logState.ui.shareFallbackMsg = null; scheduleRenderApp(); }, 4000);
+}
+function shareCurrentResult(){
+  const s = settingsWithPlayers();
+  const totals = calcTotals(logState.hanchans, logState.chips, s);
+  const order = [...s.players].sort((a,b)=>totals.money[b]-totals.money[a]);
+  const header = order.length ? `🀄 現在${order[0]}さんがトップ！収支${formatMoney(totals.money[order[0]])}` : '';
+  shareText(buildShareText(s.players, totals, header));
+}
+function shareMatchResult(id){
+  const m = logState.matchHistory.find(x => x.id === id);
+  if (!m) return;
+  const s = m.settingsSnapshot;
+  const players = s.playerNames.slice(0, s.playerCount);
+  const totals = calcTotals(m.hanchans, m.chips, { ...s, players });
+  const order = [...players].sort((a,b)=>totals.money[b]-totals.money[a]);
+  const header = order.length ? `🀄 ${order[0]}さん第1位！収支${formatMoney(totals.money[order[0]])}` : '';
+  shareText(buildShareText(players, totals, header));
+}
+
+/* ---- モーダル全体の描画 ---- */
+function renderHistoryModal(){
+  const root = document.getElementById('historyModalRoot');
+  if (!logState.ui.historyOpen) { root.innerHTML = ''; return; }
+  const view = logState.ui.historyView;
+
+  const friendFilter = logState.ui.historyFriendFilter;
+  const friendFilterBanner = friendFilter ? `
+    <div class="history-toolbar" style="align-items:center;">
+      <span class="hint" style="flex:1;">👥 ${escapeHtml(friendFilter.username)}さんと同卓した対局のみ表示中</span>
+      <button class="preset-btn" style="flex:0 0 auto;" onclick="clearFriendHistoryFilter()">全履歴に戻る</button>
+    </div>` : '';
+
+  let title = '対局履歴';
+  let bodyHtml = '';
+  if (view === 'detail') {
+    title = '対局の詳細';
+    bodyHtml = renderHistoryDetail(logState.ui.historyDetailId);
+  } else if (view === 'stats') {
+    title = friendFilter ? `${escapeHtml(friendFilter.username)}さんとの成績` : '成績';
+    bodyHtml = friendFilterBanner + renderHistoryStats();
+  } else {
+    title = friendFilter ? `${escapeHtml(friendFilter.username)}さんとの対局` : '対局履歴';
+    bodyHtml = friendFilter ? `
+      ${friendFilterBanner}
+      ${renderHistoryList()}
+    ` : `
+      ${logState.ui.importResultMsg ? `<div class="check-banner ok" style="margin-bottom:10px;">${escapeHtml(logState.ui.importResultMsg)}</div>` : ''}
+      ${Native.isNativeApp() ? `
+        <div class="premium-status-row">
+          ${isPremiumUnlocked()
+            ? `<span class="premium-badge">✓ 広告削除・記録し放題 が有効です</span>`
+            : `<button class="mentsu-add" onclick="restorePurchasesFromMenu()">購入を復元</button>`}
+        </div>
+        ${logState.ui.billingMsg ? `<div class="check-banner ok" style="margin-bottom:10px;">${escapeHtml(logState.ui.billingMsg)}</div>` : ''}
+      ` : ''}
+      <div class="history-toolbar">
+        <button class="mentsu-add" onclick="exportMatchHistory(false)">⬇ エクスポート</button>
+        <button class="mentsu-add" onclick="triggerImport()">⬆ インポート</button>
+      </div>
+      ${renderHistoryList()}
+      ${logState.matchHistory.length > 0 ? `<div class="history-reminder">💡 機種変更・端末の買い替え前にはエクスポートしておくと安心です</div>` : ''}
+    `;
+  }
+
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          ${view === 'detail'
+            ? `<button class="history-back" onclick="backToHistoryList()">← 戻る</button>`
+            : `<span class="history-modal-title">${title}</span>`}
+          <button class="history-close" onclick="closeHistoryModal()">×</button>
+        </div>
+        ${(view === 'list' || view === 'stats') ? `
+        <div class="history-tabs">
+          <button class="preset-btn ${view==='list'?'active':''}" onclick="backToHistoryList()">対局一覧</button>
+          <button class="preset-btn ${view==='stats'?'active':''}" onclick="openHistoryStats()">成績</button>
+        </div>` : ''}
+        <div class="history-modal-body">${bodyHtml}</div>
+        ${logState.ui.shareFallbackMsg ? `<div class="share-fallback-toast">${escapeHtml(logState.ui.shareFallbackMsg)}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+/* ---- ペイウォール(無料枠超過時のモーダル) ---- */
+function renderPaywallModal(){
+  const root = document.getElementById('paywallModalRoot');
+  if (!root) return;
+  if (!logState.ui.paywallOpen) { root.innerHTML = ''; return; }
+  const price = Native.getPriceLabel();
+  const purchasing = logState.ui.paywallPurchasing;
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal paywall-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">ここまで${FREE_MATCH_LIMIT}対局、お疲れ様でした！🎉</span>
+          <button class="history-close" onclick="closePaywall()" ${purchasing?'disabled':''}>×</button>
+        </div>
+        <div class="history-modal-body">
+          <p class="paywall-copy">無料版では、対局の記録を${FREE_MATCH_LIMIT}件まで保存できます。続きを記録するには、広告削除＋記録し放題プランをご利用ください。</p>
+          <ul class="paywall-benefits">
+            <li>✓ 広告が表示されなくなります</li>
+            <li>✓ 対局の記録を無制限に保存できます</li>
+            <li>✓ 一度のお支払いで、追加料金はありません</li>
+          </ul>
+          ${logState.ui.paywallErrorMsg ? `<div class="check-banner bad" style="margin-bottom:10px;">${escapeHtml(logState.ui.paywallErrorMsg)}</div>` : ''}
+          <button class="record-btn" style="width:100%;" ${purchasing?'disabled':''} onclick="purchaseFromPaywall()">
+            ${purchasing ? '処理中…' : `${escapeHtml(price)} で広告削除＋記録し放題にする`}
+          </button>
+          <button class="mentsu-add" style="margin-top:9px;" ${purchasing?'disabled':''} onclick="closePaywall()">閉じる（今回は保存しない）</button>
+          <div class="paywall-note">※閉じても今回の対局データは消えません。半荘の記録はそのまま残るので、後からいつでも購入して保存できます。</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ---- マルチプレイヤー: アカウントモーダル(ユーザーネーム設定・ログイン連携) ---- */
+function renderAccountModal(){
+  const root = document.getElementById('accountModalRoot');
+  if (!root) return;
+  if (!logState.ui.accountModalOpen) { root.innerHTML = ''; return; }
+  const a = logState.account;
+  const checking = logState.ui.usernameChecking;
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">アカウント</span>
+          <button class="history-close" onclick="closeAccountModal()">×</button>
+        </div>
+        <div class="history-modal-body">
+          <div class="settings-row">
+            <div class="lbl">ユーザーネーム<span class="hint">検索・招待用。後から変更できます</span></div>
+            <input class="text-input" value="${escapeHtml(logState.ui.usernameInput)}" placeholder="例: taro_mahjong"
+              oninput="setUsernameInput(this.value)">
+            ${logState.ui.usernameError ? `<div class="check-banner bad" style="margin-top:6px;">${escapeHtml(logState.ui.usernameError)}</div>` : ''}
+            <button class="record-btn" style="margin-top:8px;width:100%;" ${checking?'disabled':''} onclick="submitUsername()">
+              ${checking ? '確認しています…' : (a.username ? 'ユーザーネームを変更' : 'ユーザーネームを設定')}
+            </button>
+          </div>
+          <div class="settings-row" style="margin-top:14px;">
+            <div class="lbl">ログイン連携<span class="hint">機種変更時の引き継ぎに必要</span></div>
+            ${a.linkedProviders.google || a.linkedProviders.apple ? `
+              <div class="check-banner ok">✓ 連携済み(${[a.linkedProviders.google?'Google':null,a.linkedProviders.apple?'Apple':null].filter(Boolean).join('・')})</div>
+            ` : `
+              <div class="preview-line">未連携です。連携しなくても卓を立てる・記録するなど基本機能は使えますが、機種変更時にフレンド・成績を引き継ぐには連携が必要です。</div>
+              <div class="preset-row" style="margin-top:8px;">
+                <button class="preset-btn" onclick="loginFromAccountModal('google')">Googleでログイン</button>
+                <button class="preset-btn" onclick="loginFromAccountModal('apple')">🍎 Sign in with Apple</button>
+              </div>
+            `}
+          </div>
+          <div class="settings-row" style="margin-top:14px;">
+            <div class="lbl">通知</div>
+            <label style="font-weight:400;font-size:.72rem;display:flex;align-items:center;gap:5px;color:var(--ivory-dim);">
+              <input type="checkbox" ${a.notifyOnAutoRecord?'checked':''} onchange="toggleNotifyOnAutoRecord(this.checked)">
+              自分以外の操作で対局記録が追加された時に通知する
+            </label>
+          </div>
+          <button class="mentsu-add" style="margin-top:14px;" onclick="closeAccountModal(); openFriendsList();">👥 フレンド一覧を見る(${logState.friends.length}人)</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ---- マルチプレイヤー: 同卓者指定(ユーザーネーム検索/フレンド選択/ゲスト) ---- */
+function renderFriendPickerModal(){
+  const root = document.getElementById('friendPickerModalRoot');
+  if (!root) return;
+  if (!logState.ui.friendPickerOpen) { root.innerHTML = ''; return; }
+  const slot = logState.ui.friendPickerSlot;
+  const currentLink = logState.settings.participantLinks[slot];
+  const result = logState.ui.friendSearchResult;
+  const checking = logState.ui.friendSearchChecking;
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">${escapeHtml(slot)}さんを指定</span>
+          <button class="history-close" onclick="closeFriendPicker()">×</button>
+        </div>
+        <div class="history-modal-body">
+          ${currentLink ? `
+            <div class="check-banner ok" style="margin-bottom:10px;">🔗 現在: ${escapeHtml(currentLink.username)}</div>
+            <button class="mentsu-add danger-text" onclick="unlinkParticipant()">紐付けを解除してゲストに戻す</button>
+            <div style="height:12px;"></div>
+          ` : ''}
+          <div class="settings-row">
+            <div class="lbl">ユーザーネームで検索</div>
+            <div class="inline-fields">
+              <input class="text-input" value="${escapeHtml(logState.ui.friendSearchInput)}" placeholder="ユーザーネーム" oninput="setFriendSearchInput(this.value)">
+              <button class="preset-btn" style="flex:0 0 auto;" ${checking?'disabled':''} onclick="searchFriendByUsername()">検索</button>
+            </div>
+            ${logState.ui.friendSearchError ? `<div class="check-banner bad" style="margin-top:6px;">${escapeHtml(logState.ui.friendSearchError)}</div>` : ''}
+            ${result ? `
+              <div class="history-card" style="margin-top:8px;" onclick="linkParticipant('${escKey(result.uid)}','${escKey(result.username)}')">
+                <div class="history-title">${escapeHtml(result.username)}</div>
+                <div class="history-winner">この人を${escapeHtml(slot)}さんとして指定 →</div>
+              </div>` : ''}
+          </div>
+          ${logState.friends.length > 0 ? `
+            <div class="settings-row" style="margin-top:14px;">
+              <div class="lbl">フレンドから選ぶ</div>
+              <div class="history-list">
+                ${logState.friends.map(f => `
+                  <div class="history-card" onclick="linkParticipant('${escKey(f.uid)}','${escKey(f.username)}')">
+                    <div class="history-title">${escapeHtml(f.username)}</div>
+                  </div>`).join('')}
+              </div>
+            </div>` : ''}
+          <div class="history-reminder">💡 ゲスト(アプリを使っていない人)はそのまま名前を入力するだけで、自動配信の対象にはなりません</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ---- マルチプレイヤー: ログイン誘導モーダル ---- */
+function renderLoginPromptModal(){
+  const root = document.getElementById('loginPromptModalRoot');
+  if (!root) return;
+  if (!logState.ui.loginPromptOpen) { root.innerHTML = ''; return; }
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">ログインのご案内</span>
+          <button class="history-close" onclick="closeLoginPrompt()">×</button>
+        </div>
+        <div class="history-modal-body">
+          <p class="paywall-copy">フレンドを追加するには、Google連携またはSign in with Appleでログインすることをおすすめします(匿名のままでも続けられます)。機種変更時にフレンド・成績を引き継ぐために使います。</p>
+          <button class="record-btn" style="width:100%;" onclick="loginPromptContinue('google')">Googleでログイン</button>
+          <button class="record-btn" style="width:100%;margin-top:8px;" onclick="loginPromptContinue('apple')">🍎 Sign in with Apple</button>
+          <button class="mentsu-add" style="margin-top:9px;" onclick="loginPromptContinue(null)">スキップして続ける</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ---- マルチプレイヤー: フレンド一覧・解除モーダル ---- */
+function renderFriendsListModal(){
+  const root = document.getElementById('friendsListModalRoot');
+  if (!root) return;
+  if (!logState.ui.friendsListOpen) { root.innerHTML = ''; return; }
+  const listHtml = logState.friends.length === 0
+    ? `<div class="history-empty">まだフレンドがいません<br>下の「フレンドを追加」か、同卓者に指定すると追加されます</div>`
+    : logState.friends.map(f => `
+        <div class="history-card">
+          <div class="history-card-head">
+            <span class="history-title" style="margin-top:0;">${escapeHtml(f.username)}</span>
+          </div>
+          <div class="end-match-confirm-btns" style="margin-top:8px;">
+            <button class="preset-btn" onclick="viewFriendMatchHistory('${escKey(f.uid)}','${escKey(f.username)}')">👥 この人との戦歴</button>
+          </div>
+          ${logState.ui.confirmRemoveFriendUid === f.uid ? `
+            <div class="end-match-confirm">
+              <span>フレンドを解除しますか？過去の対局記録は消えません。</span>
+              <div class="end-match-confirm-btns">
+                <button class="preset-btn" onclick="cancelRemoveFriend()">キャンセル</button>
+                <button class="preset-btn danger" onclick="confirmRemoveFriend('${escKey(f.uid)}')">解除する</button>
+              </div>
+            </div>
+          ` : `<button class="mentsu-add danger-text" style="margin-top:8px;" onclick="requestRemoveFriend('${escKey(f.uid)}')">フレンドを解除</button>`}
+        </div>`).join('');
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">フレンド一覧</span>
+          <button class="history-close" onclick="closeFriendsList()">×</button>
+        </div>
+        <div class="history-modal-body">
+          <button class="mentsu-add" style="margin-bottom:12px;" onclick="openAddFriend()">＋ フレンドを追加</button>
+          <div class="history-list">${listHtml}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ---- マルチプレイヤー: 単独のフレンド追加モーダル ---- */
+function renderAddFriendModal(){
+  const root = document.getElementById('addFriendModalRoot');
+  if (!root) return;
+  if (!logState.ui.addFriendOpen) { root.innerHTML = ''; return; }
+  const result = logState.ui.addFriendSearchResult;
+  const checking = logState.ui.addFriendSearchChecking;
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">フレンドを追加</span>
+          <button class="history-close" onclick="closeAddFriend()">×</button>
+        </div>
+        <div class="history-modal-body">
+          <div class="settings-row">
+            <div class="lbl">ユーザーネームで検索</div>
+            <div class="inline-fields">
+              <input class="text-input" value="${escapeHtml(logState.ui.addFriendSearchInput)}" placeholder="ユーザーネーム" oninput="setAddFriendSearchInput(this.value)">
+              <button class="preset-btn" style="flex:0 0 auto;" ${checking?'disabled':''} onclick="searchAddFriend()">検索</button>
+            </div>
+            ${logState.ui.addFriendSearchError ? `<div class="check-banner bad" style="margin-top:6px;">${escapeHtml(logState.ui.addFriendSearchError)}</div>` : ''}
+            ${result ? `
+              <div class="history-card" style="margin-top:8px;" onclick="confirmAddFriend('${escKey(result.uid)}','${escKey(result.username)}')">
+                <div class="history-title">${escapeHtml(result.username)}</div>
+                <div class="history-winner">この人をフレンドに追加 →</div>
+              </div>` : ''}
+          </div>
+          <div class="history-reminder">💡 先にフレンドに追加しておくと、次に同卓者を指定する時に一覧からすぐ選べます</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ---- top-level bootstrap ---- */
+// テキスト入力のonchange（blur）と、別のボタンへのタップは同じ一連の操作の中で
+// 同期的に発火する。renderApp()をその場で同期実行すると、タップ先のボタンごと
+// DOMを作り直してしまい、直後に来るはずのクリックイベントが宛先を失って
+// 消えてしまう（＝名前変更などの直後だけ他の項目が反応しなくなる不具合の原因）。
+// 1フレーム分だけ描画を遅らせることで、先に来ているクリックを本来のボタンで
+// 処理させてから、最新のstateで安全に描画し直す。
+let _renderAppQueued = false;
+let _renderAppCallbacks = [];
+function scheduleRenderApp(afterRender){
+  if (afterRender) _renderAppCallbacks.push(afterRender);
+  if (_renderAppQueued) return;
+  _renderAppQueued = true;
+  requestAnimationFrame(() => {
+    _renderAppQueued = false;
+    renderApp();
+    const cbs = _renderAppCallbacks.splice(0);
+    cbs.forEach(cb => cb());
+  });
+}
+function renderApp(){
+  const onLog = logState._activeTab === 'log';
+  document.getElementById('appTitle').innerHTML = onLog
+    ? '<span class="tile">📋</span>得点記録票'
+    : '<span class="tile">🀄</span>麻雀点数電卓';
+  document.getElementById('calcTab').style.display = onLog ? 'none' : '';
+  document.getElementById('logTab').style.display = onLog ? '' : 'none';
+  // 対局履歴(☰)・アカウント(👤)は得点記録票タブでのみ意味を持つので、それ以外では隠す。
+  // アカウントボタンはマルチプレイヤー機能と同じく、ストアアプリの中でのみ表示する。
+  document.getElementById('historyMenuBtn').style.display = onLog ? '' : 'none';
+  document.getElementById('accountMenuBtn').style.display = (onLog && CloudSync.isAvailable()) ? '' : 'none';
+  if (!onLog) {
+    // 計算タブに切り替えたらモーダルも閉じる
+    logState.ui.historyOpen = false; logState.ui.paywallOpen = false;
+    logState.ui.accountModalOpen = false; logState.ui.friendPickerOpen = false;
+    logState.ui.loginPromptOpen = false; logState.ui.friendsListOpen = false;
+    logState.ui.addFriendOpen = false; logState.ui.historyFriendFilter = null;
+  }
+  document.getElementById('bottomNav').innerHTML = `
+    <button class="${onLog?'':'active'}" onclick="setActiveTab('calc')"><span class="ic">🀄</span>点数計算</button>
+    <button class="${onLog?'active':''}" onclick="setActiveTab('log')"><span class="ic">📋</span>得点記録</button>
+  `;
+  if (onLog) renderLog(); else render();
+  renderHistoryModal();
+  renderPaywallModal();
+  renderAccountModal();
+  renderFriendPickerModal();
+  renderLoginPromptModal();
+  renderFriendsListModal();
+  renderAddFriendModal();
+  renderNotifyBanner();
+  updateBannerState(onLog);
+}
+
+// バナー広告(ネイティブのオーバーレイビュー)の表示/非表示を、得点記録票タブに
+// いるか・モーダルが開いていないか・購入済みでないかに応じて切り替える。
+// 状態が変わった時だけNative.showBanner/hideBannerを呼び、無駄な呼び出しを避ける。
+let _bannerShown = false;
+function updateBannerState(onLog){
+  const modalOpen = logState.ui.historyOpen || logState.ui.paywallOpen
+    || logState.ui.accountModalOpen || logState.ui.friendPickerOpen
+    || logState.ui.loginPromptOpen || logState.ui.friendsListOpen
+    || logState.ui.addFriendOpen;
+  const shouldShow = Native.isNativeApp() && onLog && !modalOpen && !isPremiumUnlocked();
+  document.body.classList.toggle('ad-banner-active', shouldShow);
+  const nav = document.getElementById('bottomNav');
+  if (nav) nav.classList.toggle('with-ad-banner', shouldShow);
+  if (shouldShow && !_bannerShown) { _bannerShown = true; Native.showBanner(); }
+  else if (!shouldShow && _bannerShown) { _bannerShown = false; Native.hideBanner(); }
+}
+
+// 自分以外の操作で対局記録が自動追加された時の簡易通知トースト。
+// 金額・詳細成績は含めない(ロック画面等で収支が見えてしまうのを避けるため)。
+function renderNotifyBanner(){
+  const root = document.getElementById('notifyBannerRoot');
+  if (!root) return;
+  if (!logState.ui.notifyBanner) { root.innerHTML = ''; return; }
+  root.innerHTML = `<div class="share-fallback-toast" onclick="dismissNotifyBanner()">🔔 ${escapeHtml(logState.ui.notifyBanner)}</div>`;
+}
+
+renderApp();
+</script>
+
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+</script>
+
+</body>
+</html>

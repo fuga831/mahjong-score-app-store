@@ -1,0 +1,48 @@
+<!--
+  このファイルは単体では使えません。
+  `npx cap add ios` 実行後に生成される ios/App/App/Info.plist (XML形式のplist)に、
+  以下の <key>/<value> ペアを <dict> 直下に手作業でマージしてください。
+  (Xcodeの「Info」タブから項目を追加する形でも同じ内容になります。)
+-->
+
+<!-- ① プッシュ通知の受信をバックグラウンドでも許可する -->
+<key>UIBackgroundModes</key>
+<array>
+  <string>remote-notification</string>
+</array>
+
+<!--
+  ② Google Sign-In のコールバックを受け取るための URL Scheme。
+  GoogleService-Info.plist をXcodeプロジェクトに追加した後、その中の
+  "REVERSED_CLIENT_ID" の値(com.googleusercontent.apps.XXXXXXXXXX の形式)を
+  そのままコピーしてここに貼り付けること。
+-->
+<key>CFBundleURLTypes</key>
+<array>
+  <dict>
+    <key>CFBundleURLSchemes</key>
+    <array>
+      <string>com.googleusercontent.apps.XXXXXXXXXX-REPLACE-WITH-REVERSED-CLIENT-ID</string>
+    </array>
+  </dict>
+</array>
+
+<!--
+  ③ AppTrackingTransparency(ATT)の許諾ダイアログに表示される文言。
+  AdMobで(パーソナライズ)広告を配信する場合、iOS 14.5+ では原則としてこの許諾を
+  求める必要がある。求めない/パーソナライズ広告を使わない設計にするなら省略可だが、
+  capacitor.config.json の AdMob.requestTrackingAuthorization を true にする場合は必須。
+  (現状の capacitor.config.json ではこのフラグは false にしてあるため、厳密には
+  必須ではないが、AdMob SDKの挙動によっては求められる場合があるので用意しておく。)
+-->
+<key>NSUserTrackingUsageDescription</key>
+<string>ユーザーに合わせた広告を表示するために使用します。許可しなくてもアプリは通常どおり利用できます。</string>
+
+<!--
+  ④ AdMobのアプリID。AdMob管理画面(https://apps.admob.com/)のiOSアプリ設定で
+  発行される「ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY」形式の値に置き換えること。
+  (Android版のAndroidManifest-additions.xmlにある同名の値とは別の、iOS用の値。
+  同じAdMobアカウント内でもプラットフォームごとに別IDが発行される点に注意。)
+-->
+<key>GADApplicationIdentifier</key>
+<string>ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY</string>

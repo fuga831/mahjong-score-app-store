@@ -1,0 +1,56 @@
+<!--
+  このファイルは単体では使えません。
+  `npx cap add android` を実行して生成される
+  android/app/src/main/AndroidManifest.xml に、以下の内容を手作業でマージしてください。
+  (このサンドボックスにはAndroid SDKが無く実際に `cap add android` を実行できないため、
+  生成後のファイルに何を足せばよいかを示す「差分メモ」として渡しています。
+  実際のファイル構造とは行番号・周辺タグが異なる可能性があるので、
+  Android Studioでファイルを開いて該当箇所に足してください。)
+-->
+
+<manifest>
+
+  <!-- ネット通信(広告・課金とも必須。Capacitor標準テンプレートには既に入っているはずだが念のため) -->
+  <uses-permission android:name="android.permission.INTERNET" />
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+  <!-- Google Play課金(cordova-plugin-purchase / Play Billing Library)に必要 -->
+  <uses-permission android:name="com.android.vending.BILLING" />
+
+  <application>
+
+    <!--
+      AdMob アプリID。
+      AdMob管理画面(https://apps.admob.com/)で発行される
+      「ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY」形式の値に置き換えること。
+      mahjong-score.html内の MONETIZATION_CONFIG.admobAppId と必ず一致させる必要はないが
+      (こちらはネイティブSDK初期化用、JS側は広告ユニットIDのみ使用)、
+      両方とも「テスト用ID → 本番ID」への差し替えを忘れないこと。
+    -->
+    <meta-data
+      android:name="com.google.android.gms.ads.APPLICATION_ID"
+      android:value="ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY" />
+
+    <!-- 審査中/開発中に本物の広告を誤って表示しないための保険(任意・推奨) -->
+    <meta-data
+      android:name="com.google.android.gms.ads.DELAY_APP_MEASUREMENT_INIT"
+      android:value="true" />
+
+    <!--
+      ここから下は今回のマルチプレイヤー機能(Firebase Auth/Firestore/Messaging)追加分。
+
+      Firebase Cloud Messaging: 通知アイコン・通知色のデフォルト値。
+      未指定でも動作するが、通知欄でアプリのロゴがきちんと表示されるよう
+      設定しておくことを推奨。res/drawable に ic_stat_notify.png 等を
+      別途用意し、名前を合わせること。
+    -->
+    <meta-data
+      android:name="com.google.firebase.messaging.default_notification_icon"
+      android:resource="@drawable/ic_stat_notify" />
+    <meta-data
+      android:name="com.google.firebase.messaging.default_notification_channel_id"
+      android:value="default_channel" />
+
+  </application>
+
+</manifest>
