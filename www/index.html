@@ -1772,13 +1772,35 @@ const FREE_MATCH_LIMIT = 3; // 無料で保存できる対局数の上限(マジ
 
 const MONETIZATION_CONFIG = {
   // ▼▼▼ 実際のAdMob/Play Consoleの値に差し替えてください(初期値はダミー) ▼▼▼
-  admobAppId: 'ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY',
-  admobBannerUnitId: 'ca-app-pub-XXXXXXXXXXXXXXXX/BANNERID',
-  admobInterstitialUnitId: 'ca-app-pub-XXXXXXXXXXXXXXXX/INTERSTITIALID',
-  billingProductId: 'remove_ads_unlock_history', // Play Consoleの管理対象商品(買い切り)ID
+  // AdMobはiOS/Androidを別々の「アプリ」として登録するため、アプリID・広告ユニット
+  // IDともプラットフォームごとに異なる値になる。そのためプラットフォーム別に保持し、
+  // 実際に使う値は admobConfigForPlatform() で実行時に選ぶ。
+  admob: {
+    ios: {
+      appId: 'ca-app-pub-9341912936952065~9755137834',
+      bannerUnitId: 'ca-app-pub-9341912936952065/6216911178',
+      interstitialUnitId: 'ca-app-pub-9341912936952065/4250057536',
+    },
+    android: {
+      appId: 'ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY', // Android用のIDが決まったら差し替え(未設定)
+      bannerUnitId: 'ca-app-pub-XXXXXXXXXXXXXXXX/BANNERID',
+      interstitialUnitId: 'ca-app-pub-XXXXXXXXXXXXXXXX/INTERSTITIALID',
+    },
+  },
+  billingProductId: 'remove_ads_unlock_history', // Play Console/App Store Connectの商品(買い切り)ID
   // ▲▲▲ ここまで ▲▲▲
   fallbackPriceLabel: '¥400', // Billing APIから価格が取得できない場合の表示用(実価格はストア設定に従う)
 };
+// 実行環境(iOS/Android)に応じたAdMob設定を返す。Capacitor.getPlatform()は
+// Capacitor標準のAPIで 'ios' | 'android' | 'web' を返す。Web(非ネイティブ)では
+// Native.isNativeApp()がfalseになり各広告メソッドの先頭でreturnするため、
+// ここに実際に到達するのは常にiOS/Androidのネイティブアプリ内のみ。
+function admobConfigForPlatform(){
+  try {
+    const platform = window.Capacitor && window.Capacitor.getPlatform ? window.Capacitor.getPlatform() : 'android';
+    return MONETIZATION_CONFIG.admob[platform] || MONETIZATION_CONFIG.admob.android;
+  } catch (e) { return MONETIZATION_CONFIG.admob.android; }
+}
 
 let _billingReady = false;
 let _pendingPurchaseResolvers = [];
@@ -1806,7 +1828,7 @@ const Native = {
       const AdMob = window.Capacitor.Plugins && window.Capacitor.Plugins.AdMob;
       if (AdMob && AdMob.showBanner) {
         await AdMob.showBanner({
-          adId: MONETIZATION_CONFIG.admobBannerUnitId,
+          adId: admobConfigForPlatform().bannerUnitId,
           adSize: 'BANNER',
           position: 'BOTTOM_CENTER',
           margin: 0,
@@ -1826,7 +1848,7 @@ const Native = {
     try {
       const AdMob = window.Capacitor.Plugins && window.Capacitor.Plugins.AdMob;
       if (!AdMob || !AdMob.prepareInterstitial) return;
-      await AdMob.prepareInterstitial({ adId: MONETIZATION_CONFIG.admobInterstitialUnitId });
+      await AdMob.prepareInterstitial({ adId: admobConfigForPlatform().interstitialUnitId });
       await AdMob.showInterstitial();
     } catch (e) { /* 未読込・オフライン時は何もしない(対局終了フロー自体は止めない) */ }
   },
@@ -2335,6 +2357,7 @@ function defaultLogState(){
     chips: {},    // 進行中の対局のみ。name -> 最終枚数
     hanchanSeq: 1,
     currentMatchStartedAt: null, // 進行中の対局の最初の半荘を記録した時刻(ISO文字列)
+    matchAdShown: false, // この対局(進行中のhanchansの一区切り)で既に「終局」インタースティシャルを表示したか
     matchHistory: [], // 「対局を終了する」で確定・保存された過去の対局一覧(新しい順)
     // { id, startedAt, endedAt, title, settingsSnapshot, hanchans, chips, participantUids?, recordedBy? }
     account: {
@@ -2430,8 +2453,8 @@ function loadLogState(){
 
 function saveLogState(){
   try {
-    const { settings, hanchans, chips, hanchanSeq, currentMatchStartedAt, matchHistory, account, friends, room } = logState;
-    localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify({ settings, hanchans, chips, hanchanSeq, currentMatchStartedAt, matchHistory, account, friends, room }));
+    const { settings, hanchans, chips, hanchanSeq, currentMatchStartedAt, matchAdShown, matchHistory, account, friends, room } = logState;
+    localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify({ settings, hanchans, chips, hanchanSeq, currentMatchStartedAt, matchAdShown, matchHistory, account, friends, room }));
   } catch (e) { /* 保存できない環境ではメモリ上のみで継続 */ }
 }
 
@@ -2620,6 +2643,16 @@ function startReveal(){
   if (logState.hanchans.length === 0) return; // 対局ログが無い状態では発表しても意味が無いので何もしない
   logState.ui.revealActive = true;
   logState.ui.revealStep = 1; // 「終局」を押した瞬間に最初の順位（2位）まで発表する
+  // 「終局」ボタンを押した区切りの良いタイミングでインタースティシャルを挟む。
+  // ただし、半荘を追加してから再び「終局」を押すとrevealActiveは一旦falseに
+  // 戻る(recordHanchan参照)ため、同じ対局セッション中に何度も表示されて
+  // しまわないよう、matchAdShownで「この対局につき最初の1回だけ」に制限する。
+  // 非ネイティブ環境・購入済みの場合はNative.showInterstitial内部でno-op。
+  if (!logState.matchAdShown) {
+    logState.matchAdShown = true;
+    Native.showInterstitial();
+  }
+  saveLogState();
   scheduleRenderApp();
   syncRoomState();
 }
@@ -2692,6 +2725,7 @@ function archiveCurrentMatch(){
   logState.chips = {};
   logState.hanchanSeq = 1;
   logState.currentMatchStartedAt = null;
+  logState.matchAdShown = false; // 次の対局では「終局」を押した時にまた1回だけ広告を出せるようにする
   logState.ui.revealActive = false;
   logState.ui.revealStep = 0;
   logState.ui.confirmEndMatch = false;

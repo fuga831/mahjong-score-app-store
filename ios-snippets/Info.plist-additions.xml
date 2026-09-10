@@ -39,10 +39,9 @@
 <string>ユーザーに合わせた広告を表示するために使用します。許可しなくてもアプリは通常どおり利用できます。</string>
 
 <!--
-  ④ AdMobのアプリID。AdMob管理画面(https://apps.admob.com/)のiOSアプリ設定で
-  発行される「ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY」形式の値に置き換えること。
-  (Android版のAndroidManifest-additions.xmlにある同名の値とは別の、iOS用の値。
-  同じAdMobアカウント内でもプラットフォームごとに別IDが発行される点に注意。)
+  ④ AdMobのアプリID(iOS用)。mahjong-score.html内 MONETIZATION_CONFIG.admob.ios.appId
+  と同じ値にすること(Android版のAndroidManifest-additions.xmlにある値とは別の、
+  iOS専用の値。同じAdMobアカウント内でもプラットフォームごとに別IDが発行される)。
 -->
 <key>GADApplicationIdentifier</key>
-<string>ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY</string>
+<string>ca-app-pub-9341912936952065~9755137834</string>

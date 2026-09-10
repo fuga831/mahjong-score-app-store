@@ -20,12 +20,13 @@
   <application>
 
     <!--
-      AdMob アプリID。
+      AdMob アプリID(Android用)。
       AdMob管理画面(https://apps.admob.com/)で発行される
       「ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY」形式の値に置き換えること。
-      mahjong-score.html内の MONETIZATION_CONFIG.admobAppId と必ず一致させる必要はないが
-      (こちらはネイティブSDK初期化用、JS側は広告ユニットIDのみ使用)、
+      mahjong-score.html内の MONETIZATION_CONFIG.admob.android.appId と必ず一致させる
+      必要はないが(こちらはネイティブSDK初期化用、JS側は広告ユニットIDのみ使用)、
       両方とも「テスト用ID → 本番ID」への差し替えを忘れないこと。
+      (iOS用の値は別物。ios-snippets/Info.plist-additions.xml を参照)
     -->
     <meta-data
       android:name="com.google.android.gms.ads.APPLICATION_ID"

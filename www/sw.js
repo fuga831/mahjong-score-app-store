@@ -3,7 +3,7 @@
 // アプリを更新した時は CACHE_NAME の末尾の数字を必ず上げてください
 // (v1 -> v2 など)。上げないと、古いバージョンを開いたことがある端末には
 // 新しい内容が届かず、キャッシュされた古い計算ロジックのまま使われ続けます。
-const CACHE_NAME = 'mahjong-score-v12';
+const CACHE_NAME = 'mahjong-score-v14';
 
 const ASSETS = [
   './',

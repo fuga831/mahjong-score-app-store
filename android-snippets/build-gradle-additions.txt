@@ -9,7 +9,7 @@
    実際にビルドしてエラーが出た場合はここを疑ってください):
 
    defaultConfig {
-       applicationId "io.github.fuga831.mahjongscore"   // ← capacitor.config.json の appId と一致させる
+       applicationId "com.example.mahjongscore"   // ← capacitor.config.json の appId と一致させる
        minSdkVersion 22
        ...
    }
