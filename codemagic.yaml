@@ -27,16 +27,16 @@
 #
 # 4. CodemagicのTeam settings > Integrations で、App Store Connect APIキー
 #    (Issuer ID・Key ID・.p8秘密鍵)を使ってApple Developer Portal連携を作成し、
-#    好きな名前を付けてください(下のyamlでは "codemagic" という名前を
-#    想定しています。別名にした場合は integrations.app_store_connect の
-#    値を合わせて書き換えてください)。この連携が「自動署名」と
+#    好きな名前を付けてください(下のyamlでは "jan score" という名前で
+#    登録済みの連携を想定しています。別名にした場合は
+#    integrations.app_store_connect の値を合わせて書き換えてください)。
+#    この連携が「自動署名」と
 #    「TestFlightへの自動アップロード」の両方の認証基盤になります。
 #
-# 5. capacitor.config.json の appId は現在 "com.example.mahjongscore" という
-#    仮の値です。実際に配信する前に、Apple Developer Portalで登録した
-#    本物のBundle IDに置き換え、この codemagic.yaml の BUNDLE_ID も
-#    合わせて書き換えてください(ios/ を再生成する場合は `npx cap sync ios`
-#    のやり直しが必要です)。
+# 5. capacitor.config.json の appId・project.pbxproj の
+#    PRODUCT_BUNDLE_IDENTIFIER・下記 ios_signing.bundle_identifier は
+#    いずれも "io.github.fuga831.mahjongscore" に統一済みです。
+#    Apple Developer Portal側のApp ID(Bundle ID)もこの値で登録してください。
 #
 # 6. (推奨・任意) FirebaseコンソールからダウンロードしたiOS用の
 #    GoogleService-Info.plist を、リポジトリに直接コミットする代わりに
@@ -60,7 +60,7 @@ workflows:
     # Apple Developer Portal連携(準備4)。この名前は、CodemagicのTeam
     # integrations で実際に付けた連携名に合わせて変更してください。
     integrations:
-      app_store_connect: codemagic
+      app_store_connect: jan score
 
     environment:
       # ios_signing + 上のintegrationsを組み合わせることで、証明書・
@@ -69,12 +69,12 @@ workflows:
       # 管理・アップロードする必要がない)「自動署名」になります。
       ios_signing:
         distribution_type: app_store
-        bundle_identifier: com.example.mahjongscore # 準備5: 本番のBundle IDに置き換える
+        bundle_identifier: io.github.fuga831.mahjongscore
 
       vars:
         XCODE_WORKSPACE: "App.xcworkspace"
         XCODE_SCHEME: "App"
-        APP_STORE_APPLE_ID: 0000000000 # 準備3: App Store Connect上のアプリの数字ID(Apple ID)に置き換える
+        APP_STORE_APPLE_ID: 6810488211
 
       node: 20
       xcode: latest

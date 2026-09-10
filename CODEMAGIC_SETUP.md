@@ -48,21 +48,21 @@ TestFlightへのアップロード先として、App Store Connect上にこの�
    (`.p8` は一度しかダウンロードできません)。
 2. Codemagicのダッシュボード > Team settings > Integrations > Developer
    Portal で、上記3点を登録して連携を作成し、名前を付けます
-   (`codemagic.yaml` は `codemagic` という名前を想定しているので、
-   別名にした場合は `integrations.app_store_connect` の値を合わせて
-   書き換えてください)。
+   (`codemagic.yaml` は `jan score` という名前で登録済みの連携を
+   想定しているので、別名にした場合は `integrations.app_store_connect`
+   の値を合わせて書き換えてください)。
 
 この連携1つで、「証明書・プロビジョニングプロファイルの自動取得・生成
 (署名)」と「TestFlightへの自動アップロード」の両方が行えるようになります
 (APIキーを2箇所に別々に登録する必要はありません)。
 
-## 5. Bundle IDを本番用に置き換える
+## 5. Bundle ID
 
-`capacitor.config.json` の `appId` は現在 `com.example.mahjongscore` という
-仮の値です。実際に配信する前に、手順2・3で使った本物のBundle IDに置き換え、
-`codemagic.yaml` の `ios_signing.bundle_identifier` も合わせて書き換えて
-ください。書き換えたら `npx cap sync ios` をやり直し、`ios/` の変更も
-コミットしてください。
+`capacitor.config.json` の `appId`・`ios/App/App.xcodeproj/project.pbxproj` の
+`PRODUCT_BUNDLE_IDENTIFIER`・`codemagic.yaml` の `ios_signing.bundle_identifier`
+はいずれも `io.github.fuga831.mahjongscore` に統一済みです。手順2・3で
+Apple Developer Portal / App Store Connectに登録するApp IDも、この値と
+一致させてください。
 
 ## 6. (推奨・任意) GoogleService-Info.plist を暗号化環境変数で渡す
 
