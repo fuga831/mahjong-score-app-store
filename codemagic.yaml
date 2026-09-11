@@ -18,8 +18,9 @@
 # 2. Apple Developer PortalでこのアプリのApp ID(Bundle ID)を作成し、
 #    Sign in with Apple・Push Notifications の2つのCapabilityを**先に**
 #    有効化しておくこと(`ios-snippets/entitlements-additions.md` 参照)。
-#    Codemagicの自動署名は「有効化済みのCapabilityを含むプロファイル」を
-#    取得・生成するだけで、Capability自体を有効化してはくれません。
+#    `app-store-connect fetch-signing-files --create` は「有効化済みの
+#    Capabilityを含むプロファイル」を取得・生成するだけで、Capability自体を
+#    有効化してはくれません。
 #
 # 3. App Store Connectで、このアプリのアプリレコードを作成しておくこと
 #    (TestFlightへのアップロード先として必要)。作成後に払い出される
@@ -30,11 +31,12 @@
 #    好きな名前を付けてください(下のyamlでは "jan score" という名前で
 #    登録済みの連携を想定しています。別名にした場合は
 #    integrations.app_store_connect の値を合わせて書き換えてください)。
-#    この連携が「自動署名」と
-#    「TestFlightへの自動アップロード」の両方の認証基盤になります。
+#    この連携が、下の「Fetch signing files from App Store Connect」ステップの
+#    認証情報(Issuer ID・Key ID・秘密鍵)と、TestFlightへの自動アップロードの
+#    両方の認証基盤になります。
 #
 # 5. capacitor.config.json の appId・project.pbxproj の
-#    PRODUCT_BUNDLE_IDENTIFIER・下記 ios_signing.bundle_identifier は
+#    PRODUCT_BUNDLE_IDENTIFIER・下記 vars.BUNDLE_ID は
 #    いずれも "io.github.fuga831.mahjongscore" に統一済みです。
 #    Apple Developer Portal側のApp ID(Bundle ID)もこの値で登録してください。
 #
@@ -63,18 +65,11 @@ workflows:
       app_store_connect: jan score
 
     environment:
-      # ios_signing + 上のintegrationsを組み合わせることで、証明書・
-      # プロビジョニングプロファイルの取得/生成からXcodeプロジェクトへの
-      # 適用まで、Codemagicが自動で行う(=手動でp12/mobileprovisionを
-      # 管理・アップロードする必要がない)「自動署名」になります。
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: io.github.fuga831.mahjongscore
-
       vars:
         XCODE_WORKSPACE: "App.xcworkspace"
         XCODE_SCHEME: "App"
         APP_STORE_APPLE_ID: 6810488211
+        BUNDLE_ID: "io.github.fuga831.mahjongscore"
 
       node: 20
       xcode: latest
@@ -114,6 +109,34 @@ workflows:
         script: |
           cd $CM_BUILD_DIR/ios/App
           pod install
+
+      - name: Initialize keychain
+        script: |
+          # fetch-signing-files --create で証明書を新規作成する場合、Appleは
+          # 秘密鍵を後から取得させてくれない仕様のため、生成した秘密鍵を
+          # その場でキーチェーンに保存する必要がある。保存先のキーチェーンを
+          # 明示的に用意しておかないと、ビルドマシンのデフォルトキーチェーンの
+          # 状態次第で保存に失敗し「Cannot save Signing Certificates without
+          # certificate private key」になるため、fetch-signing-filesより前に
+          # 空のキーチェーンを初期化してデフォルトに設定しておく。
+          keychain initialize
+
+      - name: Fetch signing files from App Store Connect
+        script: |
+          # 宣言的な ios_signing ブロックだと「No matching profiles found」としか
+          # 出ず原因が分からないため、明示的に app-store-connect CLI を呼び出して
+          # 詳細なエラーメッセージ(Bundle ID・Capability不一致、証明書種別の
+          # 不一致など)がビルドログに出るようにしている。
+          # --issuer-id / --key-id / --private-key は integrations.app_store_connect
+          # (準備4) 経由で自動的に注入される認証情報がそのまま使われる。
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --platform IOS \
+            --type IOS_APP_STORE \
+            --create
+
+      - name: Set up signing certificate in keychain
+        script: |
+          keychain add-certificates
 
       - name: Set up code signing settings on Xcode project
         script: |
