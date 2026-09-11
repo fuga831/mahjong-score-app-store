@@ -52,6 +52,24 @@
 #    App Store Connect側で作成済みのグループ名を beta_groups に列挙してください
 #    (未設定でもアップロード自体は行われ、Codemagicの連携アカウントに
 #    内部テスターとして自動的に見えるようになります)。
+#
+# 8. 「Fetch signing files from App Store Connect」ステップで証明書を
+#    新規作成(--create)するために必要な、証明書用のRSA秘密鍵を
+#    お手元のマシンで生成し、Codemagicの暗号化環境変数として登録して
+#    ください(準備4のApp Store Connect API認証情報とは別物です)。
+#      ssh-keygen -t rsa -b 2048 -m PEM -f ./ios_distribution_private_key -q -N ""
+#    で生成される ios_distribution_private_key(-----BEGIN RSA PRIVATE KEY-----
+#    〜 -----END RSA PRIVATE KEY----- を含む全文)を、Codemagicの環境変数設定画面で
+#    変数名 CERTIFICATE_PRIVATE_KEY・「Secure」にチェックを入れて登録してください。
+#    これが無いと「Cannot save Signing Certificates without certificate private key」
+#    で失敗します(Apple Developer Portal側に既に有効な配布用証明書がある場合は、
+#    その証明書を作成した際に使った秘密鍵を代わりに登録してください。
+#    新しい秘密鍵を登録すると、Portal上の既存証明書とはペアが合わなくなり
+#    別の新しい証明書が作られます)。
+#    登録時は「グループ」の指定が必須です。実際にこのアプリをビルドしている
+#    チーム・アプリの環境変数設定画面で、グループ名 "ios_signing" を作成/選択して
+#    その中にこの変数を登録してください(下の environment.groups の値と
+#    一致していれば、グループ名自体はどんな名前でも構いません)。
 
 workflows:
   ios-testflight-workflow:
@@ -65,6 +83,12 @@ workflows:
       app_store_connect: jan score
 
     environment:
+      # 準備8で作成した環境変数グループ(CERTIFICATE_PRIVATE_KEYを含む)を
+      # ワークフローにインポートする。グループ名は実際にCodemagicで
+      # 作成した名前(現在は "ios_signing")に合わせて書き換えてください。
+      groups:
+        - ios_signing
+
       vars:
         XCODE_WORKSPACE: "App.xcworkspace"
         XCODE_SCHEME: "App"
@@ -112,13 +136,9 @@ workflows:
 
       - name: Initialize keychain
         script: |
-          # fetch-signing-files --create で証明書を新規作成する場合、Appleは
-          # 秘密鍵を後から取得させてくれない仕様のため、生成した秘密鍵を
-          # その場でキーチェーンに保存する必要がある。保存先のキーチェーンを
-          # 明示的に用意しておかないと、ビルドマシンのデフォルトキーチェーンの
-          # 状態次第で保存に失敗し「Cannot save Signing Certificates without
-          # certificate private key」になるため、fetch-signing-filesより前に
-          # 空のキーチェーンを初期化してデフォルトに設定しておく。
+          # fetch-signing-files / keychain add-certificates で証明書を
+          # インポート・生成する前に、公式サンプル通りビルド専用の
+          # キーチェーンを初期化してデフォルトに設定しておく。
           keychain initialize
 
       - name: Fetch signing files from App Store Connect
@@ -129,9 +149,23 @@ workflows:
           # 不一致など)がビルドログに出るようにしている。
           # --issuer-id / --key-id / --private-key は integrations.app_store_connect
           # (準備4) 経由で自動的に注入される認証情報がそのまま使われる。
+          #
+          # --certificate-key について:
+          # 「Cannot save Signing Certificates without certificate private key」は
+          # 上記のApp Store Connect API認証(--issuer-id等)とは別物の、
+          # 証明書自体を新規生成するためのRSA秘密鍵が無いことが原因。
+          # --create で新規証明書を作る場合、Appleは発行後に秘密鍵を
+          # 取得させてくれない仕様のため、CLIが事前にこの秘密鍵を
+          # 持っていないと、証明書を作成できても保存できずに失敗する。
+          # 公式ドキュメント(cli-tools/docs/app-store-connect/fetch-signing-files.md)
+          # の記載通り、--certificate-key を渡さない場合は環境変数
+          # CERTIFICATE_PRIVATE_KEY の値が自動的に使われるが、
+          # 未設定だと今回のエラーになるため明示的に渡している。
+          # 準備8を参照し、CERTIFICATE_PRIVATE_KEY をCodemagicの
+          # 暗号化環境変数として設定しておくこと。
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
-            --platform IOS \
             --type IOS_APP_STORE \
+            --certificate-key "$CERTIFICATE_PRIVATE_KEY" \
             --create
 
       - name: Set up signing certificate in keychain

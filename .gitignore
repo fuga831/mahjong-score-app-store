@@ -1,1 +1,6 @@
 node_modules/
+
+# 署名用の秘密鍵は絶対にコミットしない(Codemagicの環境変数にのみ登録する)
+ios_distribution_private_key*
+*.p12
+*.key
