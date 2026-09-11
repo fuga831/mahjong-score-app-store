@@ -43,7 +43,7 @@ index 0000000..0000000 100644
 -            if formStatus == UMPFormStatus.available {
 -                UMPConsentForm.load(completionHandler: {form, loadError in
 +            if formStatus == FormStatus.available {
-+                UMPConsentForm.load(with: {form, loadError in
++                ConsentForm.load(with: {form, loadError in
                      if loadError != nil {
                          call.reject(loadError?.localizedDescription ?? "Load consent form error")
                          return
