@@ -51,15 +51,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                                          object: error)
     }
 
-    // フォアグラウンド/バックグラウンドでのプッシュ通知受信も、Capacitor標準の
-    // 中継の仕組みに任せる(このアプリ独自のカスタム処理は不要な設計)。
+    // フォアグラウンド/バックグラウンドでのプッシュ通知受信は、Capacitor本体には
+    // `capacitorDidReceiveRemoteNotification` という通知名は存在しないため、
+    // @capacitor-firebase/messaging公式ドキュメントの実装通り、生の文字列名の
+    // 通知として中継する。completionHandlerはプラグイン側が呼び出すため、
+    // ここでは呼ばない。
     func application(_ application: UIApplication,
                       didReceiveRemoteNotification userInfo: [AnyHashable: Any],
                       fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
-        NotificationCenter.default.post(name: .capacitorDidReceiveRemoteNotification,
-                                         object: userInfo,
-                                         userInfo: [UIApplication.LaunchOptionsKey.remoteNotification: userInfo])
-        completionHandler(.newData)
+        NotificationCenter.default.post(name: Notification.Name("didReceiveRemoteNotification"),
+                                         object: completionHandler,
+                                         userInfo: userInfo)
     }
 
     // MARK: - Google Sign-In / Sign in with Apple のURLコールバック処理

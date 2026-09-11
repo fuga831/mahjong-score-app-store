@@ -29,10 +29,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication,
                       didReceiveRemoteNotification userInfo: [AnyHashable: Any],
                       fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
-        NotificationCenter.default.post(name: .capacitorDidReceiveRemoteNotification,
-                                         object: userInfo,
-                                         userInfo: [UIApplication.LaunchOptionsKey.remoteNotification: userInfo])
-        completionHandler(.newData)
+        // `.capacitorDidReceiveRemoteNotification` はCapacitor本体には存在しない
+        // (実在するのは capacitorDidRegisterForRemoteNotifications と
+        // capacitorDidFailToRegisterForRemoteNotifications のみ)。
+        // @capacitor-firebase/messaging公式ドキュメントの実装に合わせ、
+        // 生の文字列名の通知として中継する(completionHandlerはプラグイン側が
+        // 呼び出すため、ここでは呼ばない)。
+        NotificationCenter.default.post(name: Notification.Name("didReceiveRemoteNotification"),
+                                         object: completionHandler,
+                                         userInfo: userInfo)
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
