@@ -168,20 +168,21 @@ workflows:
           # 持っていないと、証明書を作成できても保存できずに失敗する。
           # 公式ドキュメント(cli-tools/docs/app-store-connect/fetch-signing-files.md)
           # の記載通り、--certificate-key を渡さない場合は環境変数
-          # CERTIFICATE_PRIVATE_KEY の値が自動的に使われるが、
-          # 未設定だと今回のエラーになるため明示的に渡している。
+          # CERTIFICATE_PRIVATE_KEY の値が自動的に使われる。
           #
           # 複数行のPEM形式をそのまま Codemagicの環境変数に貼り付けると、
           # Web画面側で改行が失われて「app-store-connect: error: argument
           # --certificate-key: Not a valid certificate private key」になる
           # ことがある。これを避けるため、準備8の手順でbase64エンコードして
           # CERTIFICATE_PRIVATE_KEY_BASE64 として登録してもらい、ここで
-          # デコードしてから --certificate-key に渡している。
-          CERTIFICATE_PRIVATE_KEY_PATH="$HOME/certificate_private_key.pem"
-          echo "$CERTIFICATE_PRIVATE_KEY_BASE64" | base64 --decode > "$CERTIFICATE_PRIVATE_KEY_PATH"
+          # デコードした上で CERTIFICATE_PRIVATE_KEY 環境変数にセットし、
+          # CLIのデフォルトの自動読み込みに任せている(--certificate-key に
+          # "@file:..." のようなパス参照を直接渡す書き方は、このCLIでは
+          # 単なる文字列としてPEMパース検証にかけられて弾かれるため使えない)。
+          export CERTIFICATE_PRIVATE_KEY
+          CERTIFICATE_PRIVATE_KEY=$(echo "$CERTIFICATE_PRIVATE_KEY_BASE64" | base64 --decode)
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
-            --certificate-key "@file:$CERTIFICATE_PRIVATE_KEY_PATH" \
             --create
 
       - name: Set up signing certificate in keychain
