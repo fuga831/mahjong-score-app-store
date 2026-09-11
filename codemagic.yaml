@@ -110,6 +110,17 @@ workflows:
           cd $CM_BUILD_DIR/ios/App
           pod install
 
+      - name: Initialize keychain
+        script: |
+          # fetch-signing-files --create で証明書を新規作成する場合、Appleは
+          # 秘密鍵を後から取得させてくれない仕様のため、生成した秘密鍵を
+          # その場でキーチェーンに保存する必要がある。保存先のキーチェーンを
+          # 明示的に用意しておかないと、ビルドマシンのデフォルトキーチェーンの
+          # 状態次第で保存に失敗し「Cannot save Signing Certificates without
+          # certificate private key」になるため、fetch-signing-filesより前に
+          # 空のキーチェーンを初期化してデフォルトに設定しておく。
+          keychain initialize
+
       - name: Fetch signing files from App Store Connect
         script: |
           # 宣言的な ios_signing ブロックだと「No matching profiles found」としか
