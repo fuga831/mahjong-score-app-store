@@ -67,7 +67,7 @@
 #    新しい秘密鍵を登録すると、Portal上の既存証明書とはペアが合わなくなり
 #    別の新しい証明書が作られます)。
 #    登録時は「グループ」の指定が必須です。実際にこのアプリをビルドしている
-#    チーム・アプリの環境変数設定画面で、グループ名 "tester" を作成/選択して
+#    チーム・アプリの環境変数設定画面で、グループ名 "ios_signing" を作成/選択して
 #    その中にこの変数を登録してください(下の environment.groups の値と
 #    一致していれば、グループ名自体はどんな名前でも構いません)。
 
@@ -85,9 +85,9 @@ workflows:
     environment:
       # 準備8で作成した環境変数グループ(CERTIFICATE_PRIVATE_KEYを含む)を
       # ワークフローにインポートする。グループ名は実際にCodemagicで
-      # 作成した名前(現在は "tester")に合わせて書き換えてください。
+      # 作成した名前(現在は "ios_signing")に合わせて書き換えてください。
       groups:
-        - tester
+        - ios_signing
 
       vars:
         XCODE_WORKSPACE: "App.xcworkspace"
