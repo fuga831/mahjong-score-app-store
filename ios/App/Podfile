@@ -12,6 +12,14 @@ def capacitor_pods
   pod 'Capacitor', :path => '../../node_modules/@capacitor/ios'
   pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios'
   pod 'CapacitorCommunityAdmob', :path => '../../node_modules/@capacitor-community/admob'
+  # CapacitorCommunityAdmob 6.2.0 は GoogleUserMessagingPlatform のバージョンを
+  # Podspec内で固定していないため、pod install時に最新版が解決されてしまう。
+  # GoogleUserMessagingPlatform 3.0.0 でSwift APIが `UMPConsentStatus` から
+  # `ConsentStatus` にリネームされており、プラグイン側の古いSwiftソース
+  # (ConsentExecutor.swift)はまだ `UMPConsentStatus` を使っているため、
+  # 3.0.0以降が解決されると「has been renamed to 'ConsentStatus'」で
+  # コンパイルエラーになる。3.0未満に固定してこれを回避する。
+  pod 'GoogleUserMessagingPlatform', '< 3.0'
   pod 'CapacitorFirebaseAuthentication', :path => '../../node_modules/@capacitor-firebase/authentication'
   pod 'CapacitorFirebaseFirestore', :path => '../../node_modules/@capacitor-firebase/firestore'
   pod 'CapacitorFirebaseMessaging', :path => '../../node_modules/@capacitor-firebase/messaging'
