@@ -1874,12 +1874,13 @@ const APP_VERSION = '1.0.0'; // package.jsonのversionと合わせて手動更�
 
 // ハンバーガーメニュー配下の「その他」・購入導線に表示する法務・問い合わせリンク。
 const LEGAL_CONFIG = {
-  // ▼▼▼ 実際に用意したページ・連絡先に差し替えてください(初期値はダミー) ▼▼▼
-  // プライバシーポリシーは、MONETIZATION_SETUP.md 3章の手順で用意するページと同じものを想定。
+  // docs/terms.html・docs/privacy.html をGitHub Pagesで公開したURL。
+  // リポジトリ名・公開設定を変更した場合はここも合わせて書き換えること。
   // Apple/Googleの審査要件により、この2つのURLは「その他」だけでなく購入確認画面
   // (renderPaywallModal)にも別途表示している。
-  termsUrl: 'https://example.com/terms.html',
-  privacyUrl: 'https://example.com/privacy-policy.html',
+  termsUrl: 'https://fuga831.github.io/mahjong-score-app-store/terms.html',
+  privacyUrl: 'https://fuga831.github.io/mahjong-score-app-store/privacy.html',
+  // ▼▼▼ 実際の問い合わせ先に差し替えてください(初期値はダミー) ▼▼▼
   contactEmail: 'support@example.com',
   // ▲▲▲ ここまで ▲▲▲
 };
