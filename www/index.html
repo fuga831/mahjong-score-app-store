@@ -4572,19 +4572,11 @@ function renderApp(){
     : '<span class="tile">🀄</span>麻雀点数電卓';
   document.getElementById('calcTab').style.display = onLog ? 'none' : '';
   document.getElementById('logTab').style.display = onLog ? '' : 'none';
-  // 対局履歴(☰)・アカウント(👤)は得点記録票タブでのみ意味を持つので、それ以外では隠す。
-  // アカウントボタンはマルチプレイヤー機能と同じく、ストアアプリの中でのみ表示する。
-  document.getElementById('historyMenuBtn').style.display = onLog ? '' : 'none';
-  document.getElementById('accountMenuBtn').style.display = (onLog && CloudSync.isAvailable()) ? '' : 'none';
-  if (!onLog) {
-    // 計算タブに切り替えたらモーダルも閉じる
-    logState.ui.historyOpen = false; logState.ui.paywallOpen = false;
-    logState.ui.accountModalOpen = false; logState.ui.friendPickerOpen = false;
-    logState.ui.loginPromptOpen = false; logState.ui.friendsListOpen = false;
-    logState.ui.addFriendOpen = false; logState.ui.historyFriendFilter = null;
-    logState.ui.helpOpen = false; logState.ui.otherMenuOpen = false;
-    logState.ui.confirmDeleteAccount = false; logState.ui.deleteAccountErrorMsg = null;
-  }
+  // 対局履歴(☰)は「使い方」「その他」等も含む導線になったため、タブに関わらず
+  // 常に表示する。アカウントボタンは引き続きマルチプレイヤー機能と同じく、
+  // ストアアプリの中でのみ表示する(タブには依存しない)。
+  document.getElementById('historyMenuBtn').style.display = '';
+  document.getElementById('accountMenuBtn').style.display = CloudSync.isAvailable() ? '' : 'none';
   document.getElementById('bottomNav').innerHTML = `
     <button class="${onLog?'':'active'}" onclick="setActiveTab('calc')"><span class="ic">🀄</span>点数計算</button>
     <button class="${onLog?'active':''}" onclick="setActiveTab('log')"><span class="ic">📋</span>得点記録</button>
