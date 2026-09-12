@@ -60,7 +60,11 @@ service cloud.firestore {
         && (!('matchCount' in request.resource.data)
             || !('matchCount' in resource.data)
             || request.resource.data.matchCount >= resource.data.matchCount);
-      allow delete: if false;
+      // アカウント削除機能(CloudSync.deleteAccount)のため、本人による削除を許可する。
+      // 「delete→create で matchCount を巻き戻せてしまう」という抜け道は理論上あるが、
+      // 端末を初期化して新規の匿名アカウントを作られた場合と実質的に同じであり、
+      // これによって新たに生まれる抜け道ではないため許容する。
+      allow delete: if isSelf(uid);
 
       // ---- users/{uid}/friends/{friendUid} ----
       match /friends/{friendUid} {

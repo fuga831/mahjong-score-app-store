@@ -968,6 +968,82 @@
     text-align:center;
     line-height:1.5;
   }
+  .paywall-legal-links{
+    display:flex;
+    justify-content:center;
+    gap:14px;
+    margin-top:10px;
+  }
+  .paywall-legal-links a{
+    font-size:.7rem;
+    color:var(--ink-soft);
+    text-decoration:underline;
+  }
+
+  /* ---- 対局履歴リスト上部のアクションボタン群(課金・使い方・お問い合わせ・その他) ---- */
+  .history-action-bar{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    margin-bottom:12px;
+  }
+  .history-action-btn{
+    box-sizing:border-box;
+    flex:1 1 calc(50% - 4px);
+    min-width:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:5px;
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-size:.76rem;
+    color:var(--ivory-dim);
+    background:var(--felt-1);
+    border:1.5px solid var(--line);
+    border-radius:10px;
+    padding:9px 6px;
+    cursor:pointer;
+    text-decoration:none;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .history-action-btn:active{background:var(--felt-2);}
+  .history-action-btn.premium{background:var(--gold);color:var(--ink);border-color:var(--gold-strong);}
+  .history-action-btn:disabled{cursor:default;}
+
+  /* ---- 使い方 ---- */
+  .help-steps{
+    margin:0;
+    padding-left:1.3em;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    font-size:.82rem;
+    color:var(--ivory-dim);
+    line-height:1.6;
+  }
+
+  /* ---- その他(利用規約・プライバシーポリシー・バージョン情報) ---- */
+  .other-menu-list{display:flex;flex-direction:column;gap:8px;}
+  .other-menu-item{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    font-family:"Noto Sans JP",sans-serif;
+    font-weight:500;
+    font-size:.84rem;
+    color:var(--ivory);
+    background:var(--felt-1);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:12px 13px;
+    cursor:pointer;
+    text-decoration:none;
+  }
+  .other-menu-item:active{background:var(--felt-2);}
+  .other-menu-item .arrow{color:var(--ink-soft);font-size:.76rem;}
 
   /* ---- accordion ---- */
   .accordion{
@@ -1315,6 +1391,8 @@
 <div id="loginPromptModalRoot"></div>
 <div id="friendsListModalRoot"></div>
 <div id="addFriendModalRoot"></div>
+<div id="helpModalRoot"></div>
+<div id="otherModalRoot"></div>
 <div id="notifyBannerRoot"></div>
 <input type="file" id="importFileInput" accept="application/json,.json" style="display:none;" onchange="handleImportFile(this.files)">
 
@@ -1790,6 +1868,19 @@ const MONETIZATION_CONFIG = {
   billingProductId: 'remove_ads_unlock_history', // Play Console/App Store Connectの商品(買い切り)ID
   // ▲▲▲ ここまで ▲▲▲
   fallbackPriceLabel: '¥400', // Billing APIから価格が取得できない場合の表示用(実価格はストア設定に従う)
+};
+
+const APP_VERSION = '1.0.0'; // package.jsonのversionと合わせて手動更新(ビルド時の自動注入は未実装)
+
+// ハンバーガーメニュー配下の「その他」・購入導線に表示する法務・問い合わせリンク。
+const LEGAL_CONFIG = {
+  // docs/terms.html・docs/privacy.html をGitHub Pagesで公開したURL。
+  // リポジトリ名・公開設定を変更した場合はここも合わせて書き換えること。
+  // Apple/Googleの審査要件により、この2つのURLは「その他」だけでなく購入確認画面
+  // (renderPaywallModal)にも別途表示している。
+  termsUrl: 'https://fuga831.github.io/mahjong-score-app-store/terms.html',
+  privacyUrl: 'https://fuga831.github.io/mahjong-score-app-store/privacy.html',
+  contactEmail: 'gechi.studio@gmail.com', // docs/terms.html・docs/privacy.html記載の連絡先と同じアドレス
 };
 // 実行環境(iOS/Android)に応じたAdMob設定を返す。Capacitor.getPlatform()は
 // Capacitor標準のAPIで 'ios' | 'android' | 'web' を返す。Web(非ネイティブ)では
@@ -2324,6 +2415,60 @@ const CloudSync = {
       await Firestore.updateDocument({ reference: `users/${logState.account.uid}`, data: { notifyOnAutoRecord: !!v } });
     } catch (e) { /* オフライン時はローカル設定のみで継続 */ }
   },
+
+  // ---- アカウント削除(ハンバーガーメニュー「その他」から) ----
+  // users/{uid}以下(friends・matchHistoryサブコレクション含む)とusernames/{name}を
+  // Firestoreから削除した上で、Firebase Authenticationのユーザー自体も削除する。
+  // サブコレクションの一括削除APIが無いため、1件ずつ列挙して削除する
+  // (firestore.rulesでusers/{uid}の本人によるdeleteを別途許可済み)。
+  // 戻り値: { ok: true } | { ok: false, error, dataDeleted? }
+  //   error: 'unavailable'(非ネイティブ・未サインイン) | 'network'(Firestore削除に失敗) |
+  //          'auth'(Firestoreは削除できたがAuthユーザーの削除に失敗。多くはFirebaseの
+  //          「最近のログインが必要」制約によるもので、再ログイン後の再試行を促す想定)
+  async deleteAccount(){
+    if (!this.isAvailable()) return { ok: false, error: 'unavailable' };
+    const uid = logState.account.uid;
+    if (!uid) return { ok: false, error: 'unavailable' };
+    const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+    const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
+    if (!Firestore || !Auth) return { ok: false, error: 'unavailable' };
+    try {
+      // 自分がホストの卓が残っていたら、同卓者を巻き込まないよう先に終了させる。
+      if (logState.room && logState.room.roomId && logState.room.isHost) {
+        await this.updateRoom(logState.room.roomId, { status: 'ended' }).catch(() => {});
+      }
+      // ここから下は「本当に削除できたか」を呼び出し側が信頼できるよう、意図的に
+      // .catch()で握りつぶさない(個々の失敗もそのまま外側のcatchでnetworkエラーに
+      // している)。ホストの卓を閉じる処理だけは付随的な後片付けなのでベストエフォート
+      // で構わないが、それ以外を握りつぶすと「実際は消えていないのに削除成功」と
+      // 誤報告しかねないため。
+      const [friendsRes, historyRes] = await Promise.all([
+        Firestore.getCollection({ reference: `users/${uid}/friends` }),
+        Firestore.getCollection({ reference: `users/${uid}/matchHistory` }),
+      ]);
+      const friendDocs = (friendsRes && friendsRes.snapshots) || [];
+      const historyDocs = (historyRes && historyRes.snapshots) || [];
+      await Promise.all([
+        ...friendDocs.map(d => Firestore.deleteDocument({ reference: `users/${uid}/friends/${d.id}` })),
+        ...historyDocs.map(d => Firestore.deleteDocument({ reference: `users/${uid}/matchHistory/${d.id}` })),
+      ]);
+      if (logState.account.username) {
+        await Firestore.deleteDocument({ reference: `usernames/${normalizeUsername(logState.account.username)}` });
+      }
+      await Firestore.deleteDocument({ reference: `users/${uid}` });
+    } catch (e) {
+      return { ok: false, error: 'network' };
+    }
+    try {
+      await Auth.deleteUser();
+    } catch (e) {
+      // Firestore側のデータは既に削除済み。Authユーザーだけ残ってしまうと次回起動時に
+      // その古いセッションのままになりかねないので、サインアウトだけはしておく。
+      await Auth.signOut().catch(() => {});
+      return { ok: false, error: 'auth', dataDeleted: true };
+    }
+    return { ok: true };
+  },
 };
 
 /* =========================================================================
@@ -2390,9 +2535,15 @@ function defaultLogState(){
       shareFallbackMsg: null,
       editingChipFor: null, // タップでチップ枚数を直接編集中のプレイヤー名
       paywallOpen: false,       // 無料枠(FREE_MATCH_LIMIT)超過時のペイウォール表示中か
+      paywallSource: null,      // 'archive'(対局終了時の無料枠超過) | 'menu'(メニューの「課金する」から) | null
       paywallPurchasing: false,
       paywallErrorMsg: null,
       billingMsg: null,         // 「購入を復元」結果などの短いメッセージ
+      helpOpen: false,          // 「使い方」モーダル
+      otherMenuOpen: false,     // 「その他」(利用規約・プライバシーポリシー・バージョン情報)モーダル
+      confirmDeleteAccount: false, // 「アカウントを削除」の誤タップ防止確認中か
+      deletingAccount: false,
+      deleteAccountErrorMsg: null,
       accountModalOpen: false,     // ユーザーネーム設定・ログイン連携モーダル
       usernameInput: '',
       usernameError: null,
@@ -2680,6 +2831,7 @@ function confirmEndMatch(){
   // ペイウォールを表示する。半荘データ(hanchans)はここでは一切消さない。
   if (!isPremiumUnlocked() && logState.matchHistory.length >= FREE_MATCH_LIMIT) {
     logState.ui.paywallOpen = true;
+    logState.ui.paywallSource = 'archive';
     logState.ui.paywallErrorMsg = null;
     scheduleRenderApp();
     return;
@@ -2749,8 +2901,14 @@ async function purchaseFromPaywall(){
     logState.ui.paywallOpen = false;
     saveLogState();
     Native.hideBanner();
-    // ユーザーにもう一度ボタンを押させず、そのまま保存まで完了させる。
-    archiveCurrentMatch();
+    if (logState.ui.paywallSource === 'archive') {
+      // 対局終了(無料枠超過)経由なら、ユーザーにもう一度ボタンを押させず、そのまま保存まで完了させる。
+      archiveCurrentMatch();
+    } else {
+      // メニューの「課金する」から任意に開いた場合は、保存すべき対局が無いので閉じるだけ。
+      logState.ui.paywallSource = null;
+      scheduleRenderApp();
+    }
   } else {
     logState.ui.paywallErrorMsg = '購入を完了できませんでした。通信環境をご確認のうえ、もう一度お試しください。';
     scheduleRenderApp();
@@ -2758,6 +2916,16 @@ async function purchaseFromPaywall(){
 }
 function closePaywall(){
   logState.ui.paywallOpen = false;
+  logState.ui.paywallSource = null;
+  logState.ui.paywallErrorMsg = null;
+  scheduleRenderApp();
+}
+// ハンバーガーメニュー最上部の「課金する」から任意に開く入口(対局終了時の
+// 自動ペイウォールとは別経路。既にプレミアムなら何もしない)。
+function openPaywallFromMenu(){
+  if (isPremiumUnlocked()) return;
+  logState.ui.paywallOpen = true;
+  logState.ui.paywallSource = 'menu';
   logState.ui.paywallErrorMsg = null;
   scheduleRenderApp();
 }
@@ -3906,6 +4074,22 @@ function shareMatchResult(id){
 }
 
 /* ---- モーダル全体の描画 ---- */
+// 対局一覧・成績の両画面で共通の、対局履歴リスト直上のアクションボタン群
+// (課金する/使い方/お問い合わせ/その他)。両画面から呼び出す共通コンポーネントとして
+// ここに1箇所だけ実装する。
+function renderHistoryActionBar(){
+  const premium = isPremiumUnlocked();
+  return `
+    <div class="history-action-bar">
+      ${premium
+        ? `<button class="history-action-btn premium" disabled>✓ プレミアム会員</button>`
+        : `<button class="history-action-btn" onclick="openPaywallFromMenu()">💎 課金する</button>`}
+      <button class="history-action-btn" onclick="openHelpModal()">📖 使い方</button>
+      <a class="history-action-btn" href="mailto:${escapeHtml(LEGAL_CONFIG.contactEmail)}">✉️ お問い合わせ</a>
+      <button class="history-action-btn" onclick="openOtherMenu()">⋯ その他</button>
+    </div>`;
+}
+
 function renderHistoryModal(){
   const root = document.getElementById('historyModalRoot');
   if (!logState.ui.historyOpen) { root.innerHTML = ''; return; }
@@ -3925,13 +4109,15 @@ function renderHistoryModal(){
     bodyHtml = renderHistoryDetail(logState.ui.historyDetailId);
   } else if (view === 'stats') {
     title = friendFilter ? `${escapeHtml(friendFilter.username)}さんとの成績` : '成績';
-    bodyHtml = friendFilterBanner + renderHistoryStats();
+    bodyHtml = renderHistoryActionBar() + friendFilterBanner + renderHistoryStats();
   } else {
     title = friendFilter ? `${escapeHtml(friendFilter.username)}さんとの対局` : '対局履歴';
     bodyHtml = friendFilter ? `
+      ${renderHistoryActionBar()}
       ${friendFilterBanner}
       ${renderHistoryList()}
     ` : `
+      ${renderHistoryActionBar()}
       ${logState.ui.importResultMsg ? `<div class="check-banner ok" style="margin-bottom:10px;">${escapeHtml(logState.ui.importResultMsg)}</div>` : ''}
       ${Native.isNativeApp() ? `
         <div class="premium-status-row">
@@ -3997,6 +4183,145 @@ function renderPaywallModal(){
           </button>
           <button class="mentsu-add" style="margin-top:9px;" ${purchasing?'disabled':''} onclick="closePaywall()">閉じる（今回は保存しない）</button>
           <div class="paywall-note">※閉じても今回の対局データは消えません。半荘の記録はそのまま残るので、後からいつでも購入して保存できます。</div>
+          <div class="paywall-legal-links">
+            <a href="${LEGAL_CONFIG.termsUrl}" target="_blank" rel="noopener">利用規約</a>
+            <a href="${LEGAL_CONFIG.privacyUrl}" target="_blank" rel="noopener">プライバシーポリシー</a>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ---- 使い方(簡易ヘルプ) ---- */
+function openHelpModal(){
+  logState.ui.helpOpen = true;
+  scheduleRenderApp();
+}
+function closeHelpModal(){
+  logState.ui.helpOpen = false;
+  scheduleRenderApp();
+}
+function renderHelpModal(){
+  const root = document.getElementById('helpModalRoot');
+  if (!root) return;
+  if (!logState.ui.helpOpen) { root.innerHTML = ''; return; }
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">使い方</span>
+          <button class="history-close" onclick="closeHelpModal()">×</button>
+        </div>
+        <div class="history-modal-body">
+          <ol class="help-steps">
+            <li>「点数計算」タブで翻・符(または符を直接入力)を選ぶと、点数が自動で計算されます。</li>
+            <li>「得点記録」タブの入力欄に半荘ごとの素点を入力し、「半荘を記録」で記録します。</li>
+            <li>対局が終わったら「対局を終了する」を押すと、この対局が履歴に保存されます。</li>
+            <li>☰(対局履歴)から、保存した対局の一覧・詳細・通算成績をいつでも確認できます。</li>
+            <li>👤(アカウント)から連携すると、同卓者の指定・対局記録の自動共有ができます。</li>
+          </ol>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ---- その他(利用規約・プライバシーポリシー・バージョン情報・アカウント削除) ---- */
+function openOtherMenu(){
+  logState.ui.otherMenuOpen = true;
+  scheduleRenderApp();
+}
+function closeOtherMenu(){
+  logState.ui.otherMenuOpen = false;
+  logState.ui.confirmDeleteAccount = false;
+  logState.ui.deleteAccountErrorMsg = null;
+  scheduleRenderApp();
+}
+function requestDeleteAccount(){
+  logState.ui.confirmDeleteAccount = true;
+  logState.ui.deleteAccountErrorMsg = null;
+  scheduleRenderApp();
+}
+function cancelDeleteAccount(){
+  logState.ui.confirmDeleteAccount = false;
+  logState.ui.deleteAccountErrorMsg = null;
+  scheduleRenderApp();
+}
+async function confirmDeleteAccountFromMenu(){
+  logState.ui.deletingAccount = true;
+  logState.ui.deleteAccountErrorMsg = null;
+  scheduleRenderApp();
+  const result = await CloudSync.deleteAccount();
+  logState.ui.deletingAccount = false;
+
+  if (!result.ok && !result.dataDeleted) {
+    logState.ui.deleteAccountErrorMsg = '削除に失敗しました。通信環境をご確認のうえ、もう一度お試しください。';
+    scheduleRenderApp();
+    return;
+  }
+
+  // クラウド側のデータ(ユーザーネーム・フレンド・対局記録)は削除済み。ローカルの
+  // アカウント・フレンド・進行中の卓もリセットし、次回から新しい匿名アカウントとして
+  // 使い始められるようにする(この端末のローカル対局記録と、ストア購入済みの
+  // isPremiumはどちらもアカウントとは独立した情報のため削除しない)。
+  logState.account = defaultLogState().account;
+  logState.friends = [];
+  logState.room = null;
+  logState.ui.confirmDeleteAccount = false;
+  logState.ui.deleteAccountErrorMsg = null;
+  logState.ui.otherMenuOpen = false;
+  logState.ui.accountModalOpen = false;
+  saveLogState();
+  scheduleRenderApp();
+  CloudSync.init(); // 新しい匿名アカウントとして再初期化
+
+  if (result.error === 'auth') {
+    // Firestore側のデータは削除済みだが、Authユーザー自体の削除には失敗している
+    // (多くはFirebaseの「最近のログインが必要」制約による)。致命的ではないので
+    // トーストで案内するのみに留める。
+    logState.ui.notifyBanner = 'データは削除されましたが、サインイン情報の削除には失敗しました(お手数ですが再度ログインのうえお試しください)';
+    scheduleRenderApp();
+  }
+}
+function renderOtherModal(){
+  const root = document.getElementById('otherModalRoot');
+  if (!root) return;
+  if (!logState.ui.otherMenuOpen) { root.innerHTML = ''; return; }
+  const deleteAccountHtml = !CloudSync.isAvailable() ? '' : (
+    logState.ui.confirmDeleteAccount ? `
+      <div class="end-match-confirm" style="margin-top:10px;">
+        <span>アカウントを削除しますか？ユーザーネーム・フレンド・対局記録などのクラウド上のデータが削除され、元に戻せません。</span>
+        ${logState.ui.deleteAccountErrorMsg ? `<div class="check-banner bad">${escapeHtml(logState.ui.deleteAccountErrorMsg)}</div>` : ''}
+        <div class="end-match-confirm-btns">
+          <button class="preset-btn" ${logState.ui.deletingAccount?'disabled':''} onclick="cancelDeleteAccount()">キャンセル</button>
+          <button class="preset-btn danger" ${logState.ui.deletingAccount?'disabled':''} onclick="confirmDeleteAccountFromMenu()">${logState.ui.deletingAccount ? '削除しています…' : '削除する'}</button>
+        </div>
+      </div>
+    ` : `
+      <div class="other-menu-item danger-text" style="margin-top:10px;" onclick="requestDeleteAccount()">
+        <span>アカウントを削除</span><span class="arrow">›</span>
+      </div>
+    `
+  );
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">その他</span>
+          <button class="history-close" onclick="closeOtherMenu()">×</button>
+        </div>
+        <div class="history-modal-body">
+          <div class="other-menu-list">
+            <a class="other-menu-item" href="${LEGAL_CONFIG.termsUrl}" target="_blank" rel="noopener">
+              <span>利用規約</span><span class="arrow">›</span>
+            </a>
+            <a class="other-menu-item" href="${LEGAL_CONFIG.privacyUrl}" target="_blank" rel="noopener">
+              <span>プライバシーポリシー</span><span class="arrow">›</span>
+            </a>
+            <div class="other-menu-item" style="cursor:default;">
+              <span>バージョン情報</span><span class="arrow">v${escapeHtml(APP_VERSION)}</span>
+            </div>
+          </div>
+          ${deleteAccountHtml}
         </div>
       </div>
     </div>`;
@@ -4235,6 +4560,8 @@ function renderApp(){
     logState.ui.accountModalOpen = false; logState.ui.friendPickerOpen = false;
     logState.ui.loginPromptOpen = false; logState.ui.friendsListOpen = false;
     logState.ui.addFriendOpen = false; logState.ui.historyFriendFilter = null;
+    logState.ui.helpOpen = false; logState.ui.otherMenuOpen = false;
+    logState.ui.confirmDeleteAccount = false; logState.ui.deleteAccountErrorMsg = null;
   }
   document.getElementById('bottomNav').innerHTML = `
     <button class="${onLog?'':'active'}" onclick="setActiveTab('calc')"><span class="ic">🀄</span>点数計算</button>
@@ -4248,6 +4575,8 @@ function renderApp(){
   renderLoginPromptModal();
   renderFriendsListModal();
   renderAddFriendModal();
+  renderHelpModal();
+  renderOtherModal();
   renderNotifyBanner();
   updateBannerState(onLog);
 }
@@ -4260,7 +4589,7 @@ function updateBannerState(onLog){
   const modalOpen = logState.ui.historyOpen || logState.ui.paywallOpen
     || logState.ui.accountModalOpen || logState.ui.friendPickerOpen
     || logState.ui.loginPromptOpen || logState.ui.friendsListOpen
-    || logState.ui.addFriendOpen;
+    || logState.ui.addFriendOpen || logState.ui.helpOpen || logState.ui.otherMenuOpen;
   const shouldShow = Native.isNativeApp() && onLog && !modalOpen && !isPremiumUnlocked();
   document.body.classList.toggle('ad-banner-active', shouldShow);
   const nav = document.getElementById('bottomNav');
