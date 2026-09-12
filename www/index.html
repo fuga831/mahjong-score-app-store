@@ -1019,10 +1019,22 @@
     padding-left:1.3em;
     display:flex;
     flex-direction:column;
-    gap:10px;
+    gap:18px;
     font-size:.82rem;
     color:var(--ivory-dim);
     line-height:1.6;
+  }
+  .help-step{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .help-screenshot{
+    width:100%;
+    display:block;
+    border-radius:10px;
+    border:1px solid var(--line);
+    background:var(--felt-1);
   }
 
   /* ---- その他(利用規約・プライバシーポリシー・バージョン情報) ---- */
@@ -4193,6 +4205,17 @@ function renderPaywallModal(){
 }
 
 /* ---- 使い方(簡易ヘルプ) ---- */
+// 「使い方」モーダルの各手順。imgはwww/help/以下に置くスクリーンショットの
+// ファイル名(未配置の間は<img>のonerrorで自動的に非表示になり、キャプション
+// 文字だけの表示にフォールバックする)。実際にどの画面を撮ればよいかは
+// captionの内容と対応させてある。
+const HELP_STEPS = [
+  { img: 'help/01-calc.png', caption: '「点数計算」タブで翻・符(または符を直接入力)を選ぶと、点数が自動で計算されます。' },
+  { img: 'help/02-record.png', caption: '「得点記録」タブの入力欄に半荘ごとの素点を入力し、「半荘を記録」で記録します。' },
+  { img: 'help/03-end.png', caption: '対局が終わったら「対局を終了する」を押すと、この対局が履歴に保存されます。' },
+  { img: 'help/04-history.png', caption: '☰(対局履歴)から、保存した対局の一覧・詳細・通算成績をいつでも確認できます。' },
+  { img: 'help/05-account.png', caption: '👤(アカウント)から連携すると、同卓者の指定・対局記録の自動共有ができます。' },
+];
 function openHelpModal(){
   logState.ui.helpOpen = true;
   scheduleRenderApp();
@@ -4205,6 +4228,11 @@ function renderHelpModal(){
   const root = document.getElementById('helpModalRoot');
   if (!root) return;
   if (!logState.ui.helpOpen) { root.innerHTML = ''; return; }
+  const stepsHtml = HELP_STEPS.map((step, i) => `
+    <li class="help-step">
+      <img class="help-screenshot" src="${escapeHtml(step.img)}" alt="使い方 手順${i+1}" loading="lazy" onerror="this.remove()">
+      <span>${escapeHtml(step.caption)}</span>
+    </li>`).join('');
   root.innerHTML = `
     <div class="history-modal-overlay">
       <div class="history-modal">
@@ -4213,13 +4241,7 @@ function renderHelpModal(){
           <button class="history-close" onclick="closeHelpModal()">×</button>
         </div>
         <div class="history-modal-body">
-          <ol class="help-steps">
-            <li>「点数計算」タブで翻・符(または符を直接入力)を選ぶと、点数が自動で計算されます。</li>
-            <li>「得点記録」タブの入力欄に半荘ごとの素点を入力し、「半荘を記録」で記録します。</li>
-            <li>対局が終わったら「対局を終了する」を押すと、この対局が履歴に保存されます。</li>
-            <li>☰(対局履歴)から、保存した対局の一覧・詳細・通算成績をいつでも確認できます。</li>
-            <li>👤(アカウント)から連携すると、同卓者の指定・対局記録の自動共有ができます。</li>
-          </ol>
+          <ol class="help-steps">${stepsHtml}</ol>
         </div>
       </div>
     </div>`;
