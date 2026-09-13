@@ -1894,15 +1894,18 @@ const LEGAL_CONFIG = {
   privacyUrl: 'https://fuga831.github.io/mahjong-score-app-store/privacy.html',
   contactEmail: 'gechi.studio@gmail.com', // docs/terms.html・docs/privacy.html記載の連絡先と同じアドレス
 };
-// 実行環境(iOS/Android)に応じたAdMob設定を返す。Capacitor.getPlatform()は
-// Capacitor標準のAPIで 'ios' | 'android' | 'web' を返す。Web(非ネイティブ)では
-// Native.isNativeApp()がfalseになり各広告メソッドの先頭でreturnするため、
+// 実行環境(iOS/Android)を返す。Capacitor.getPlatform()はCapacitor標準の
+// APIで 'ios' | 'android' | 'web' を返す。Web(非ネイティブ)ではNative.
+// isNativeApp()がfalseになり、これを使う各メソッドの先頭でreturnするため、
 // ここに実際に到達するのは常にiOS/Androidのネイティブアプリ内のみ。
-function admobConfigForPlatform(){
+function capacitorPlatform(){
   try {
-    const platform = window.Capacitor && window.Capacitor.getPlatform ? window.Capacitor.getPlatform() : 'android';
-    return MONETIZATION_CONFIG.admob[platform] || MONETIZATION_CONFIG.admob.android;
-  } catch (e) { return MONETIZATION_CONFIG.admob.android; }
+    return (window.Capacitor && window.Capacitor.getPlatform) ? window.Capacitor.getPlatform() : 'android';
+  } catch (e) { return 'android'; }
+}
+function admobConfigForPlatform(){
+  const platform = capacitorPlatform();
+  return MONETIZATION_CONFIG.admob[platform] || MONETIZATION_CONFIG.admob.android;
 }
 
 let _billingReady = false;
@@ -1955,21 +1958,31 @@ const Native = {
       await AdMob.showInterstitial();
     } catch (e) { /* 未読込・オフライン時は何もしない(対局終了フロー自体は止めない) */ }
   },
-  /* ---- 課金(Google Play Billing, cordova-plugin-purchase想定) ----
+  /* ---- 課金(cordova-plugin-purchase, iOS: App Store / Android: Google Play Billing) ----
      https://purchase.cordova.fovea.cc/ のイベント駆動API(v13系)を前提にした実装例。
+     store.register/store.initializeは、実行中のOSに対応するプラットフォーム
+     (Platform.APPLE_APPSTORE または Platform.GOOGLE_PLAY)だけを登録する
+     ―両方いっぺんに登録すると、実機には存在しない方のストアにも問い合わせが
+     走ってしまうため。プロダクトID(billingProductId)はiOS/Android共通の
+     "remove_ads_unlock_history" を使う(App Store Connect側にも同じIDで
+     商品を作成しておくこと)。以降のapproved/verified/productUpdatedの
+     イベントハンドラ、およびrestorePurchases/purchasePremiumは、cdvpurchase
+     のTransaction/Receipt/Productがプラットフォームを問わず共通のAPIで
+     扱える設計になっているため、iOS/Android共通のコードのままで動作する。
      プラグインのバージョンによりAPIが変わることがあるため、実機ビルド時は
      公式ドキュメントで最新のAPIを確認してください(このサンドボックスでは
-     Android実機・Play Billingサンドボックスでの検証ができていません)。 */
+     iOS/Android実機・各ストアのサンドボックスでの検証ができていません)。 */
   async initBilling(){
     if (!this.isNativeApp() || _billingReady) return;
     try {
       const store = window.CdvPurchase && window.CdvPurchase.store;
       if (!store) return;
       _billingReady = true;
+      const storePlatform = capacitorPlatform() === 'ios' ? store.Platform.APPLE_APPSTORE : store.Platform.GOOGLE_PLAY;
       store.register([{
         id: MONETIZATION_CONFIG.billingProductId,
         type: store.ProductType.NON_CONSUMABLE,
-        platform: store.Platform.GOOGLE_PLAY,
+        platform: storePlatform,
       }]);
       store.when().approved(transaction => transaction.verify());
       store.when().verified(receipt => receipt.finish());
@@ -1984,7 +1997,10 @@ const Native = {
         }
         if (owned) _resolvePendingPurchase(true);
       });
-      await store.initialize([store.GOOGLE_PLAY]);
+      // 修正前は store.initialize([store.GOOGLE_PLAY]) と、Platformを経由しない
+      // 誤った参照になっていた(正しくは store.Platform.GOOGLE_PLAY)。加えて
+      // Android決め打ちだったため、iOSでは課金が一切初期化されていなかった。
+      await store.initialize([storePlatform]);
     } catch (e) { /* 課金SDK初期化に失敗しても無料枠のまま安全に継続する */ }
   },
   // 戻り値: true(有効な購入あり) / false(購入なし) / null(判定できなかった＝

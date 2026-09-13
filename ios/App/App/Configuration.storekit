@@ -1,0 +1,31 @@
+{
+  "identifier" : "7B45D2FB",
+  "nonRenewingSubscriptions" : [],
+  "products" : [
+    {
+      "displayPrice" : "400",
+      "familyShareable" : false,
+      "internalID" : "C6F329DC",
+      "localizations" : [
+        {
+          "description" : "広告を非表示にし、対局記録を無制限に保存できるようにします。",
+          "displayName" : "広告削除＋記録し放題",
+          "locale" : "ja"
+        }
+      ],
+      "productID" : "remove_ads_unlock_history",
+      "referenceName" : "広告削除＋記録し放題",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "",
+    "_developerTeamID" : "",
+    "_lastSynchronizedDate" : 0
+  },
+  "subscriptionGroups" : [],
+  "version" : {
+    "major" : 2,
+    "minor" : 0
+  }
+}
