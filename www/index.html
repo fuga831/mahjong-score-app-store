@@ -299,6 +299,20 @@
   }
   .row-ron .amt{color:var(--red-soft);}
 
+  /* ---- 符計算の内訳(学習用の可視化表示) ---- */
+  .fu-breakdown{
+    margin-top:8px;
+    padding-top:8px;
+    border-top:1px dashed var(--line);
+    display:flex;
+    flex-direction:column;
+    gap:3px;
+    font-size:.68rem;
+    color:var(--ink-soft);
+    line-height:1.5;
+    word-break:break-word;
+  }
+
   /* ---- section blocks ---- */
   section{
     background:var(--felt-1);
@@ -1451,30 +1465,70 @@ function mentsuFu(m){
 function shanponRonFu(terminal){ return terminal ? 4 : 2; }   // = minko value
 function shanponTsumoFu(terminal){ return terminal ? 8 : 4; } // = ankou value
 
-// calcFuPair(state) -> { fuRon, fuTsumo } computed independently, because a
-// hand's fu is not always the same for both winning methods (menzen-ron
-// bonus only applies to ron; tsumo bonus only applies to tsumo; and a
-// shanpon-completed set flips between minko/ankou — see above).
-function calcFuPair(s){
-  if (s.keitai === 'chiitoitsu') return { fuRon: 25, fuTsumo: 25 };
-  if (s.keitai === 'pinfu')      return { fuRon: 30, fuTsumo: 20 }; // pinfu locks both fixed values
+// calcFuBreakdown(state) -> { fuRon, fuTsumo, ron, tsumo } — 符計算を、UIで
+// そのまま表示できる内訳(積み上げ項目の配列)付きで返す。ron/tsumoはそれぞれ
+// { items:[{label,value}], subtotal, rounded, final } の形。
+// items を合計 → 10符単位に切り上げ → (鳴きのみ)30符の最低保証、という
+// 3段階の値をそのまま subtotal/rounded/final として保持しているので、
+// 内訳表示側は計算をやり直さずにこれらをつなげて表示するだけでよい
+// (=表示用の値と実際にスコア計算へ渡す値が原理的にズレない)。
+// fuRon/fuTsumoはron.final/tsumo.finalと同じ値で、既存のcalcFuPair()と
+// 完全に同じ計算結果を返す(内訳を求める過程で同じ式を積み上げているだけ)。
+function calcFuBreakdown(s){
+  if (s.keitai === 'chiitoitsu') {
+    const items = [{ label: '七対子(固定)', value: 25 }];
+    const side = { items, subtotal: 25, rounded: 25, final: 25 };
+    return { fuRon: 25, fuTsumo: 25, ron: side, tsumo: side };
+  }
+  if (s.keitai === 'pinfu') { // pinfu locks both fixed values
+    const ron = { items: [{ label: '平和(ロン, 固定)', value: 30 }], subtotal: 30, rounded: 30, final: 30 };
+    const tsumo = { items: [{ label: '平和(ツモ, 固定)', value: 20 }], subtotal: 20, rounded: 20, final: 20 };
+    return { fuRon: 30, fuTsumo: 20, ron, tsumo };
+  }
 
   const isClosed = s.keitai !== 'naki';
-  const waitBonus = s.machi === 'bad' ? 2 : 0; // ryanmen and shanpon both add 0 here
-  const shared = waitBonus + (s.yakuhaiHead?2:0) + s.mentsuList.reduce((sum, m) => sum + mentsuFu(m), 0);
-  const shanponRon = s.machi === 'shanpon' ? shanponRonFu(s.shanponTerminal) : 0;
-  const shanponTsumo = s.machi === 'shanpon' ? shanponTsumoFu(s.shanponTerminal) : 0;
+  const mentsuItems = s.mentsuList.map(m => ({
+    label: `${m.ankou ? '暗' : '明'}${m.isKan ? '槓' : '刻'}(${m.terminal ? '1・9・字' : '中張'})`,
+    value: mentsuFu(m),
+  }));
+  const waitItem = s.machi === 'bad' ? { label: '待ち(カンチャン・ペンチャン・単騎)', value: 2 } : null; // ryanmen and shanpon both add 0 here
+  const headItem = s.yakuhaiHead ? { label: '雀頭(役牌)', value: 2 } : null;
 
-  let fuRon = roundUpTo(FU_BASE + (isClosed ? FU_MENZEN_RON_BONUS : 0) + shared + shanponRon, 10);
-  let fuTsumo = roundUpTo(FU_BASE + FU_TSUMO_BONUS + shared + shanponTsumo, 10);
-
-  // 鳴きで加符が何も無い形（いわゆる喰い平和形）は20符になってしまうが、
-  // 実戦のルールでは30符が最低ラインとして扱われる。
-  if (!isClosed) {
-    fuRon = Math.max(fuRon, 30);
-    fuTsumo = Math.max(fuTsumo, 30);
+  // isRonごとに、副底→面子→待ち→雀頭→(門前ロン/ツモ)の順で内訳を積み上げる。
+  function buildSide(isRon){
+    const items = [{ label: '副底', value: FU_BASE }, ...mentsuItems];
+    if (waitItem) items.push(waitItem);
+    if (s.machi === 'shanpon') {
+      // シャンポンの対子は、ロンなら明刻・ツモなら暗刻として扱われるため、
+      // ron/tsumoで別の値になる(shanponRonFu/shanponTsumoFu参照)。
+      items.push(isRon
+        ? { label: '待ち(シャンポン→明刻扱い)', value: shanponRonFu(s.shanponTerminal) }
+        : { label: '待ち(シャンポン→暗刻扱い)', value: shanponTsumoFu(s.shanponTerminal) });
+    }
+    if (headItem) items.push(headItem);
+    if (isRon) {
+      if (isClosed) items.push({ label: '門前ロン', value: FU_MENZEN_RON_BONUS });
+    } else {
+      items.push({ label: 'ツモ', value: FU_TSUMO_BONUS });
+    }
+    const subtotal = items.reduce((sum, it) => sum + it.value, 0);
+    const rounded = roundUpTo(subtotal, 10);
+    // 鳴きで加符が何も無い形（いわゆる喰い平和形）は20符になってしまうが、
+    // 実戦のルールでは30符が最低ラインとして扱われる。
+    const final = isClosed ? rounded : Math.max(rounded, 30);
+    return { items, subtotal, rounded, final };
   }
-  return { fuRon, fuTsumo };
+
+  const ron = buildSide(true);
+  const tsumo = buildSide(false);
+  return { fuRon: ron.final, fuTsumo: tsumo.final, ron, tsumo };
+}
+
+// calcFuPair(state) -> { fuRon, fuTsumo }。既存の呼び出し元との互換のため
+// 残しているが、実体はcalcFuBreakdown()の値をそのまま使う薄いラッパー。
+function calcFuPair(s){
+  const b = calcFuBreakdown(s);
+  return { fuRon: b.fuRon, fuTsumo: b.fuTsumo };
 }
 
 // calcBase(han, fu, isKiriageMangan) -> the 基本点(A) for one han/fu pair.
@@ -1813,17 +1867,46 @@ function render(){
     const r = calcScore(state.isDealer, info.minHan, 0, 0, state.kiriageMangan);
     panel.innerHTML = resultHtml(`${info.name}（${info.sub}）`, null, null, r);
   } else {
+    // 符数直接入力モードでは計算過程自体が存在しない(手入力値をそのまま使う)ため
+    // 内訳(breakdown)はnullのままにし、resultHtml側で内訳表示を省略する。
+    const breakdown = state.fuDirectMode ? null : calcFuBreakdown(state);
     const { fuRon, fuTsumo } = state.fuDirectMode
       ? (() => { const f = normalizeManualFu(state.manualFu); return { fuRon: f, fuTsumo: f }; })()
-      : calcFuPair(state);
+      : breakdown;
     const r = calcScore(state.isDealer, state.hanTier, fuRon, fuTsumo, state.kiriageMangan);
     const ronFuLabel = r.ronCapped ? `${fuRon}符→満貫` : `${fuRon}符`;
     const tsumoFuLabel = r.tsumoCapped ? `${fuTsumo}符→満貫` : `${fuTsumo}符`;
-    panel.innerHTML = resultHtml(`${state.hanTier}翻`, ronFuLabel, tsumoFuLabel, r);
+    panel.innerHTML = resultHtml(`${state.hanTier}翻`, ronFuLabel, tsumoFuLabel, r, breakdown);
   }
 }
 
-function resultHtml(stateLabel, ronFuLabel, tsumoFuLabel, r){
+// 符計算の内訳1本分(ron側 or tsumo側)を「項目1a + 項目b = 小計符 → 切り上げ後符」
+// の文字列に組み立てる。要素が1つしかない(七対子・平和の固定値)場合は
+// 「〇〇(固定)25符」のように単独表示し、冗長な「= 25符」を付けない。
+function formatFuBreakdown(side){
+  const parts = side.items.map(it => `${it.label}${it.value}符`).join(' + ');
+  // 項目が1つだけ(七対子・平和の固定値、または鳴きで加符が無いだけの手)の
+  // 場合は、冗長な「= 〇〇符」を付けずラベル+値だけを表示する。
+  let text = side.items.length > 1 ? `${parts} = ${side.subtotal}符` : parts;
+  if (side.rounded !== side.subtotal) text += ` → ${side.rounded}符(切り上げ)`;
+  if (side.final !== side.rounded) text += ` → ${side.final}符(鳴きは30符が最低)`;
+  return text;
+}
+
+// ロン/ツモで内訳(項目の並び・値)が完全に一致する場合(七対子など)は1行に
+// まとめ、そうでなければ「ロン:」「ツモ:」を頭に付けて2行に分けて表示する。
+function fuBreakdownHtml(breakdown){
+  if (!breakdown) return '';
+  const sameBothSides = breakdown.ron.items.length === breakdown.tsumo.items.length
+    && breakdown.ron.items.every((it, i) =>
+      it.label === breakdown.tsumo.items[i].label && it.value === breakdown.tsumo.items[i].value);
+  const lines = sameBothSides
+    ? [formatFuBreakdown(breakdown.ron)]
+    : [`ロン: ${formatFuBreakdown(breakdown.ron)}`, `ツモ: ${formatFuBreakdown(breakdown.tsumo)}`];
+  return `<div class="fu-breakdown">${lines.map(l => `<div>${escapeHtml(l)}</div>`).join('')}</div>`;
+}
+
+function resultHtml(stateLabel, ronFuLabel, tsumoFuLabel, r, breakdown){
   const tsumoHtml = r.tsumo.all !== undefined
     ? `<span class="pt">${fmt(r.tsumo.all)}</span><span class="all">ALL</span>`
     : `<span class="split">
@@ -1844,6 +1927,7 @@ function resultHtml(stateLabel, ronFuLabel, tsumoFuLabel, r){
         <span class="amt">${tsumoHtml}</span>
       </div>
     </div>
+    ${fuBreakdownHtml(breakdown)}
   `;
 }
 
