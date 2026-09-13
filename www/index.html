@@ -1111,7 +1111,9 @@
     gap:8px;
   }
   .help-screenshot{
+    max-width:100%;
     width:100%;
+    height:auto;
     display:block;
     border-radius:10px;
     border:1px solid var(--line);
@@ -4540,8 +4542,16 @@ function renderPaywallModal(){
 // 文字だけの表示にフォールバックする)。実際にどの画面を撮ればよいかは
 // captionの内容と対応させてある。
 const HELP_STEPS = [
-  { img: 'help/01-calc.png', caption: '「点数計算」タブで翻・符(または符を直接入力)を選ぶと、点数が自動で計算されます。' },
-  { img: 'help/02-record.png', caption: '「得点記録」タブの入力欄に半荘ごとの素点を入力し、「半荘を記録」で記録します。' },
+  {
+    img: 'assets/images/help-01-score-calc-3steps.jpg',
+    alt: '点数計算はカンタン3ステップ: 1.役・翻数を選ぶ 2.翻や符を選ぶ 3.点数が自動で計算される、を画面例つきで説明した図解',
+    caption: '「点数計算」タブで翻・符(または符を直接入力)を選ぶと、点数が自動で計算されます。',
+  },
+  {
+    img: 'assets/images/help-02-record-match-6steps.jpg',
+    alt: '対局を記録して成績をいつでも確認: 1.対局のルールを設定 2.詳細なルールを設定 3.半荘ごとの素点を入力 4.対局を終了する 5.結果が履歴に保存される 6.履歴や詳細・通算成績を確認、を画面例つきで説明した図解',
+    caption: '「得点記録」タブの入力欄に半荘ごとの素点を入力し、「半荘を記録」で記録します。',
+  },
   { img: 'help/03-end.png', caption: '対局が終わったら「対局を終了する」を押すと、この対局が履歴に保存されます。' },
   { img: 'help/04-history.png', caption: '☰(対局履歴)から、保存した対局の一覧・詳細・通算成績をいつでも確認できます。' },
   { img: 'help/05-account.png', caption: '👤(アカウント)から連携すると、同卓者の指定・対局記録の自動共有ができます。' },
@@ -4560,7 +4570,7 @@ function renderHelpModal(){
   if (!logState.ui.helpOpen) { root.innerHTML = ''; return; }
   const stepsHtml = HELP_STEPS.map((step, i) => `
     <li class="help-step">
-      <img class="help-screenshot" src="${escapeHtml(step.img)}" alt="使い方 手順${i+1}" loading="lazy" onerror="this.remove()">
+      <img class="help-screenshot" src="${escapeHtml(step.img)}" alt="${escapeHtml(step.alt || `使い方 手順${i+1}`)}" loading="lazy" onerror="this.remove()">
       <span>${escapeHtml(step.caption)}</span>
     </li>`).join('');
   root.innerHTML = `
