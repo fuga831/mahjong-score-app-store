@@ -929,6 +929,73 @@
     padding:2px 0;
   }
   .stat-row b{color:var(--ivory);font-variant-numeric:tabular-nums;}
+
+  /* ---- 総成績(アカウント) ---- */
+  .overall-stats-summary{ margin-bottom:18px; }
+  .overall-stats-total{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-size:.88rem;
+    color:var(--ivory);
+    margin-bottom:12px;
+  }
+  .overall-stats-total b{
+    font-size:1.15rem;
+    color:var(--gold-strong);
+    font-variant-numeric:tabular-nums;
+  }
+  .rank-bars{ display:flex; flex-direction:column; gap:8px; }
+  .rank-bar-row{ display:flex; align-items:center; gap:8px; }
+  .rank-bar-label{
+    width:2.4em; flex-shrink:0;
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-size:.78rem;
+    color:var(--ivory-dim);
+  }
+  .rank-bar-track{
+    flex:1;
+    height:14px;
+    background:var(--felt-2);
+    border-radius:999px;
+    overflow:hidden;
+  }
+  .rank-bar-fill{ height:100%; border-radius:999px; }
+  .rank-bar-1{ background:var(--gold); }
+  .rank-bar-2{ background:#c7b988; }
+  .rank-bar-3{ background:#7c9d8b; }
+  .rank-bar-4{ background:var(--red-soft); }
+  .rank-bar-value{
+    width:6.6em;
+    flex-shrink:0;
+    text-align:right;
+    font-size:.72rem;
+    color:var(--ink-soft);
+    font-variant-numeric:tabular-nums;
+  }
+  .rank-trend-title{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-size:.82rem;
+    color:var(--ivory-dim);
+    margin-bottom:8px;
+    display:flex;
+    align-items:baseline;
+    gap:6px;
+  }
+  .rank-trend-svg{ width:100%; height:auto; display:block; }
+  .chart-gridline{ stroke:var(--line); stroke-width:1; vector-effect:non-scaling-stroke; }
+  .chart-axis-label{ font-size:7px; fill:var(--ink-soft); }
+  .chart-line{
+    fill:none;
+    stroke:var(--gold-strong);
+    stroke-width:1.6;
+    vector-effect:non-scaling-stroke;
+    stroke-linejoin:round;
+    stroke-linecap:round;
+  }
+  .chart-point{ fill:var(--gold); }
+
   .share-fallback-toast{
     margin:0 14px 12px;
     background:var(--felt-2);
@@ -2639,8 +2706,9 @@ function defaultLogState(){
       revealStep: 0,       // 発表済みの順位グループ数
       confirmEndMatch: false,   // 「対局を終了する」の誤タップ防止確認中か
       historyOpen: false,       // 対局履歴モーダルを開いているか
-      historyView: 'list',      // 'list' | 'detail' | 'stats'
+      historyView: 'list',      // 'list' | 'detail' | 'stats' | 'overallStats'
       historyDetailId: null,
+      overallStatsPlayer: null, // 「アカウント」タブ(総成績)で選択中のプレイヤー名(nullなら自動選択)
       editingArchiveTitleId: null,
       confirmDeleteArchiveId: null,
       importResultMsg: null,
@@ -3864,6 +3932,14 @@ function openHistoryStats(){
   logState.ui.historyView = 'stats';
   scheduleRenderApp();
 }
+function openOverallStats(){
+  logState.ui.historyView = 'overallStats';
+  scheduleRenderApp();
+}
+function setOverallStatsPlayer(name){
+  logState.ui.overallStatsPlayer = name;
+  scheduleRenderApp();
+}
 
 /* ---- フレンド絞り込み: このuidが参加者に含まれる対局だけを返す ---- */
 function filterMatchHistoryByFriend(matchHistory, filter){
@@ -4020,6 +4096,156 @@ function calcCareerStats(matchHistory, playerName){
     totalMoney: moneySum,
     tobiCount,
   };
+}
+
+/* ---- 総成績(ハンバーガーメニュー「アカウント」) ----
+   フレンド・卓の概念とは無関係に、この端末に保存されている対局記録
+   (logState.matchHistory)だけを対象にした、プレイヤー1人分の通算成績。
+   複数の相手グループを跨いでも「自分がどの順位を何回取ったか」「平均着順が
+   どう推移しているか」が分かるようにする。 ---- */
+
+// これまでの全対局に一度でも登場したプレイヤー名を、実際に半荘へ参加した
+// 回数が多い順に返す(先頭が「自分」である可能性が最も高い名前になる)。
+function getAllPlayerNamesEverPlayed(matchHistory){
+  const counts = {};
+  matchHistory.forEach(m => {
+    const s = m.settingsSnapshot;
+    if (!s) return;
+    const players = s.playerNames.slice(0, s.playerCount);
+    m.hanchans.forEach(h => {
+      players.forEach(p => { if (p in h.scores) counts[p] = (counts[p] || 0) + 1; });
+    });
+  });
+  return Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b));
+}
+
+const OVERALL_STATS_MOVING_AVG_WINDOW = 10; // 平均着順グラフの移動平均の対象半荘数
+
+// calcOverallStats(matchHistory, playerName) -> プレイヤー1人分の通算成績。
+// matchHistoryはstartedAt昇順(=対局が行われた時系列順)に並べ替えてから、
+// 各対局のhanchans(こちらも記録された順)を順番に走査し、「このプレイヤーが
+// 実際にプレイした半荘」だけを対象に通し番号を振る。
+function calcOverallStats(matchHistory, playerName){
+  if (!playerName) return null;
+  const sorted = [...matchHistory].sort((a, b) =>
+    new Date(a.startedAt || a.endedAt || 0) - new Date(b.startedAt || b.endedAt || 0));
+
+  const rankCounts = {}; // { 1: 回数, 2: 回数, ... }
+  const series = [];     // [{ index, rank, pc(その半荘の人数), movingAvg }]
+
+  sorted.forEach(m => {
+    const s = m.settingsSnapshot;
+    if (!s) return;
+    const players = s.playerNames.slice(0, s.playerCount);
+    if (!players.includes(playerName)) return;
+    m.hanchans.forEach(h => {
+      if (!(playerName in h.scores)) return;
+      const entries = players.map(p => ({ name: p, score: h.scores[p] }));
+      const ranked = rankPlayers(entries);
+      const me = ranked.find(r => r.name === playerName);
+      // 順位分布の集計は、既存のcalcCareerStats()のtopRate等と同じく、
+      // 同着なら上位側(loRank)のバケットにまとめて数える。
+      rankCounts[me.loRank] = (rankCounts[me.loRank] || 0) + 1;
+      series.push({
+        index: series.length + 1,
+        rank: (me.loRank + me.hiRank) / 2, // 平均着順の推移では帯の平均順位を使う
+        pc: players.length,
+      });
+    });
+  });
+
+  series.forEach((pt, i) => {
+    const from = Math.max(0, i - OVERALL_STATS_MOVING_AVG_WINDOW + 1);
+    const windowPts = series.slice(from, i + 1);
+    pt.movingAvg = windowPts.reduce((sum, w) => sum + w.rank, 0) / windowPts.length;
+  });
+
+  return { totalHanchans: series.length, rankCounts, series };
+}
+
+// 1位〜4位の獲得回数を横棒グラフで表示する(3人打ちのみの記録なら4位は0件になる)。
+function renderRankBars(stats){
+  const rows = [1, 2, 3, 4].map(rank => {
+    const count = stats.rankCounts[rank] || 0;
+    const pct = stats.totalHanchans > 0 ? (count / stats.totalHanchans) * 100 : 0;
+    return `
+      <div class="rank-bar-row">
+        <span class="rank-bar-label">${rank}位</span>
+        <div class="rank-bar-track"><div class="rank-bar-fill rank-bar-${rank}" style="width:${pct.toFixed(1)}%"></div></div>
+        <span class="rank-bar-value">${count}回(${pct.toFixed(1)}%)</span>
+      </div>`;
+  }).join('');
+  return `<div class="rank-bars">${rows}</div>`;
+}
+
+// 平均着順の推移を折れ線(SVG)で表示する。縦軸は1位を上端、実際に記録の
+// あった最大人数(3 or 4)を下端にした反転スケール(=上に行くほど好成績)。
+function renderRankTrendChart(series){
+  if (series.length === 0) return '';
+  const w = 300, h = 150, padL = 24, padR = 10, padT = 10, padB = 20;
+  const plotW = w - padL - padR, plotH = h - padT - padB;
+  const yMax = Math.max(...series.map(p => p.pc || 4), 3);
+  const n = series.length;
+  const xAt = i => padL + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+  const yAt = rank => padT + ((rank - 1) / (yMax - 1)) * plotH;
+
+  const points = series.map((p, i) => `${xAt(i).toFixed(1)},${yAt(p.movingAvg).toFixed(1)}`).join(' ');
+
+  let yTicks = '';
+  for (let r = 1; r <= yMax; r++) {
+    const yy = yAt(r);
+    yTicks += `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${w - padR}" y2="${yy.toFixed(1)}" class="chart-gridline" />`;
+    yTicks += `<text x="${padL - 4}" y="${(yy + 2.5).toFixed(1)}" class="chart-axis-label" text-anchor="end">${r}位</text>`;
+  }
+  const dots = series.map((p, i) =>
+    `<circle cx="${xAt(i).toFixed(1)}" cy="${yAt(p.movingAvg).toFixed(1)}" r="1.6" class="chart-point" />`).join('');
+  const xLabels = `
+    <text x="${xAt(0).toFixed(1)}" y="${h - 4}" class="chart-axis-label" text-anchor="start">${series[0].index}半荘目</text>
+    ${n > 1 ? `<text x="${xAt(n - 1).toFixed(1)}" y="${h - 4}" class="chart-axis-label" text-anchor="end">${series[n - 1].index}半荘目</text>` : ''}
+  `;
+
+  return `
+    <div class="rank-trend">
+      <div class="rank-trend-title">平均着順の推移<span class="hint">直近${OVERALL_STATS_MOVING_AVG_WINDOW}半荘の移動平均</span></div>
+      <svg viewBox="0 0 ${w} ${h}" class="rank-trend-svg" preserveAspectRatio="none">
+        ${yTicks}
+        <polyline points="${points}" class="chart-line" />
+        ${dots}
+        ${xLabels}
+      </svg>
+    </div>`;
+}
+
+function renderOverallStats(){
+  const matchHistory = logState.matchHistory;
+  const names = getAllPlayerNamesEverPlayed(matchHistory);
+  if (names.length === 0) {
+    return `<div class="history-empty">まだ記録がありません<br>対局を終了すると、ここに総成績が表示されます</div>`;
+  }
+
+  const selected = (logState.ui.overallStatsPlayer && names.includes(logState.ui.overallStatsPlayer))
+    ? logState.ui.overallStatsPlayer
+    : names[0];
+  logState.ui.overallStatsPlayer = selected; // 選んだ結果を覚えておく
+
+  const playerPicker = names.length > 1 ? `
+    <div class="preset-row" style="margin-bottom:12px;">
+      ${names.map(n => `<button class="preset-btn ${n === selected ? 'active' : ''}" onclick="setOverallStatsPlayer('${escKey(n)}')">${escapeHtml(n)}</button>`).join('')}
+    </div>` : '';
+
+  const stats = calcOverallStats(matchHistory, selected);
+  if (!stats || stats.totalHanchans === 0) {
+    return `${playerPicker}<div class="history-empty">${escapeHtml(selected)}さんの記録がありません</div>`;
+  }
+
+  return `
+    ${playerPicker}
+    <div class="overall-stats-summary">
+      <div class="overall-stats-total">総半荘数 <b>${stats.totalHanchans}</b>半荘</div>
+      ${renderRankBars(stats)}
+    </div>
+    ${renderRankTrendChart(stats.series)}
+  `;
 }
 
 function renderHistoryStats(){
@@ -4222,6 +4448,9 @@ function renderHistoryModal(){
   } else if (view === 'stats') {
     title = friendFilter ? `${escapeHtml(friendFilter.username)}さんとの成績` : '成績';
     bodyHtml = renderHistoryActionBar() + friendFilterBanner + renderHistoryStats();
+  } else if (view === 'overallStats') {
+    title = '総成績';
+    bodyHtml = renderHistoryActionBar() + renderOverallStats();
   } else {
     title = friendFilter ? `${escapeHtml(friendFilter.username)}さんとの対局` : '対局履歴';
     bodyHtml = friendFilter ? `
@@ -4257,10 +4486,11 @@ function renderHistoryModal(){
             : `<span class="history-modal-title">${title}</span>`}
           <button class="history-close" onclick="closeHistoryModal()">×</button>
         </div>
-        ${(view === 'list' || view === 'stats') ? `
+        ${(view === 'list' || view === 'stats' || view === 'overallStats') ? `
         <div class="history-tabs">
           <button class="preset-btn ${view==='list'?'active':''}" onclick="backToHistoryList()">対局一覧</button>
           <button class="preset-btn ${view==='stats'?'active':''}" onclick="openHistoryStats()">成績</button>
+          <button class="preset-btn ${view==='overallStats'?'active':''}" onclick="openOverallStats()">アカウント</button>
         </div>` : ''}
         <div class="history-modal-body">${bodyHtml}</div>
         ${logState.ui.shareFallbackMsg ? `<div class="share-fallback-toast">${escapeHtml(logState.ui.shareFallbackMsg)}</div>` : ''}
