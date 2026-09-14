@@ -526,16 +526,23 @@
     gap:14px;
   }
 
-  /* ---- bottom nav ---- */
+  /* ---- bottom nav ----
+     以前はrgba(12,42,32,.85)という半透明色から始まるグラデーションだった
+     ため、バー上端の帯だけ不透明度が100%未満になり、スクロールしてきた
+     コンテンツがバーの縁からうっすら透けて見えていた(backdrop-filterの
+     ぼかしだけでは不透明化されない)。felt-1→felt-0はどちらも完全不透明な
+     色なので、見た目のグラデーション(上端がやや明るい帯)は維持しつつ、
+     透過は完全に無くなる。box-shadowを追加し、コンテンツの上に独立した
+     1枚のパネルが乗っているように見せる。 ---- */
   .bottom-nav{
     position:fixed;
     left:0; right:0; bottom:0;
     display:flex;
     gap:8px;
     padding:8px 14px calc(8px + env(safe-area-inset-bottom, 0px));
-    background:linear-gradient(180deg, rgba(12,42,32,.85), var(--felt-0) 30%);
+    background:linear-gradient(180deg, var(--felt-1), var(--felt-0) 30%);
     border-top:1px solid var(--line);
-    backdrop-filter:blur(6px);
+    box-shadow:0 -4px 14px rgba(0,0,0,.32);
     z-index:20;
   }
   /* ストアアプリでバナー広告(ネイティブのオーバーレイビュー)を表示している間は、
@@ -930,7 +937,7 @@
   }
   .stat-row b{color:var(--ivory);font-variant-numeric:tabular-nums;}
 
-  /* ---- 総成績(アカウント) ---- */
+  /* ---- 通算成績(「成績」タブに統合) ---- */
   .overall-stats-summary{ margin-bottom:18px; }
   .overall-stats-total{
     font-family:"Zen Maru Gothic",sans-serif;
@@ -995,6 +1002,54 @@
     stroke-linecap:round;
   }
   .chart-point{ fill:var(--gold); }
+
+  /* ---- 成績タブ: 成績を見たい人を選ぶUI(タップで開くスクロール一覧) ---- */
+  .stats-player-picker{ margin-bottom:14px; }
+  .stats-player-picker-btn{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    width:100%;
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-size:.82rem;
+    color:var(--ivory);
+    background:var(--felt-2);
+    border:1.5px solid var(--line);
+    border-radius:10px;
+    padding:9px 12px;
+    cursor:pointer;
+  }
+  .stats-player-picker-btn .picker-caret{ color:var(--ink-soft); font-size:.7rem; }
+  .stats-player-picker-list{
+    margin-top:6px;
+    max-height:180px;
+    overflow-y:auto;
+    -webkit-overflow-scrolling:touch;
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    padding:2px 2px 2px 0;
+  }
+  .stats-player-picker-item{
+    text-align:left;
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-size:.8rem;
+    color:var(--ink-soft);
+    background:var(--felt-1);
+    border:1.5px solid var(--line);
+    border-radius:9px;
+    padding:8px 12px;
+    cursor:pointer;
+    flex-shrink:0;
+  }
+  .stats-player-picker-item.active{
+    color:var(--gold-strong);
+    border-color:var(--gold);
+    background:var(--felt-2);
+  }
 
   .share-fallback-toast{
     margin:0 14px 12px;
@@ -2250,10 +2305,11 @@ function isPremiumUnlocked(){
 function normalizeUsername(name){
   return String(name || '').trim().toLowerCase().replace(/\s+/g, '');
 }
-// 半角英数字とアンダースコアのみ、3〜20文字。招待・検索用の識別子として
-// 曖昧さが出ないように制限する(絵文字・全角文字は不可)。
+// 半角英数字・アンダースコア・ひらがな・カタカナ・漢字のみ、3〜20文字。
+// 絵文字・制御文字・記号など表示上問題になりうる文字は招待・検索用の
+// 識別子として不可とする。
 function isValidUsernameFormat(name){
-  return /^[a-z0-9_]{3,20}$/.test(normalizeUsername(name));
+  return /^[a-z0-9_぀-ゟ゠-ヿ㐀-䶿一-鿿]{3,20}$/.test(normalizeUsername(name));
 }
 
 const CloudSync = {
@@ -2752,9 +2808,10 @@ function defaultLogState(){
       revealStep: 0,       // 発表済みの順位グループ数
       confirmEndMatch: false,   // 「対局を終了する」の誤タップ防止確認中か
       historyOpen: false,       // 対局履歴モーダルを開いているか
-      historyView: 'list',      // 'list' | 'detail' | 'stats' | 'overallStats'
+      historyView: 'list',      // 'list' | 'detail' | 'stats'
       historyDetailId: null,
-      overallStatsPlayer: null, // 「アカウント」タブ(総成績)で選択中のプレイヤー名(nullなら自動選択)
+      statsPlayer: null,        // 「成績」タブで選択中のプレイヤー名(nullなら自動選択)
+      statsPlayerPickerOpen: false, // 「成績」タブのプレイヤー選択(スクロール一覧)が開いているか
       editingArchiveTitleId: null,
       confirmDeleteArchiveId: null,
       importResultMsg: null,
@@ -3360,7 +3417,7 @@ function setUsernameInput(v){ logState.ui.usernameInput = v; }
 async function submitUsername(){
   const name = (logState.ui.usernameInput || '').trim();
   if (!isValidUsernameFormat(name)) {
-    logState.ui.usernameError = '半角英数字・アンダースコアのみ、3〜20文字で入力してください';
+    logState.ui.usernameError = '半角英数字・アンダースコア・ひらがな・カタカナ・漢字のみ、3〜20文字で入力してください';
     scheduleRenderApp();
     return;
   }
@@ -3983,12 +4040,13 @@ function openHistoryStats(){
   logState.ui.historyView = 'stats';
   scheduleRenderApp();
 }
-function openOverallStats(){
-  logState.ui.historyView = 'overallStats';
+function toggleStatsPlayerPicker(){
+  logState.ui.statsPlayerPickerOpen = !logState.ui.statsPlayerPickerOpen;
   scheduleRenderApp();
 }
-function setOverallStatsPlayer(name){
-  logState.ui.overallStatsPlayer = name;
+function setStatsPlayer(name){
+  logState.ui.statsPlayer = name;
+  logState.ui.statsPlayerPickerOpen = false;
   scheduleRenderApp();
 }
 
@@ -4149,7 +4207,7 @@ function calcCareerStats(matchHistory, playerName){
   };
 }
 
-/* ---- 総成績(ハンバーガーメニュー「アカウント」) ----
+/* ---- 通算成績(「成績」タブに統合。旧ハンバーガーメニュー「アカウント」) ----
    フレンド・卓の概念とは無関係に、この端末に保存されている対局記録
    (logState.matchHistory)だけを対象にした、プレイヤー1人分の通算成績。
    複数の相手グループを跨いでも「自分がどの順位を何回取ったか」「平均着順が
@@ -4267,30 +4325,12 @@ function renderRankTrendChart(series){
     </div>`;
 }
 
-function renderOverallStats(){
-  const matchHistory = logState.matchHistory;
-  const names = getAllPlayerNamesEverPlayed(matchHistory);
-  if (names.length === 0) {
-    return `<div class="history-empty">まだ記録がありません<br>対局を終了すると、ここに総成績が表示されます</div>`;
-  }
-
-  const selected = (logState.ui.overallStatsPlayer && names.includes(logState.ui.overallStatsPlayer))
-    ? logState.ui.overallStatsPlayer
-    : names[0];
-  logState.ui.overallStatsPlayer = selected; // 選んだ結果を覚えておく
-
-  const playerPicker = names.length > 1 ? `
-    <div class="preset-row" style="margin-bottom:12px;">
-      ${names.map(n => `<button class="preset-btn ${n === selected ? 'active' : ''}" onclick="setOverallStatsPlayer('${escKey(n)}')">${escapeHtml(n)}</button>`).join('')}
-    </div>` : '';
-
+// 選んだ人の通算成績(総半荘数・順位分布・平均着順の推移)部分のHTML片を返す。
+// データが無ければ空文字を返す(呼び出し側で他の内容と合わせて空欄判定する)。
+function renderOverallStatsSection(matchHistory, selected){
   const stats = calcOverallStats(matchHistory, selected);
-  if (!stats || stats.totalHanchans === 0) {
-    return `${playerPicker}<div class="history-empty">${escapeHtml(selected)}さんの記録がありません</div>`;
-  }
-
+  if (!stats || stats.totalHanchans === 0) return '';
   return `
-    ${playerPicker}
     <div class="overall-stats-summary">
       <div class="overall-stats-total">総半荘数 <b>${stats.totalHanchans}</b>半荘</div>
       ${renderRankBars(stats)}
@@ -4299,56 +4339,96 @@ function renderOverallStats(){
   `;
 }
 
+// 成績を見たい人を選ぶUI。タップで開閉するスクロール一覧で、一覧内の項目を
+// 直接タップして選択が完結する(候補が1人だけの時は選ぶ意味がないため出さない)。
+function renderStatsPlayerPicker(names, selected){
+  if (names.length <= 1) return '';
+  const open = logState.ui.statsPlayerPickerOpen;
+  return `
+    <div class="stats-player-picker">
+      <button class="stats-player-picker-btn" onclick="toggleStatsPlayerPicker()">
+        <span>👤 ${escapeHtml(selected)}さんの成績</span>
+        <span class="picker-caret">${open ? '▲' : '▼'}</span>
+      </button>
+      ${open ? `
+        <div class="stats-player-picker-list">
+          ${names.map(n => `<button class="stats-player-picker-item ${n === selected ? 'active' : ''}" onclick="setStatsPlayer('${escKey(n)}')">${escapeHtml(n)}</button>`).join('')}
+        </div>` : ''}
+    </div>`;
+}
+
 function renderHistoryStats(){
   const filter = logState.ui.historyFriendFilter;
   const source = filterMatchHistoryByFriend(logState.matchHistory, filter);
   if (source.length === 0) {
     return filter
       ? `<div class="history-empty">${escapeHtml(filter.username)}さんと同卓した対局はまだありません</div>`
-      : `<div class="history-empty">まだ成績データがありません<br>対局を終了すると、ここに通算成績が表示されます</div>`;
+      : `<div class="history-empty">まだ成績データがありません<br>対局を終了すると、ここに成績が表示されます</div>`;
   }
-  // メンバー構成（参加者の名前の組み合わせ）ごとにグループ分けする。
+
+  // 成績を見たい人を選ぶ(先頭は最も多く登場した名前=「自分」である可能性が高い)。
+  const names = getAllPlayerNamesEverPlayed(source);
+  if (names.length === 0) {
+    return `<div class="history-empty">まだ成績データがありません<br>対局を終了すると、ここに成績が表示されます</div>`;
+  }
+  const selected = (logState.ui.statsPlayer && names.includes(logState.ui.statsPlayer))
+    ? logState.ui.statsPlayer
+    : names[0];
+  logState.ui.statsPlayer = selected; // 選んだ結果を覚えておく
+
+  // a) メンバー構成(参加者の組み合わせ)ごとの成績カード。選んだ人が参加した
+  //    対局だけを対象に、これまでと同じカード形式で表示する。
   const groups = {};
   source.forEach(m => {
     const s = m.settingsSnapshot;
     const players = s.playerNames.slice(0, s.playerCount);
+    if (!players.includes(selected)) return;
     const key = memberKey(players);
     if (!groups[key]) groups[key] = { players, playerCount: s.playerCount, matches: [] };
     groups[key].matches.push(m);
   });
   const groupList = Object.values(groups).sort((a,b) => b.matches.length - a.matches.length);
 
-  return groupList.map(g => {
+  const groupsHtml = groupList.map(g => {
     const totalHanchans = g.matches.reduce((sum,m)=>sum+m.hanchans.length, 0);
-    const cards = g.players.map(p => {
-      const st = calcCareerStats(g.matches, p);
-      if (!st) return '';
-      const primaryLine = g.playerCount === 4
-        ? `<div class="stat-row">連対率 <b>${(st.top2Rate*100).toFixed(0)}%</b></div>`
-        : `<div class="stat-row">トップ率 <b>${(st.topRate*100).toFixed(0)}%</b> ／ ラス回避率 <b>${(st.lastAvoidRate*100).toFixed(0)}%</b></div>`;
-      const secondaryLine = g.playerCount === 4
-        ? `<div class="stat-row">トップ率 <b>${(st.topRate*100).toFixed(0)}%</b> ／ ラス率 <b>${(st.lastRate*100).toFixed(0)}%</b></div>`
-        : `<div class="stat-row">ラス率 <b>${(st.lastRate*100).toFixed(0)}%</b></div>`;
-      const moneyColor = v => v >= 0 ? '#9fe0bd' : 'var(--red-soft)';
-      return `
-        <div class="stat-card">
-          <div class="stat-name">${escapeHtml(p)}</div>
-          <div class="stat-row">平均順位 <b>${st.avgRank.toFixed(2)}</b></div>
-          <div class="stat-row">試合数 <b>${st.games}半荘</b></div>
-          ${primaryLine}
-          ${secondaryLine}
-          <div class="stat-row">MAX得点 <b>${st.maxScore.toLocaleString()}</b></div>
-          <div class="stat-row">飛んだ回数 <b>${st.tobiCount}回</b></div>
-          <div class="stat-row">平均収支(半荘あたり) <b style="color:${moneyColor(st.avgMoneyPerHanchan)}">${formatMoney(st.avgMoneyPerHanchan)}</b></div>
-          <div class="stat-row">通算収支 <b style="color:${moneyColor(st.totalMoney)}">${formatMoney(st.totalMoney)}</b></div>
-        </div>`;
-    }).join('');
+    const st = calcCareerStats(g.matches, selected);
+    if (!st) return '';
+    const primaryLine = g.playerCount === 4
+      ? `<div class="stat-row">連対率 <b>${(st.top2Rate*100).toFixed(0)}%</b></div>`
+      : `<div class="stat-row">トップ率 <b>${(st.topRate*100).toFixed(0)}%</b> ／ ラス回避率 <b>${(st.lastAvoidRate*100).toFixed(0)}%</b></div>`;
+    const secondaryLine = g.playerCount === 4
+      ? `<div class="stat-row">トップ率 <b>${(st.topRate*100).toFixed(0)}%</b> ／ ラス率 <b>${(st.lastRate*100).toFixed(0)}%</b></div>`
+      : `<div class="stat-row">ラス率 <b>${(st.lastRate*100).toFixed(0)}%</b></div>`;
+    const moneyColor = v => v >= 0 ? '#9fe0bd' : 'var(--red-soft)';
     return `
       <div class="stat-group">
         <div class="stat-group-head"><span>${escapeHtml(g.players.join('・'))}</span><span class="hint">${g.matches.length}対局・${totalHanchans}半荘</span></div>
-        <div class="stat-cards">${cards}</div>
+        <div class="stat-cards">
+          <div class="stat-card">
+            <div class="stat-name">${escapeHtml(selected)}</div>
+            <div class="stat-row">平均順位 <b>${st.avgRank.toFixed(2)}</b></div>
+            <div class="stat-row">試合数 <b>${st.games}半荘</b></div>
+            ${primaryLine}
+            ${secondaryLine}
+            <div class="stat-row">MAX得点 <b>${st.maxScore.toLocaleString()}</b></div>
+            <div class="stat-row">飛んだ回数 <b>${st.tobiCount}回</b></div>
+            <div class="stat-row">平均収支(半荘あたり) <b style="color:${moneyColor(st.avgMoneyPerHanchan)}">${formatMoney(st.avgMoneyPerHanchan)}</b></div>
+            <div class="stat-row">通算収支 <b style="color:${moneyColor(st.totalMoney)}">${formatMoney(st.totalMoney)}</b></div>
+          </div>
+        </div>
       </div>`;
   }).join('');
+
+  // b) 通算成績(総半荘数・順位分布・平均着順の推移)。メンバー構成を問わず、
+  //    選んだ人が参加した(このタブに表示中の範囲の)全半荘をまとめて集計する
+  //    (旧ハンバーガーメニュー「アカウント」タブの内容)。
+  const overallHtml = renderOverallStatsSection(source, selected);
+
+  const picker = renderStatsPlayerPicker(names, selected);
+  if (!groupsHtml && !overallHtml) {
+    return `${picker}<div class="history-empty">${escapeHtml(selected)}さんの記録がありません</div>`;
+  }
+  return `${picker}${groupsHtml}${overallHtml}`;
 }
 
 /* ---- エクスポート / インポート / シェア ---- */
@@ -4499,9 +4579,6 @@ function renderHistoryModal(){
   } else if (view === 'stats') {
     title = friendFilter ? `${escapeHtml(friendFilter.username)}さんとの成績` : '成績';
     bodyHtml = renderHistoryActionBar() + friendFilterBanner + renderHistoryStats();
-  } else if (view === 'overallStats') {
-    title = '総成績';
-    bodyHtml = renderHistoryActionBar() + renderOverallStats();
   } else {
     title = friendFilter ? `${escapeHtml(friendFilter.username)}さんとの対局` : '対局履歴';
     bodyHtml = friendFilter ? `
@@ -4537,11 +4614,10 @@ function renderHistoryModal(){
             : `<span class="history-modal-title">${title}</span>`}
           <button class="history-close" onclick="closeHistoryModal()">×</button>
         </div>
-        ${(view === 'list' || view === 'stats' || view === 'overallStats') ? `
+        ${(view === 'list' || view === 'stats') ? `
         <div class="history-tabs">
           <button class="preset-btn ${view==='list'?'active':''}" onclick="backToHistoryList()">対局一覧</button>
           <button class="preset-btn ${view==='stats'?'active':''}" onclick="openHistoryStats()">成績</button>
-          <button class="preset-btn ${view==='overallStats'?'active':''}" onclick="openOverallStats()">アカウント</button>
         </div>` : ''}
         <div class="history-modal-body">${bodyHtml}</div>
         ${logState.ui.shareFallbackMsg ? `<div class="share-fallback-toast">${escapeHtml(logState.ui.shareFallbackMsg)}</div>` : ''}
@@ -4586,24 +4662,22 @@ function renderPaywallModal(){
 }
 
 /* ---- 使い方(簡易ヘルプ) ---- */
-// 「使い方」モーダルの各手順。imgはwww/help/以下に置くスクリーンショットの
-// ファイル名(未配置の間は<img>のonerrorで自動的に非表示になり、キャプション
-// 文字だけの表示にフォールバックする)。実際にどの画面を撮ればよいかは
-// captionの内容と対応させてある。
+// 「使い方」モーダルの各手順。テキストのキャプションは表示せず、画像のみを
+// 順番に並べる(altはスクリーンリーダー用に維持)。imgはwww/help/以下に
+// 置くスクリーンショットのファイル名で、未配置の間は<img>のonerrorで
+// 自動的に非表示になる(その手順は何も表示されない空欄になる)。
 const HELP_STEPS = [
   {
     img: 'assets/images/help-01-score-calc-3steps.jpg',
     alt: '点数計算はカンタン3ステップ: 1.役・翻数を選ぶ 2.翻や符を選ぶ 3.点数が自動で計算される、を画面例つきで説明した図解',
-    caption: '「点数計算」タブで翻・符(または符を直接入力)を選ぶと、点数が自動で計算されます。',
   },
   {
     img: 'assets/images/help-02-record-match-6steps.jpg',
     alt: '対局を記録して成績をいつでも確認: 1.対局のルールを設定 2.詳細なルールを設定 3.半荘ごとの素点を入力 4.対局を終了する 5.結果が履歴に保存される 6.履歴や詳細・通算成績を確認、を画面例つきで説明した図解',
-    caption: '「得点記録」タブの入力欄に半荘ごとの素点を入力し、「半荘を記録」で記録します。',
   },
-  { img: 'help/03-end.png', caption: '対局が終わったら「対局を終了する」を押すと、この対局が履歴に保存されます。' },
-  { img: 'help/04-history.png', caption: '☰(対局履歴)から、保存した対局の一覧・詳細・通算成績をいつでも確認できます。' },
-  { img: 'help/05-account.png', caption: '👤(アカウント)から連携すると、同卓者の指定・対局記録の自動共有ができます。' },
+  { img: 'help/03-end.png', alt: '対局が終わったら「対局を終了する」を押すと、この対局が履歴に保存される画面例' },
+  { img: 'help/04-history.png', alt: '☰(対局履歴)から、保存した対局の一覧・詳細・成績をいつでも確認できる画面例' },
+  { img: 'help/05-account.png', alt: '「成績」タブから連携すると、同卓者の指定・対局記録の自動共有ができる画面例' },
 ];
 function openHelpModal(){
   logState.ui.helpOpen = true;
@@ -4620,7 +4694,6 @@ function renderHelpModal(){
   const stepsHtml = HELP_STEPS.map((step, i) => `
     <li class="help-step">
       <img class="help-screenshot" src="${escapeHtml(step.img)}" alt="${escapeHtml(step.alt || `使い方 手順${i+1}`)}" loading="lazy" onerror="this.remove()">
-      <span>${escapeHtml(step.caption)}</span>
     </li>`).join('');
   root.innerHTML = `
     <div class="history-modal-overlay">
