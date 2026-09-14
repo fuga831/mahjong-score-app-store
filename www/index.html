@@ -299,6 +299,20 @@
   }
   .row-ron .amt{color:var(--red-soft);}
 
+  /* ---- 符計算の内訳(学習用の可視化表示) ---- */
+  .fu-breakdown{
+    margin-top:8px;
+    padding-top:8px;
+    border-top:1px dashed var(--line);
+    display:flex;
+    flex-direction:column;
+    gap:3px;
+    font-size:.68rem;
+    color:var(--ink-soft);
+    line-height:1.5;
+    word-break:break-word;
+  }
+
   /* ---- section blocks ---- */
   section{
     background:var(--felt-1);
@@ -915,6 +929,73 @@
     padding:2px 0;
   }
   .stat-row b{color:var(--ivory);font-variant-numeric:tabular-nums;}
+
+  /* ---- 総成績(アカウント) ---- */
+  .overall-stats-summary{ margin-bottom:18px; }
+  .overall-stats-total{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-size:.88rem;
+    color:var(--ivory);
+    margin-bottom:12px;
+  }
+  .overall-stats-total b{
+    font-size:1.15rem;
+    color:var(--gold-strong);
+    font-variant-numeric:tabular-nums;
+  }
+  .rank-bars{ display:flex; flex-direction:column; gap:8px; }
+  .rank-bar-row{ display:flex; align-items:center; gap:8px; }
+  .rank-bar-label{
+    width:2.4em; flex-shrink:0;
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-size:.78rem;
+    color:var(--ivory-dim);
+  }
+  .rank-bar-track{
+    flex:1;
+    height:14px;
+    background:var(--felt-2);
+    border-radius:999px;
+    overflow:hidden;
+  }
+  .rank-bar-fill{ height:100%; border-radius:999px; }
+  .rank-bar-1{ background:var(--gold); }
+  .rank-bar-2{ background:#c7b988; }
+  .rank-bar-3{ background:#7c9d8b; }
+  .rank-bar-4{ background:var(--red-soft); }
+  .rank-bar-value{
+    width:6.6em;
+    flex-shrink:0;
+    text-align:right;
+    font-size:.72rem;
+    color:var(--ink-soft);
+    font-variant-numeric:tabular-nums;
+  }
+  .rank-trend-title{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-size:.82rem;
+    color:var(--ivory-dim);
+    margin-bottom:8px;
+    display:flex;
+    align-items:baseline;
+    gap:6px;
+  }
+  .rank-trend-svg{ width:100%; height:auto; display:block; }
+  .chart-gridline{ stroke:var(--line); stroke-width:1; vector-effect:non-scaling-stroke; }
+  .chart-axis-label{ font-size:7px; fill:var(--ink-soft); }
+  .chart-line{
+    fill:none;
+    stroke:var(--gold-strong);
+    stroke-width:1.6;
+    vector-effect:non-scaling-stroke;
+    stroke-linejoin:round;
+    stroke-linecap:round;
+  }
+  .chart-point{ fill:var(--gold); }
+
   .share-fallback-toast{
     margin:0 14px 12px;
     background:var(--felt-2);
@@ -1019,10 +1100,24 @@
     padding-left:1.3em;
     display:flex;
     flex-direction:column;
-    gap:10px;
+    gap:18px;
     font-size:.82rem;
     color:var(--ivory-dim);
     line-height:1.6;
+  }
+  .help-step{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .help-screenshot{
+    max-width:100%;
+    width:100%;
+    height:auto;
+    display:block;
+    border-radius:10px;
+    border:1px solid var(--line);
+    background:var(--felt-1);
   }
 
   /* ---- その他(利用規約・プライバシーポリシー・バージョン情報) ---- */
@@ -1439,30 +1534,70 @@ function mentsuFu(m){
 function shanponRonFu(terminal){ return terminal ? 4 : 2; }   // = minko value
 function shanponTsumoFu(terminal){ return terminal ? 8 : 4; } // = ankou value
 
-// calcFuPair(state) -> { fuRon, fuTsumo } computed independently, because a
-// hand's fu is not always the same for both winning methods (menzen-ron
-// bonus only applies to ron; tsumo bonus only applies to tsumo; and a
-// shanpon-completed set flips between minko/ankou — see above).
-function calcFuPair(s){
-  if (s.keitai === 'chiitoitsu') return { fuRon: 25, fuTsumo: 25 };
-  if (s.keitai === 'pinfu')      return { fuRon: 30, fuTsumo: 20 }; // pinfu locks both fixed values
+// calcFuBreakdown(state) -> { fuRon, fuTsumo, ron, tsumo } — 符計算を、UIで
+// そのまま表示できる内訳(積み上げ項目の配列)付きで返す。ron/tsumoはそれぞれ
+// { items:[{label,value}], subtotal, rounded, final } の形。
+// items を合計 → 10符単位に切り上げ → (鳴きのみ)30符の最低保証、という
+// 3段階の値をそのまま subtotal/rounded/final として保持しているので、
+// 内訳表示側は計算をやり直さずにこれらをつなげて表示するだけでよい
+// (=表示用の値と実際にスコア計算へ渡す値が原理的にズレない)。
+// fuRon/fuTsumoはron.final/tsumo.finalと同じ値で、既存のcalcFuPair()と
+// 完全に同じ計算結果を返す(内訳を求める過程で同じ式を積み上げているだけ)。
+function calcFuBreakdown(s){
+  if (s.keitai === 'chiitoitsu') {
+    const items = [{ label: '七対子(固定)', value: 25 }];
+    const side = { items, subtotal: 25, rounded: 25, final: 25 };
+    return { fuRon: 25, fuTsumo: 25, ron: side, tsumo: side };
+  }
+  if (s.keitai === 'pinfu') { // pinfu locks both fixed values
+    const ron = { items: [{ label: '平和(ロン, 固定)', value: 30 }], subtotal: 30, rounded: 30, final: 30 };
+    const tsumo = { items: [{ label: '平和(ツモ, 固定)', value: 20 }], subtotal: 20, rounded: 20, final: 20 };
+    return { fuRon: 30, fuTsumo: 20, ron, tsumo };
+  }
 
   const isClosed = s.keitai !== 'naki';
-  const waitBonus = s.machi === 'bad' ? 2 : 0; // ryanmen and shanpon both add 0 here
-  const shared = waitBonus + (s.yakuhaiHead?2:0) + s.mentsuList.reduce((sum, m) => sum + mentsuFu(m), 0);
-  const shanponRon = s.machi === 'shanpon' ? shanponRonFu(s.shanponTerminal) : 0;
-  const shanponTsumo = s.machi === 'shanpon' ? shanponTsumoFu(s.shanponTerminal) : 0;
+  const mentsuItems = s.mentsuList.map(m => ({
+    label: `${m.ankou ? '暗' : '明'}${m.isKan ? '槓' : '刻'}(${m.terminal ? '1・9・字' : '中張'})`,
+    value: mentsuFu(m),
+  }));
+  const waitItem = s.machi === 'bad' ? { label: '待ち(カンチャン・ペンチャン・単騎)', value: 2 } : null; // ryanmen and shanpon both add 0 here
+  const headItem = s.yakuhaiHead ? { label: '雀頭(役牌)', value: 2 } : null;
 
-  let fuRon = roundUpTo(FU_BASE + (isClosed ? FU_MENZEN_RON_BONUS : 0) + shared + shanponRon, 10);
-  let fuTsumo = roundUpTo(FU_BASE + FU_TSUMO_BONUS + shared + shanponTsumo, 10);
-
-  // 鳴きで加符が何も無い形（いわゆる喰い平和形）は20符になってしまうが、
-  // 実戦のルールでは30符が最低ラインとして扱われる。
-  if (!isClosed) {
-    fuRon = Math.max(fuRon, 30);
-    fuTsumo = Math.max(fuTsumo, 30);
+  // isRonごとに、副底→面子→待ち→雀頭→(門前ロン/ツモ)の順で内訳を積み上げる。
+  function buildSide(isRon){
+    const items = [{ label: '副底', value: FU_BASE }, ...mentsuItems];
+    if (waitItem) items.push(waitItem);
+    if (s.machi === 'shanpon') {
+      // シャンポンの対子は、ロンなら明刻・ツモなら暗刻として扱われるため、
+      // ron/tsumoで別の値になる(shanponRonFu/shanponTsumoFu参照)。
+      items.push(isRon
+        ? { label: '待ち(シャンポン→明刻扱い)', value: shanponRonFu(s.shanponTerminal) }
+        : { label: '待ち(シャンポン→暗刻扱い)', value: shanponTsumoFu(s.shanponTerminal) });
+    }
+    if (headItem) items.push(headItem);
+    if (isRon) {
+      if (isClosed) items.push({ label: '門前ロン', value: FU_MENZEN_RON_BONUS });
+    } else {
+      items.push({ label: 'ツモ', value: FU_TSUMO_BONUS });
+    }
+    const subtotal = items.reduce((sum, it) => sum + it.value, 0);
+    const rounded = roundUpTo(subtotal, 10);
+    // 鳴きで加符が何も無い形（いわゆる喰い平和形）は20符になってしまうが、
+    // 実戦のルールでは30符が最低ラインとして扱われる。
+    const final = isClosed ? rounded : Math.max(rounded, 30);
+    return { items, subtotal, rounded, final };
   }
-  return { fuRon, fuTsumo };
+
+  const ron = buildSide(true);
+  const tsumo = buildSide(false);
+  return { fuRon: ron.final, fuTsumo: tsumo.final, ron, tsumo };
+}
+
+// calcFuPair(state) -> { fuRon, fuTsumo }。既存の呼び出し元との互換のため
+// 残しているが、実体はcalcFuBreakdown()の値をそのまま使う薄いラッパー。
+function calcFuPair(s){
+  const b = calcFuBreakdown(s);
+  return { fuRon: b.fuRon, fuTsumo: b.fuTsumo };
 }
 
 // calcBase(han, fu, isKiriageMangan) -> the 基本点(A) for one han/fu pair.
@@ -1801,17 +1936,46 @@ function render(){
     const r = calcScore(state.isDealer, info.minHan, 0, 0, state.kiriageMangan);
     panel.innerHTML = resultHtml(`${info.name}（${info.sub}）`, null, null, r);
   } else {
+    // 符数直接入力モードでは計算過程自体が存在しない(手入力値をそのまま使う)ため
+    // 内訳(breakdown)はnullのままにし、resultHtml側で内訳表示を省略する。
+    const breakdown = state.fuDirectMode ? null : calcFuBreakdown(state);
     const { fuRon, fuTsumo } = state.fuDirectMode
       ? (() => { const f = normalizeManualFu(state.manualFu); return { fuRon: f, fuTsumo: f }; })()
-      : calcFuPair(state);
+      : breakdown;
     const r = calcScore(state.isDealer, state.hanTier, fuRon, fuTsumo, state.kiriageMangan);
     const ronFuLabel = r.ronCapped ? `${fuRon}符→満貫` : `${fuRon}符`;
     const tsumoFuLabel = r.tsumoCapped ? `${fuTsumo}符→満貫` : `${fuTsumo}符`;
-    panel.innerHTML = resultHtml(`${state.hanTier}翻`, ronFuLabel, tsumoFuLabel, r);
+    panel.innerHTML = resultHtml(`${state.hanTier}翻`, ronFuLabel, tsumoFuLabel, r, breakdown);
   }
 }
 
-function resultHtml(stateLabel, ronFuLabel, tsumoFuLabel, r){
+// 符計算の内訳1本分(ron側 or tsumo側)を「項目1a + 項目b = 小計符 → 切り上げ後符」
+// の文字列に組み立てる。要素が1つしかない(七対子・平和の固定値)場合は
+// 「〇〇(固定)25符」のように単独表示し、冗長な「= 25符」を付けない。
+function formatFuBreakdown(side){
+  const parts = side.items.map(it => `${it.label}${it.value}符`).join(' + ');
+  // 項目が1つだけ(七対子・平和の固定値、または鳴きで加符が無いだけの手)の
+  // 場合は、冗長な「= 〇〇符」を付けずラベル+値だけを表示する。
+  let text = side.items.length > 1 ? `${parts} = ${side.subtotal}符` : parts;
+  if (side.rounded !== side.subtotal) text += ` → ${side.rounded}符(切り上げ)`;
+  if (side.final !== side.rounded) text += ` → ${side.final}符(鳴きは30符が最低)`;
+  return text;
+}
+
+// ロン/ツモで内訳(項目の並び・値)が完全に一致する場合(七対子など)は1行に
+// まとめ、そうでなければ「ロン:」「ツモ:」を頭に付けて2行に分けて表示する。
+function fuBreakdownHtml(breakdown){
+  if (!breakdown) return '';
+  const sameBothSides = breakdown.ron.items.length === breakdown.tsumo.items.length
+    && breakdown.ron.items.every((it, i) =>
+      it.label === breakdown.tsumo.items[i].label && it.value === breakdown.tsumo.items[i].value);
+  const lines = sameBothSides
+    ? [formatFuBreakdown(breakdown.ron)]
+    : [`ロン: ${formatFuBreakdown(breakdown.ron)}`, `ツモ: ${formatFuBreakdown(breakdown.tsumo)}`];
+  return `<div class="fu-breakdown">${lines.map(l => `<div>${escapeHtml(l)}</div>`).join('')}</div>`;
+}
+
+function resultHtml(stateLabel, ronFuLabel, tsumoFuLabel, r, breakdown){
   const tsumoHtml = r.tsumo.all !== undefined
     ? `<span class="pt">${fmt(r.tsumo.all)}</span><span class="all">ALL</span>`
     : `<span class="split">
@@ -1832,6 +1996,7 @@ function resultHtml(stateLabel, ronFuLabel, tsumoFuLabel, r){
         <span class="amt">${tsumoHtml}</span>
       </div>
     </div>
+    ${fuBreakdownHtml(breakdown)}
   `;
 }
 
@@ -1882,15 +2047,18 @@ const LEGAL_CONFIG = {
   privacyUrl: 'https://fuga831.github.io/mahjong-score-app-store/privacy.html',
   contactEmail: 'gechi.studio@gmail.com', // docs/terms.html・docs/privacy.html記載の連絡先と同じアドレス
 };
-// 実行環境(iOS/Android)に応じたAdMob設定を返す。Capacitor.getPlatform()は
-// Capacitor標準のAPIで 'ios' | 'android' | 'web' を返す。Web(非ネイティブ)では
-// Native.isNativeApp()がfalseになり各広告メソッドの先頭でreturnするため、
+// 実行環境(iOS/Android)を返す。Capacitor.getPlatform()はCapacitor標準の
+// APIで 'ios' | 'android' | 'web' を返す。Web(非ネイティブ)ではNative.
+// isNativeApp()がfalseになり、これを使う各メソッドの先頭でreturnするため、
 // ここに実際に到達するのは常にiOS/Androidのネイティブアプリ内のみ。
-function admobConfigForPlatform(){
+function capacitorPlatform(){
   try {
-    const platform = window.Capacitor && window.Capacitor.getPlatform ? window.Capacitor.getPlatform() : 'android';
-    return MONETIZATION_CONFIG.admob[platform] || MONETIZATION_CONFIG.admob.android;
-  } catch (e) { return MONETIZATION_CONFIG.admob.android; }
+    return (window.Capacitor && window.Capacitor.getPlatform) ? window.Capacitor.getPlatform() : 'android';
+  } catch (e) { return 'android'; }
+}
+function admobConfigForPlatform(){
+  const platform = capacitorPlatform();
+  return MONETIZATION_CONFIG.admob[platform] || MONETIZATION_CONFIG.admob.android;
 }
 
 let _billingReady = false;
@@ -1943,21 +2111,31 @@ const Native = {
       await AdMob.showInterstitial();
     } catch (e) { /* 未読込・オフライン時は何もしない(対局終了フロー自体は止めない) */ }
   },
-  /* ---- 課金(Google Play Billing, cordova-plugin-purchase想定) ----
+  /* ---- 課金(cordova-plugin-purchase, iOS: App Store / Android: Google Play Billing) ----
      https://purchase.cordova.fovea.cc/ のイベント駆動API(v13系)を前提にした実装例。
+     store.register/store.initializeは、実行中のOSに対応するプラットフォーム
+     (Platform.APPLE_APPSTORE または Platform.GOOGLE_PLAY)だけを登録する
+     ―両方いっぺんに登録すると、実機には存在しない方のストアにも問い合わせが
+     走ってしまうため。プロダクトID(billingProductId)はiOS/Android共通の
+     "remove_ads_unlock_history" を使う(App Store Connect側にも同じIDで
+     商品を作成しておくこと)。以降のapproved/verified/productUpdatedの
+     イベントハンドラ、およびrestorePurchases/purchasePremiumは、cdvpurchase
+     のTransaction/Receipt/Productがプラットフォームを問わず共通のAPIで
+     扱える設計になっているため、iOS/Android共通のコードのままで動作する。
      プラグインのバージョンによりAPIが変わることがあるため、実機ビルド時は
      公式ドキュメントで最新のAPIを確認してください(このサンドボックスでは
-     Android実機・Play Billingサンドボックスでの検証ができていません)。 */
+     iOS/Android実機・各ストアのサンドボックスでの検証ができていません)。 */
   async initBilling(){
     if (!this.isNativeApp() || _billingReady) return;
     try {
       const store = window.CdvPurchase && window.CdvPurchase.store;
       if (!store) return;
       _billingReady = true;
+      const storePlatform = capacitorPlatform() === 'ios' ? store.Platform.APPLE_APPSTORE : store.Platform.GOOGLE_PLAY;
       store.register([{
         id: MONETIZATION_CONFIG.billingProductId,
         type: store.ProductType.NON_CONSUMABLE,
-        platform: store.Platform.GOOGLE_PLAY,
+        platform: storePlatform,
       }]);
       store.when().approved(transaction => transaction.verify());
       store.when().verified(receipt => receipt.finish());
@@ -1972,7 +2150,10 @@ const Native = {
         }
         if (owned) _resolvePendingPurchase(true);
       });
-      await store.initialize([store.GOOGLE_PLAY]);
+      // 修正前は store.initialize([store.GOOGLE_PLAY]) と、Platformを経由しない
+      // 誤った参照になっていた(正しくは store.Platform.GOOGLE_PLAY)。加えて
+      // Android決め打ちだったため、iOSでは課金が一切初期化されていなかった。
+      await store.initialize([storePlatform]);
     } catch (e) { /* 課金SDK初期化に失敗しても無料枠のまま安全に継続する */ }
   },
   // 戻り値: true(有効な購入あり) / false(購入なし) / null(判定できなかった＝
@@ -2527,8 +2708,9 @@ function defaultLogState(){
       revealStep: 0,       // 発表済みの順位グループ数
       confirmEndMatch: false,   // 「対局を終了する」の誤タップ防止確認中か
       historyOpen: false,       // 対局履歴モーダルを開いているか
-      historyView: 'list',      // 'list' | 'detail' | 'stats'
+      historyView: 'list',      // 'list' | 'detail' | 'stats' | 'overallStats'
       historyDetailId: null,
+      overallStatsPlayer: null, // 「アカウント」タブ(総成績)で選択中のプレイヤー名(nullなら自動選択)
       editingArchiveTitleId: null,
       confirmDeleteArchiveId: null,
       importResultMsg: null,
@@ -3752,6 +3934,14 @@ function openHistoryStats(){
   logState.ui.historyView = 'stats';
   scheduleRenderApp();
 }
+function openOverallStats(){
+  logState.ui.historyView = 'overallStats';
+  scheduleRenderApp();
+}
+function setOverallStatsPlayer(name){
+  logState.ui.overallStatsPlayer = name;
+  scheduleRenderApp();
+}
 
 /* ---- フレンド絞り込み: このuidが参加者に含まれる対局だけを返す ---- */
 function filterMatchHistoryByFriend(matchHistory, filter){
@@ -3908,6 +4098,156 @@ function calcCareerStats(matchHistory, playerName){
     totalMoney: moneySum,
     tobiCount,
   };
+}
+
+/* ---- 総成績(ハンバーガーメニュー「アカウント」) ----
+   フレンド・卓の概念とは無関係に、この端末に保存されている対局記録
+   (logState.matchHistory)だけを対象にした、プレイヤー1人分の通算成績。
+   複数の相手グループを跨いでも「自分がどの順位を何回取ったか」「平均着順が
+   どう推移しているか」が分かるようにする。 ---- */
+
+// これまでの全対局に一度でも登場したプレイヤー名を、実際に半荘へ参加した
+// 回数が多い順に返す(先頭が「自分」である可能性が最も高い名前になる)。
+function getAllPlayerNamesEverPlayed(matchHistory){
+  const counts = {};
+  matchHistory.forEach(m => {
+    const s = m.settingsSnapshot;
+    if (!s) return;
+    const players = s.playerNames.slice(0, s.playerCount);
+    m.hanchans.forEach(h => {
+      players.forEach(p => { if (p in h.scores) counts[p] = (counts[p] || 0) + 1; });
+    });
+  });
+  return Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b));
+}
+
+const OVERALL_STATS_MOVING_AVG_WINDOW = 10; // 平均着順グラフの移動平均の対象半荘数
+
+// calcOverallStats(matchHistory, playerName) -> プレイヤー1人分の通算成績。
+// matchHistoryはstartedAt昇順(=対局が行われた時系列順)に並べ替えてから、
+// 各対局のhanchans(こちらも記録された順)を順番に走査し、「このプレイヤーが
+// 実際にプレイした半荘」だけを対象に通し番号を振る。
+function calcOverallStats(matchHistory, playerName){
+  if (!playerName) return null;
+  const sorted = [...matchHistory].sort((a, b) =>
+    new Date(a.startedAt || a.endedAt || 0) - new Date(b.startedAt || b.endedAt || 0));
+
+  const rankCounts = {}; // { 1: 回数, 2: 回数, ... }
+  const series = [];     // [{ index, rank, pc(その半荘の人数), movingAvg }]
+
+  sorted.forEach(m => {
+    const s = m.settingsSnapshot;
+    if (!s) return;
+    const players = s.playerNames.slice(0, s.playerCount);
+    if (!players.includes(playerName)) return;
+    m.hanchans.forEach(h => {
+      if (!(playerName in h.scores)) return;
+      const entries = players.map(p => ({ name: p, score: h.scores[p] }));
+      const ranked = rankPlayers(entries);
+      const me = ranked.find(r => r.name === playerName);
+      // 順位分布の集計は、既存のcalcCareerStats()のtopRate等と同じく、
+      // 同着なら上位側(loRank)のバケットにまとめて数える。
+      rankCounts[me.loRank] = (rankCounts[me.loRank] || 0) + 1;
+      series.push({
+        index: series.length + 1,
+        rank: (me.loRank + me.hiRank) / 2, // 平均着順の推移では帯の平均順位を使う
+        pc: players.length,
+      });
+    });
+  });
+
+  series.forEach((pt, i) => {
+    const from = Math.max(0, i - OVERALL_STATS_MOVING_AVG_WINDOW + 1);
+    const windowPts = series.slice(from, i + 1);
+    pt.movingAvg = windowPts.reduce((sum, w) => sum + w.rank, 0) / windowPts.length;
+  });
+
+  return { totalHanchans: series.length, rankCounts, series };
+}
+
+// 1位〜4位の獲得回数を横棒グラフで表示する(3人打ちのみの記録なら4位は0件になる)。
+function renderRankBars(stats){
+  const rows = [1, 2, 3, 4].map(rank => {
+    const count = stats.rankCounts[rank] || 0;
+    const pct = stats.totalHanchans > 0 ? (count / stats.totalHanchans) * 100 : 0;
+    return `
+      <div class="rank-bar-row">
+        <span class="rank-bar-label">${rank}位</span>
+        <div class="rank-bar-track"><div class="rank-bar-fill rank-bar-${rank}" style="width:${pct.toFixed(1)}%"></div></div>
+        <span class="rank-bar-value">${count}回(${pct.toFixed(1)}%)</span>
+      </div>`;
+  }).join('');
+  return `<div class="rank-bars">${rows}</div>`;
+}
+
+// 平均着順の推移を折れ線(SVG)で表示する。縦軸は1位を上端、実際に記録の
+// あった最大人数(3 or 4)を下端にした反転スケール(=上に行くほど好成績)。
+function renderRankTrendChart(series){
+  if (series.length === 0) return '';
+  const w = 300, h = 150, padL = 24, padR = 10, padT = 10, padB = 20;
+  const plotW = w - padL - padR, plotH = h - padT - padB;
+  const yMax = Math.max(...series.map(p => p.pc || 4), 3);
+  const n = series.length;
+  const xAt = i => padL + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+  const yAt = rank => padT + ((rank - 1) / (yMax - 1)) * plotH;
+
+  const points = series.map((p, i) => `${xAt(i).toFixed(1)},${yAt(p.movingAvg).toFixed(1)}`).join(' ');
+
+  let yTicks = '';
+  for (let r = 1; r <= yMax; r++) {
+    const yy = yAt(r);
+    yTicks += `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${w - padR}" y2="${yy.toFixed(1)}" class="chart-gridline" />`;
+    yTicks += `<text x="${padL - 4}" y="${(yy + 2.5).toFixed(1)}" class="chart-axis-label" text-anchor="end">${r}位</text>`;
+  }
+  const dots = series.map((p, i) =>
+    `<circle cx="${xAt(i).toFixed(1)}" cy="${yAt(p.movingAvg).toFixed(1)}" r="1.6" class="chart-point" />`).join('');
+  const xLabels = `
+    <text x="${xAt(0).toFixed(1)}" y="${h - 4}" class="chart-axis-label" text-anchor="start">${series[0].index}半荘目</text>
+    ${n > 1 ? `<text x="${xAt(n - 1).toFixed(1)}" y="${h - 4}" class="chart-axis-label" text-anchor="end">${series[n - 1].index}半荘目</text>` : ''}
+  `;
+
+  return `
+    <div class="rank-trend">
+      <div class="rank-trend-title">平均着順の推移<span class="hint">直近${OVERALL_STATS_MOVING_AVG_WINDOW}半荘の移動平均</span></div>
+      <svg viewBox="0 0 ${w} ${h}" class="rank-trend-svg" preserveAspectRatio="none">
+        ${yTicks}
+        <polyline points="${points}" class="chart-line" />
+        ${dots}
+        ${xLabels}
+      </svg>
+    </div>`;
+}
+
+function renderOverallStats(){
+  const matchHistory = logState.matchHistory;
+  const names = getAllPlayerNamesEverPlayed(matchHistory);
+  if (names.length === 0) {
+    return `<div class="history-empty">まだ記録がありません<br>対局を終了すると、ここに総成績が表示されます</div>`;
+  }
+
+  const selected = (logState.ui.overallStatsPlayer && names.includes(logState.ui.overallStatsPlayer))
+    ? logState.ui.overallStatsPlayer
+    : names[0];
+  logState.ui.overallStatsPlayer = selected; // 選んだ結果を覚えておく
+
+  const playerPicker = names.length > 1 ? `
+    <div class="preset-row" style="margin-bottom:12px;">
+      ${names.map(n => `<button class="preset-btn ${n === selected ? 'active' : ''}" onclick="setOverallStatsPlayer('${escKey(n)}')">${escapeHtml(n)}</button>`).join('')}
+    </div>` : '';
+
+  const stats = calcOverallStats(matchHistory, selected);
+  if (!stats || stats.totalHanchans === 0) {
+    return `${playerPicker}<div class="history-empty">${escapeHtml(selected)}さんの記録がありません</div>`;
+  }
+
+  return `
+    ${playerPicker}
+    <div class="overall-stats-summary">
+      <div class="overall-stats-total">総半荘数 <b>${stats.totalHanchans}</b>半荘</div>
+      ${renderRankBars(stats)}
+    </div>
+    ${renderRankTrendChart(stats.series)}
+  `;
 }
 
 function renderHistoryStats(){
@@ -4110,6 +4450,9 @@ function renderHistoryModal(){
   } else if (view === 'stats') {
     title = friendFilter ? `${escapeHtml(friendFilter.username)}さんとの成績` : '成績';
     bodyHtml = renderHistoryActionBar() + friendFilterBanner + renderHistoryStats();
+  } else if (view === 'overallStats') {
+    title = '総成績';
+    bodyHtml = renderHistoryActionBar() + renderOverallStats();
   } else {
     title = friendFilter ? `${escapeHtml(friendFilter.username)}さんとの対局` : '対局履歴';
     bodyHtml = friendFilter ? `
@@ -4145,10 +4488,11 @@ function renderHistoryModal(){
             : `<span class="history-modal-title">${title}</span>`}
           <button class="history-close" onclick="closeHistoryModal()">×</button>
         </div>
-        ${(view === 'list' || view === 'stats') ? `
+        ${(view === 'list' || view === 'stats' || view === 'overallStats') ? `
         <div class="history-tabs">
           <button class="preset-btn ${view==='list'?'active':''}" onclick="backToHistoryList()">対局一覧</button>
           <button class="preset-btn ${view==='stats'?'active':''}" onclick="openHistoryStats()">成績</button>
+          <button class="preset-btn ${view==='overallStats'?'active':''}" onclick="openOverallStats()">アカウント</button>
         </div>` : ''}
         <div class="history-modal-body">${bodyHtml}</div>
         ${logState.ui.shareFallbackMsg ? `<div class="share-fallback-toast">${escapeHtml(logState.ui.shareFallbackMsg)}</div>` : ''}
@@ -4193,6 +4537,25 @@ function renderPaywallModal(){
 }
 
 /* ---- 使い方(簡易ヘルプ) ---- */
+// 「使い方」モーダルの各手順。imgはwww/help/以下に置くスクリーンショットの
+// ファイル名(未配置の間は<img>のonerrorで自動的に非表示になり、キャプション
+// 文字だけの表示にフォールバックする)。実際にどの画面を撮ればよいかは
+// captionの内容と対応させてある。
+const HELP_STEPS = [
+  {
+    img: 'assets/images/help-01-score-calc-3steps.jpg',
+    alt: '点数計算はカンタン3ステップ: 1.役・翻数を選ぶ 2.翻や符を選ぶ 3.点数が自動で計算される、を画面例つきで説明した図解',
+    caption: '「点数計算」タブで翻・符(または符を直接入力)を選ぶと、点数が自動で計算されます。',
+  },
+  {
+    img: 'assets/images/help-02-record-match-6steps.jpg',
+    alt: '対局を記録して成績をいつでも確認: 1.対局のルールを設定 2.詳細なルールを設定 3.半荘ごとの素点を入力 4.対局を終了する 5.結果が履歴に保存される 6.履歴や詳細・通算成績を確認、を画面例つきで説明した図解',
+    caption: '「得点記録」タブの入力欄に半荘ごとの素点を入力し、「半荘を記録」で記録します。',
+  },
+  { img: 'help/03-end.png', caption: '対局が終わったら「対局を終了する」を押すと、この対局が履歴に保存されます。' },
+  { img: 'help/04-history.png', caption: '☰(対局履歴)から、保存した対局の一覧・詳細・通算成績をいつでも確認できます。' },
+  { img: 'help/05-account.png', caption: '👤(アカウント)から連携すると、同卓者の指定・対局記録の自動共有ができます。' },
+];
 function openHelpModal(){
   logState.ui.helpOpen = true;
   scheduleRenderApp();
@@ -4205,6 +4568,11 @@ function renderHelpModal(){
   const root = document.getElementById('helpModalRoot');
   if (!root) return;
   if (!logState.ui.helpOpen) { root.innerHTML = ''; return; }
+  const stepsHtml = HELP_STEPS.map((step, i) => `
+    <li class="help-step">
+      <img class="help-screenshot" src="${escapeHtml(step.img)}" alt="${escapeHtml(step.alt || `使い方 手順${i+1}`)}" loading="lazy" onerror="this.remove()">
+      <span>${escapeHtml(step.caption)}</span>
+    </li>`).join('');
   root.innerHTML = `
     <div class="history-modal-overlay">
       <div class="history-modal">
@@ -4213,13 +4581,7 @@ function renderHelpModal(){
           <button class="history-close" onclick="closeHelpModal()">×</button>
         </div>
         <div class="history-modal-body">
-          <ol class="help-steps">
-            <li>「点数計算」タブで翻・符(または符を直接入力)を選ぶと、点数が自動で計算されます。</li>
-            <li>「得点記録」タブの入力欄に半荘ごとの素点を入力し、「半荘を記録」で記録します。</li>
-            <li>対局が終わったら「対局を終了する」を押すと、この対局が履歴に保存されます。</li>
-            <li>☰(対局履歴)から、保存した対局の一覧・詳細・通算成績をいつでも確認できます。</li>
-            <li>👤(アカウント)から連携すると、同卓者の指定・対局記録の自動共有ができます。</li>
-          </ol>
+          <ol class="help-steps">${stepsHtml}</ol>
         </div>
       </div>
     </div>`;
@@ -4550,19 +4912,11 @@ function renderApp(){
     : '<span class="tile">🀄</span>麻雀点数電卓';
   document.getElementById('calcTab').style.display = onLog ? 'none' : '';
   document.getElementById('logTab').style.display = onLog ? '' : 'none';
-  // 対局履歴(☰)・アカウント(👤)は得点記録票タブでのみ意味を持つので、それ以外では隠す。
-  // アカウントボタンはマルチプレイヤー機能と同じく、ストアアプリの中でのみ表示する。
-  document.getElementById('historyMenuBtn').style.display = onLog ? '' : 'none';
-  document.getElementById('accountMenuBtn').style.display = (onLog && CloudSync.isAvailable()) ? '' : 'none';
-  if (!onLog) {
-    // 計算タブに切り替えたらモーダルも閉じる
-    logState.ui.historyOpen = false; logState.ui.paywallOpen = false;
-    logState.ui.accountModalOpen = false; logState.ui.friendPickerOpen = false;
-    logState.ui.loginPromptOpen = false; logState.ui.friendsListOpen = false;
-    logState.ui.addFriendOpen = false; logState.ui.historyFriendFilter = null;
-    logState.ui.helpOpen = false; logState.ui.otherMenuOpen = false;
-    logState.ui.confirmDeleteAccount = false; logState.ui.deleteAccountErrorMsg = null;
-  }
+  // 対局履歴(☰)は「使い方」「その他」等も含む導線になったため、タブに関わらず
+  // 常に表示する。アカウントボタンは引き続きマルチプレイヤー機能と同じく、
+  // ストアアプリの中でのみ表示する(タブには依存しない)。
+  document.getElementById('historyMenuBtn').style.display = '';
+  document.getElementById('accountMenuBtn').style.display = CloudSync.isAvailable() ? '' : 'none';
   document.getElementById('bottomNav').innerHTML = `
     <button class="${onLog?'':'active'}" onclick="setActiveTab('calc')"><span class="ic">🀄</span>点数計算</button>
     <button class="${onLog?'active':''}" onclick="setActiveTab('log')"><span class="ic">📋</span>得点記録</button>

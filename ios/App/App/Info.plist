@@ -61,6 +61,6 @@
 	<key>NSUserTrackingUsageDescription</key>
 	<string>ユーザーに合わせた広告を表示するために使用します。許可しなくてもアプリは通常どおり利用できます。</string>
 	<key>GADApplicationIdentifier</key>
-	<string>ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY</string>
+	<string>ca-app-pub-9341912936952065~9755137834</string>
 </dict>
 </plist>

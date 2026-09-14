@@ -1,5 +1,6 @@
 import UIKit
 import Capacitor
+import FirebaseAuth
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -7,8 +8,23 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        // 未捕捉のNSExceptionが原因で起動直後にクラッシュする問題の調査用。
+        // NSExceptionはSwiftのdo-catchでは捕捉できない(Swift Errorとは別物)ため、
+        // ここで例外のname/reason/callStackSymbolsをNSLogに残し、次のクラッシュ時に
+        // デバイスのコンソールログ(Xcode > Window > Devices and Simulators、または
+        // Console.app)から実際の例外理由を確認できるようにする。abort()自体は
+        // 防げないので、これはロギングのみの目的。
+        NSSetUncaughtExceptionHandler { exception in
+            NSLog("[UncaughtException] name=%@ reason=%@ userInfo=%@\nStack:\n%@",
+                  exception.name.rawValue,
+                  exception.reason ?? "(no reason)",
+                  String(describing: exception.userInfo ?? [:]),
+                  exception.callStackSymbols.joined(separator: "\n"))
+        }
+        NSLog("[AppLifecycle] didFinishLaunchingWithOptions: start")
         // Override point for customization after application launch.
         application.registerForRemoteNotifications()
+        NSLog("[AppLifecycle] didFinishLaunchingWithOptions: end")
         return true
     }
 
@@ -63,6 +79,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
+        // @capacitor-firebase/messagingを@capacitor-firebase/authenticationと
+        // 併用する場合に公式READMEが要求している対応(Google/Appleサインインの
+        // コールバックURLをFirebase Authに先に処理させる)。これが無いと、
+        // サインインのコールバックURLがCapacitorのURLハンドラに渡ってしまい、
+        // サインインが正しく完了しない。
+        if Auth.auth().canHandle(url) {
+            return true
+        }
         // Called when the app was launched with a url. Feel free to add additional processing here,
         // but if you want the App API to support tracking app url opens, make sure to keep this call
         return ApplicationDelegateProxy.shared.application(app, open: url, options: options)

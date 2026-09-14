@@ -1,6 +1,6 @@
 # マネタイズ導入ガイド (AdMob広告 ＋ アプリ内課金)
 
-対象: `mahjong-score-app` のCapacitorラップ版(Google Play配信想定)。
+対象: `mahjong-score-app` のCapacitorラップ版(Google Play / App Store 両配信想定)。
 
 このガイドは「アプリのコードは書き終わったが、Google/AdMob側のアカウント設定・
 申請・法的対応をこれから行う」人向けの手順書です。コード側の実装
@@ -47,6 +47,10 @@ Google側の仕様変更で変わることがあるため、実際の画面の�
    **ライセンステスター**として登録する。これをしないと、実際に決済が発生してしまいます。
 5. 商品を「有効」にした後、反映まで数時間かかることがあるので、
    すぐにテストできなくても慌てないこと。
+
+この節はAndroid(Google Play)向けです。iOS側のApp Store Connectでの商品作成・
+StoreKitローカルテスト・Sandboxテスターでの実機テストは「8. App Store Connect
+でのアプリ内課金(iOS)とStoreKitローカルテストの準備」を参照してください。
 
 ---
 
@@ -137,6 +141,113 @@ Play Consoleの「アプリのコンテンツ」→「データセーフティ�
 - [ ] オフライン状態で起動しても、広告初期化・購入照会が失敗するだけでクラッシュせず、
       通常の点数計算・記録機能が問題なく使えることを確認した
       (`Native` オブジェクトの全メソッドが `try/catch` で失敗を握りつぶす設計になっています)
+
+---
+
+## 8. App Store Connect でのアプリ内課金(iOS)とStoreKitローカルテストの準備
+
+`www/index.html` の `Native.initBilling()` は、実行中のOS(`Capacitor.getPlatform()`)に
+応じて `store.Platform.APPLE_APPSTORE` / `store.Platform.GOOGLE_PLAY` を自動的に
+切り替えて登録します(修正前はGoogle Play決め打ちで、iOSでは課金が一切初期化
+されていませんでした)。iOS側で実際に動かすには、以下の準備が必要です。
+
+⚠️ 例によってこのサンドボックスには実際のXcode・App Store Connectへの
+アクセス環境が無く、この節の手順・以下で追加したStoreKit Configuration File・
+スキーム設定は、公式ドキュメントに基づいて書いたものであり実機検証していません。
+
+### 8-1. App Store Connect側の商品作成
+
+1. https://appstoreconnect.apple.com/ で本アプリのアプリレコードを開き、
+   「機能」→「App内課金」から**非消耗型(Non-Consumable)**の商品を1つ作成:
+   - プロダクトID: `remove_ads_unlock_history`
+     (Android側・`www/index.html` の `MONETIZATION_CONFIG.billingProductId` と
+     **完全一致**させること)
+   - 価格: ¥400に最も近い価格ティアを選択(Appleは価格をティアから選ぶ方式のため、
+     Androidのように任意の金額を直接指定することはできません)
+   - 表示名・説明: 「広告削除＋記録し放題」等、Android側と一貫した文言にする
+2. **In-App Purchase機能を使うには、事前に「契約/税金/口座情報」
+   (Agreements, Tax, and Banking)で「有料App」契約に同意し、銀行口座・
+   税務情報を入力しておく必要があります。** これが未完了だと、商品を作成しても
+   ステータスが進まないことがあります。
+3. 商品のステータスが「送信準備完了(Ready to Submit)」になっていることを確認する
+   (実際の審査提出はアプリ本体の審査提出時にまとめて行われます)。
+
+### 8-2. In-App Purchase capabilityについて(portal側の追加設定は不要)
+
+`ios/App/App.xcodeproj/project.pbxproj` に `com.apple.InAppPurchase` の
+capabilityエントリを追加済みで、Xcodeで開くと「Signing & Capabilities」タブに
+表示されます。ただしIn-App PurchaseはSign in with AppleやPush Notificationsと
+異なり、**Apple Developer Portal側でApp IDに対して個別に有効化する操作は
+不要**です(StoreKitはどのApp IDでも標準で利用できます)。このcapability
+エントリは、Xcode上で正しく表示されるようにするための対応です。
+
+### 8-3. Xcodeでのローカル動作確認(StoreKit Configuration File)
+
+App Store Connect側の審査完了・商品の反映を待たずに購入フロー自体をテスト
+できるよう、`ios/App/App/Configuration.storekit` を追加し、共有スキーム
+`ios/App/App.xcodeproj/xcshareddata/xcschemes/App.xcscheme` の実行(Run)設定
+でこのファイルを使うよう設定しました(`remove_ads_unlock_history` を
+¥400相当の非消耗型として登録済み)。
+
+⚠️ スキームXML内の `StoreKitConfigurationFileReference` のファイル参照
+(相対パス指定)は実機のXcodeで検証できていません。**Xcodeでプロジェクトを
+開いたらまず、「Product > Scheme > Edit Scheme > Run > Options」タブを開き、
+「StoreKit Configuration」に `Configuration.storekit` が選択されているか
+確認してください。選択されていなければ、プルダウンから手動で選び直して
+ください**(ファイル自体はプロジェクトに追加済みなので、選択肢には出てくる
+はずです)。
+
+手順:
+1. `ios/App/App.xcworkspace` をXcodeで開く(`.xcodeproj` ではなく
+   `.xcworkspace` の方)。
+2. 上記の「StoreKit Configuration」設定を確認・選択。
+3. シミュレータまたは実機を選んでビルド・実行(Run)する。
+4. アプリの「課金する」ボタン等から購入フローを開始すると、実際の決済無しで
+   Xcode上に購入確認シートが表示され、承認すると `approved` → `verify()` →
+   `finish()` のイベントが流れてアプリ内で `isPremium` が `true` になることを
+   確認できる。
+5. Xcodeの「Debug > StoreKit > Manage Transactions」から、テスト購入の削除・
+   返金シミュレーションも行える(「購入を復元」ボタンのテストにも使える)。
+
+これはあくまでXcode内で完結するローカルシミュレーションで、App Store
+Connectへの接続や実際のApple ID・Sandboxテスターアカウントは不要です。
+
+### 8-4. Sandboxテスターアカウントでの実機テスト(App Store Connect連携)
+
+ローカルのStoreKit Configuration Fileでのテストとは別に、実際にApp Store
+Connectと通信する経路(TestFlight配信後や、審査提出前の実機確認)を試す場合は
+Sandboxテスターアカウントが必要です。
+
+1. App Store Connectの「ユーザーとアクセス」→「Sandboxテスター」から、
+   実際には使われていないメールアドレスでテスター用Apple IDを作成する
+   (実在するApple IDを使い回すことはできません)。
+2. 実機(またはシミュレータ)の「設定」→「App Store」→一番下の
+   「SANDBOX ACCOUNT」欄で、このSandboxテスターアカウントにサインインする
+   (通常使っているApple IDからサインアウトする必要はない。iOS 17以降は
+   この専用欄からサインインできる)。
+3. Xcodeのスキームの「StoreKit Configuration」を**「None」に戻してから**
+   ビルド・実行する(ローカルの`.storekit`ファイルを使ったままだと、
+   実際のApp Store Connectには問い合わせに行かないため)。
+4. アプリ内で購入操作を行うと、Sandbox環境の決済シートが表示される
+   (「[Environment: Sandbox]」といった表示が出る)。Sandboxテスターの
+   Apple IDでのサインインを求められたら、8-1で作成したSandboxテスターの
+   認証情報を入力する。
+5. 決済が完了すると`approved`イベントが発火し、これまで通り`isPremium`が
+   `true`になることを確認する。
+6. 商品が「送信準備完了」になっていない(8-1が未完了)と、Sandbox環境でも
+   購入フローが正しく動作しないことがあるので、先に8-1を終わらせておくこと。
+
+### 8-5. iOS版の申請前チェックリスト
+
+- [ ] App Store Connectで `remove_ads_unlock_history` の非消耗型商品を作成し、
+      「送信準備完了」になっている
+- [ ] 「契約/税金/口座情報」で有料App契約・銀行口座・税務情報の登録を完了した
+- [ ] Sandboxテスターアカウントを作成し、実機の「SANDBOX ACCOUNT」欄でサイン
+      インして、実際に購入テスト(承認→`isPremium`が`true`になる)ができた
+- [ ] 「購入を復元」がiOS実機でも正しく動作する(Sandboxアカウントでの
+      再インストール後に購入状態が復元される)ことを確認した
+- [ ] Xcodeでプロジェクトを開き、「Signing & Capabilities」に
+      In-App Purchaseが表示されていることを確認した
 
 ---
 

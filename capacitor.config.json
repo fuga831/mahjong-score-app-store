@@ -1,5 +1,5 @@
 {
-  "appId": "com.example.mahjongscore",
+  "appId": "io.github.fuga831.mahjongscore",
   "appName": "麻雀点数電卓",
   "webDir": "www",
   "bundledWebRuntime": false,
