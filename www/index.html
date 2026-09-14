@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>麻雀点数電卓</title>
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0c2a20">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -51,7 +51,12 @@
     max-width:460px;
     margin:0 auto;
     min-height:100vh;
-    padding:18px 14px calc(70px + env(safe-area-inset-bottom, 0px));
+    /* capacitor.config.jsonのios.contentInsetを"never"にしてWKWebViewの
+       自動セーフエリア調整を無効化し、ここで手動にpadding-top/bottomを
+       付けている(自動調整とCSSのposition:fixed/env()が競合し、上部は
+       ステータスバーの裏にコンテンツが潜り込み、下部は固定バーが
+       画面端に密着しない不具合の原因になっていたため)。 */
+    padding:calc(18px + env(safe-area-inset-top, 0px)) 14px calc(70px + env(safe-area-inset-bottom, 0px));
     display:flex;
     flex-direction:column;
     gap:14px;
@@ -572,7 +577,7 @@
   /* ---- sticky totals header (log tab) ---- */
   .sticky-header{
     position:sticky;
-    top:0;
+    top:env(safe-area-inset-top, 0px);
     z-index:10;
     margin:0 -14px;
     padding:10px 14px 12px;
@@ -835,7 +840,7 @@
   }
   .history-tabs .preset-btn{flex:1;}
   .history-modal-body{
-    padding:0 14px 18px;
+    padding:0 14px calc(18px + env(safe-area-inset-bottom, 0px));
     overflow-y:auto;
   }
   .history-toolbar{display:flex;gap:8px;margin-bottom:10px;}
@@ -4244,14 +4249,18 @@ function calcOverallStats(matchHistory, playerName){
 
   sorted.forEach(m => {
     const s = m.settingsSnapshot;
-    if (!s) return;
+    if (!s || !Array.isArray(s.playerNames) || !Array.isArray(m.hanchans)) return;
     const players = s.playerNames.slice(0, s.playerCount);
     if (!players.includes(playerName)) return;
     m.hanchans.forEach(h => {
-      if (!(playerName in h.scores)) return;
+      if (!h || !h.scores || !(playerName in h.scores)) return;
+      // 一部のプレイヤーだけ素点が未記録の不完全なデータ(インポート由来等)は
+      // 順位判定ができないため、この半荘の集計自体をスキップする。
+      if (!players.every(p => typeof h.scores[p] === 'number')) return;
       const entries = players.map(p => ({ name: p, score: h.scores[p] }));
       const ranked = rankPlayers(entries);
       const me = ranked.find(r => r.name === playerName);
+      if (!me) return;
       // 順位分布の集計は、既存のcalcCareerStats()のtopRate等と同じく、
       // 同着なら上位側(loRank)のバケットにまとめて数える。
       rankCounts[me.loRank] = (rankCounts[me.loRank] || 0) + 1;
@@ -4421,14 +4430,25 @@ function renderHistoryStats(){
 
   // b) 通算成績(総半荘数・順位分布・平均着順の推移)。メンバー構成を問わず、
   //    選んだ人が参加した(このタブに表示中の範囲の)全半荘をまとめて集計する
-  //    (旧ハンバーガーメニュー「アカウント」タブの内容)。
-  const overallHtml = renderOverallStatsSection(source, selected);
+  //    (旧ハンバーガーメニュー「アカウント」タブの内容)。例外が起きても
+  //    a)側の表示は道連れにせず、コンソールにログを残して空欄にとどめる。
+  let overallHtml = '';
+  try {
+    overallHtml = renderOverallStatsSection(source, selected);
+  } catch (e) {
+    console.error('[renderHistoryStats] renderOverallStatsSection failed:', e);
+  }
 
   const picker = renderStatsPlayerPicker(names, selected);
   if (!groupsHtml && !overallHtml) {
     return `${picker}<div class="history-empty">${escapeHtml(selected)}さんの記録がありません</div>`;
   }
-  return `${picker}${groupsHtml}${overallHtml}`;
+  // 通算成績(サマリー)を個別対局履歴より上に表示する。
+  return `
+    ${picker}
+    ${overallHtml}
+    ${groupsHtml ? `<div class="hint" style="margin-bottom:8px;">メンバー構成ごとの成績</div>${groupsHtml}` : ''}
+  `;
 }
 
 /* ---- エクスポート / インポート / シェア ---- */
