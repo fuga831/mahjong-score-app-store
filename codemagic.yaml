@@ -136,7 +136,14 @@ workflows:
       - name: Update dependencies and copy web assets to native iOS project
         script: |
           cd $CM_BUILD_DIR
-          npx cap sync ios
+          # 生の `npx cap sync ios` ではなく `npm run sync:ios` を使うこと。
+          # cap syncはios/App/Podfileのcapacitor_podsブロックを毎回自動生成し
+          # 直してしまい、CapacitorFirebaseAuthenticationのGoogleサブスペック
+          # 指定が消えてしまう。npm run sync:ios はcap sync直後に
+          # scripts/patch-podfile-google-signin.js を実行してこれを
+          # 補正するため、GoogleSignInモジュールが正しく解決される
+          # (詳細は ios/App/Podfile のコメント参照)。
+          npm run sync:ios
 
       - name: Install CocoaPods dependencies
         script: |

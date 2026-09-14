@@ -21,36 +21,34 @@ end
 target 'App' do
   capacitor_pods
   # Add your Pods here
-  # CapacitorFirebaseAuthenticationのGoogleサブスペックを有効にするために必要
-  # (下のpost_installと対で使う。理由はそちらのコメント参照)。
-  pod 'GoogleSignIn', '7.1.0'
+  # ⚠️ GoogleSignInをここに直接 `pod` 宣言しない・OTHER_SWIFT_FLAGSで
+  # -DRGCFA_INCLUDE_GOOGLE をpost_installから手動注入しない こと。
+  # それだけではCapacitorFirebaseAuthenticationターゲット自身が
+  # GoogleSignInモジュールに依存する形にならず、
+  # 「Unable to resolve module dependency: 'GoogleSignIn'」でビルドが
+  # 失敗する(OTHER_SWIFT_FLAGSはあくまでコンパイルフラグであり、
+  # ポッド間の依存関係グラフには影響しないため)。
+  #
+  # 正しい解決策は、CapacitorFirebaseAuthenticationのGoogleサブスペック
+  # (`CapacitorFirebaseAuthentication/Google`)を使うこと。このサブスペックの
+  # podspecが `dependency 'GoogleSignIn', '7.1.0'` と
+  # `xcconfig 'OTHER_SWIFT_FLAGS' => '-DRGCFA_INCLUDE_GOOGLE'` の両方を
+  # 一体で宣言しているため、これだけで依存関係グラフ・フラグの両方が
+  # 正しく解決される。
+  #
+  # ただし上の `capacitor_pods`(defブロック)は `npx cap sync ios` を
+  # 実行するたびに @capacitor/cliが自動生成し直すため、
+  # `pod 'CapacitorFirebaseAuthentication/Google'` のようにサブスペックを
+  # 直接ここに書いてもcap syncのたびに消えてしまう
+  # (@capacitor/cli/dist/ios/update.jsのupdatePodfile()が
+  # `pod '<name>', :path => '<path>'` という素の形で毎回書き直すため)。
+  # そのため `npm run sync:ios` / `npm run sync`(生の `npx cap sync` では
+  # なくこちら)経由でcap syncを実行し、直後に
+  # scripts/patch-podfile-google-signin.js がこの行を自動的に
+  # `CapacitorFirebaseAuthentication/Google` へ書き換える運用にしている。
+  # (Codemagic側のビルドスクリプトも同様に `npm run sync:ios` を使う)
 end
 
 post_install do |installer|
   assertDeploymentTarget(installer)
-
-  # ⚠️ `capacitor_pods`(上のdefブロック)は `npx cap sync ios` を実行するたびに
-  # @capacitor/cliが自動生成し直すため、`pod 'CapacitorFirebaseAuthentication/Google'`
-  # のようにサブスペックを直接指定してもcap syncのたびに消えてしまう
-  # (@capacitor/cli/dist/ios/update.jsのupdatePodfile()が
-  # `pod '<name>', :path => '<path>'` という素の形で毎回書き直すため)。
-  # そのため、Googleサブスペックが有効にするのと同じ効果を、cap syncで
-  # 書き換えられないこのpost_installブロックとtarget内の追加pod宣言
-  # (上のGoogleSignIn行)で手動的に再現している:
-  #   1. 上でGoogleSignInポッドを明示的に追加する
-  #   2. ここでCapacitorFirebaseAuthenticationターゲットに、Googleサブスペックの
-  #      xcconfigが本来設定するのと同じ -DRGCFA_INCLUDE_GOOGLE フラグを立てる
-  #      (GoogleAuthProviderHandler.swiftはこのフラグで実装を切り替えている)
-  # これが無いと、Googleサインインのボタンを押しても何も起きない
-  # (ビルド自体は通ってしまうため、この不具合は気づきにくい)。
-  installer.pods_project.targets.each do |target|
-    if target.name == 'CapacitorFirebaseAuthentication'
-      target.build_configurations.each do |config|
-        flags = config.build_settings['OTHER_SWIFT_FLAGS'] || '$(inherited)'
-        unless flags.include?('-DRGCFA_INCLUDE_GOOGLE')
-          config.build_settings['OTHER_SWIFT_FLAGS'] = "#{flags} -DRGCFA_INCLUDE_GOOGLE"
-        end
-      end
-    end
-  end
 end
