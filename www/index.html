@@ -55,8 +55,12 @@
        自動セーフエリア調整を無効化し、ここで手動にpadding-top/bottomを
        付けている(自動調整とCSSのposition:fixed/env()が競合し、上部は
        ステータスバーの裏にコンテンツが潜り込み、下部は固定バーが
-       画面端に密着しない不具合の原因になっていたため)。 */
-    padding:calc(18px + env(safe-area-inset-top, 0px)) 14px calc(70px + env(safe-area-inset-bottom, 0px));
+       画面端に密着しない不具合の原因になっていたため)。
+       padding-topは position:fixed の .title-row(ヘッダーバー)の実測の
+       高さぶん(地の高さ64px)+ヘッダー自身にも足しているセーフエリア分を
+       同じ式で二重に確保している(ヘッダー側の高さが安全域ぶん伸びるため、
+       コンテンツ側もその伸びた分だけ余分にpadding-topを確保する必要がある)。 */
+    padding:calc(64px + env(safe-area-inset-top, 0px)) 14px calc(70px + env(safe-area-inset-bottom, 0px));
     display:flex;
     flex-direction:column;
     gap:14px;
@@ -84,11 +88,23 @@
     font-size:.75em;
     box-shadow:var(--shadow);
   }
+  /* 画面上部に常時固定するヘッダーバー。.bottom-navと同じく、透過が
+     一切無い不透明な背景+box-shadowで「独立した1枚のパネル」として見せ、
+     padding-topにenv(safe-area-inset-top)を足してステータスバー領域まで
+     背景色で覆う(下のcontent側は.stageのpadding-topで同じ高さぶん
+     避けている)。 */
   .title-row{
+    position:fixed;
+    top:0; left:0; right:0;
+    z-index:20;
     display:flex;
     align-items:center;
     justify-content:space-between;
     gap:8px;
+    padding:calc(10px + env(safe-area-inset-top, 0px)) 14px 10px;
+    background:linear-gradient(180deg, var(--felt-1), var(--felt-0) 70%);
+    border-bottom:1px solid var(--line);
+    box-shadow:0 4px 14px rgba(0,0,0,.32);
   }
   .title-row h1{margin:2px 0 0;flex:1;min-width:0;}
   .hamburger-btn{
@@ -1488,7 +1504,6 @@
 <div class="stage">
   <div class="title-row">
     <h1 id="appTitle"><span class="tile">🀄</span>麻雀点数電卓</h1>
-    <button class="hamburger-btn" id="accountMenuBtn" onclick="openAccountModal()" title="アカウント・フレンド" style="display:none;">👤</button>
     <button class="hamburger-btn" id="historyMenuBtn" onclick="openHistoryModal()" title="対局履歴" style="display:none;">☰</button>
   </div>
 
@@ -4570,6 +4585,7 @@ function renderHistoryActionBar(){
   const premium = isPremiumUnlocked();
   return `
     <div class="history-action-bar">
+      ${CloudSync.isAvailable() ? `<button class="history-action-btn" onclick="openAccountModal()">👤 アカウント</button>` : ''}
       ${premium
         ? `<button class="history-action-btn premium" disabled>✓ プレミアム会員</button>`
         : `<button class="history-action-btn" onclick="openPaywallFromMenu()">💎 課金する</button>`}
@@ -5054,11 +5070,10 @@ function renderApp(){
     : '<span class="tile">🀄</span>麻雀点数電卓';
   document.getElementById('calcTab').style.display = onLog ? 'none' : '';
   document.getElementById('logTab').style.display = onLog ? '' : 'none';
-  // 対局履歴(☰)は「使い方」「その他」等も含む導線になったため、タブに関わらず
-  // 常に表示する。アカウントボタンは引き続きマルチプレイヤー機能と同じく、
-  // ストアアプリの中でのみ表示する(タブには依存しない)。
+  // 対局履歴(☰)は「使い方」「その他」「アカウント」等も含む導線になったため、
+  // タブに関わらず常に表示する(アカウント項目自体は、対局履歴モーダル内の
+  // renderHistoryActionBar()側でストアアプリの中でのみ表示するよう制御する)。
   document.getElementById('historyMenuBtn').style.display = '';
-  document.getElementById('accountMenuBtn').style.display = CloudSync.isAvailable() ? '' : 'none';
   document.getElementById('bottomNav').innerHTML = `
     <button class="${onLog?'':'active'}" onclick="setActiveTab('calc')"><span class="ic">🀄</span>点数計算</button>
     <button class="${onLog?'active':''}" onclick="setActiveTab('log')"><span class="ic">📋</span>得点記録</button>
