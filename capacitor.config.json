@@ -11,7 +11,6 @@
   },
   "plugins": {
     "AdMob": {
-      "requestTrackingAuthorization": false,
       "testingDevices": [],
       "initializeForTesting": false
     },
@@ -19,7 +18,7 @@
       "skipNativeAuth": false,
       "providers": ["google.com", "apple.com"]
     },
-    "PushNotifications": {
+    "FirebaseMessaging": {
       "presentationOptions": ["badge", "sound", "alert"]
     }
   }

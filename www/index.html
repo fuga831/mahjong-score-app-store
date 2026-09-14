@@ -2078,7 +2078,25 @@ const Native = {
     if (!this.isNativeApp()) return;
     try {
       const AdMob = window.Capacitor.Plugins && window.Capacitor.Plugins.AdMob;
-      if (AdMob && AdMob.initialize) await AdMob.initialize({});
+      if (!AdMob) return;
+      // ⚠️ capacitor.config.jsonのAdMobブロックにある `requestTrackingAuthorization`
+      // というキーは、このプラグイン(@capacitor-community/admob)のiOS実装
+      // (AdMobPlugin.swift)からもWeb実装からも一切参照されていない
+      // (native側は`requestTrackingAuthorization`という"メソッド"をJSから
+      // 明示的に呼んだ時だけATTrackingManagerのダイアログを出す設計で、
+      // capacitor.config.jsonの同名の設定キーとは無関係の別物)。そのため
+      // NSUserTrackingUsageDescriptionをInfo.plistに用意していても、
+      // ここで明示的に呼び出さない限りトラッキング許可ダイアログは一切
+      // 表示されない。iOS 14+でまだ未確認(notDetermined)の場合のみ要求する。
+      if (AdMob.trackingAuthorizationStatus && AdMob.requestTrackingAuthorization) {
+        try {
+          const status = await AdMob.trackingAuthorizationStatus();
+          if (status && status.status === 'notDetermined') {
+            await AdMob.requestTrackingAuthorization();
+          }
+        } catch (e) { /* iOS 14未満・Android等では未対応のため無視 */ }
+      }
+      if (AdMob.initialize) await AdMob.initialize({});
     } catch (e) { /* 広告SDKの初期化に失敗しても本体機能は止めない */ }
   },
   async showBanner(){
@@ -2245,8 +2263,25 @@ const CloudSync = {
   },
 
   _authListenerAdded: false,
-  async init(){
-    if (!this.isAvailable()) return;
+  _initPromise: null,
+  // CloudSync.init()は起動時に発火のみさせて待たない(fire-and-forget)ため、
+  // 匿名認証(signInAnonymously)が完了する前にユーザーがユーザーネーム設定
+  // などの書き込み操作を行える。その場合 logState.account.uid が未確定のまま
+  // Firestoreへ書き込もうとして権限エラーになるため、書き込み系の操作は
+  // 呼び出し前に必ずこれを呼び、認証確立を待ってから進めること。
+  async ensureSignedIn(){
+    if (!this.isAvailable()) return false;
+    if (!logState.account.uid && this._initPromise) {
+      await this._initPromise.catch(() => {});
+    }
+    return !!logState.account.uid;
+  },
+  init(){
+    if (!this.isAvailable()) return Promise.resolve();
+    this._initPromise = this._doInit();
+    return this._initPromise;
+  },
+  async _doInit(){
     try {
       const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
       if (!Auth) return;
@@ -2327,6 +2362,10 @@ const CloudSync = {
   async claimUsername(name){
     if (!this.isAvailable()) return { ok: false, error: 'unavailable' };
     if (!isValidUsernameFormat(name)) return { ok: false, error: 'invalid' };
+    // 匿名認証(signInAnonymously)がまだ完了していない状態でFirestoreに
+    // 書き込もうとすると、firestore.rules側でrequest.auth.uidが未確定に
+    // なり毎回permission-deniedで失敗する。CloudSync.init()の完了を待つ。
+    if (!(await this.ensureSignedIn())) return { ok: false, error: 'network' };
     try {
       const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
       if (!Firestore) return { ok: false, error: 'unavailable' };
@@ -2345,7 +2384,12 @@ const CloudSync = {
       logState.account.username = name;
       saveLogState();
       return { ok: true };
-    } catch (e) { return { ok: false, error: 'network' }; }
+    } catch (e) {
+      // 汎用メッセージだけだと実機での原因調査ができないため、実際のエラー
+      // (Firestoreの場合は e.code に 'permission-denied' 等が入る)をログに残す。
+      console.error('[CloudSync.claimUsername] failed:', e && (e.code || e.message || e));
+      return { ok: false, error: 'network' };
+    }
   },
 
   async searchUsername(name){
@@ -3307,7 +3351,12 @@ function closeAccountModal(){
   logState.ui.accountModalOpen = false;
   scheduleRenderApp();
 }
-function setUsernameInput(v){ logState.ui.usernameInput = v; scheduleRenderApp(); }
+// ⚠️ ここでscheduleRenderApp()を呼ばないこと。renderAccountModal()は
+// root.innerHTML = ... でモーダル全体(input要素含む)を毎回作り直すため、
+// 1文字入力するたびに再描画するとinput要素そのものが差し替わってフォーカスが
+// 失われ、iOSでソフトウェアキーボードが閉じてしまう(input自身のDOM値は
+// ブラウザが保持するので、再描画しなくても入力内容の表示は崩れない)。
+function setUsernameInput(v){ logState.ui.usernameInput = v; }
 async function submitUsername(){
   const name = (logState.ui.usernameInput || '').trim();
   if (!isValidUsernameFormat(name)) {
