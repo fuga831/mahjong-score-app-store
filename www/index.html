@@ -526,16 +526,23 @@
     gap:14px;
   }
 
-  /* ---- bottom nav ---- */
+  /* ---- bottom nav ----
+     以前はrgba(12,42,32,.85)という半透明色から始まるグラデーションだった
+     ため、バー上端の帯だけ不透明度が100%未満になり、スクロールしてきた
+     コンテンツがバーの縁からうっすら透けて見えていた(backdrop-filterの
+     ぼかしだけでは不透明化されない)。felt-1→felt-0はどちらも完全不透明な
+     色なので、見た目のグラデーション(上端がやや明るい帯)は維持しつつ、
+     透過は完全に無くなる。box-shadowを追加し、コンテンツの上に独立した
+     1枚のパネルが乗っているように見せる。 ---- */
   .bottom-nav{
     position:fixed;
     left:0; right:0; bottom:0;
     display:flex;
     gap:8px;
     padding:8px 14px calc(8px + env(safe-area-inset-bottom, 0px));
-    background:linear-gradient(180deg, rgba(12,42,32,.85), var(--felt-0) 30%);
+    background:linear-gradient(180deg, var(--felt-1), var(--felt-0) 30%);
     border-top:1px solid var(--line);
-    backdrop-filter:blur(6px);
+    box-shadow:0 -4px 14px rgba(0,0,0,.32);
     z-index:20;
   }
   /* ストアアプリでバナー広告(ネイティブのオーバーレイビュー)を表示している間は、
