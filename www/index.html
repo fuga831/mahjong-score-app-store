@@ -611,9 +611,22 @@
   }
   /* ストアアプリでバナー広告(ネイティブのオーバーレイビュー)を表示している間は、
      アプリ自身の下部ナビを広告の高さぶん上に逃がし、誤クリックを防ぐための
-     余白も確保する。広告そのものはDOM外(ネイティブ側)に描画される。 */
-  .bottom-nav.with-ad-banner{ bottom:50px; }
-  body.ad-banner-active .stage{ padding-bottom:calc(120px + env(safe-area-inset-bottom, 0px)); }
+     余白も確保する。広告そのものはDOM外(ネイティブ側)に描画される。
+     --ad-banner-heightはNative.initAds()内のbannerAdSizeChangedリスナーが
+     実測値で上書きする(未取得の間はadSize:'BANNER'の規定サイズ50pxを
+     フォールバックとして使う)。ネイティブ側のバナーはrootViewControllerの
+     safeAreaLayoutGuide.bottomを基準に配置されるため、画面下端からの
+     オフセットはenv(safe-area-inset-bottom)とバナー高さの合計にする必要が
+     あり、どちらか一方だけでは実際のバナー位置とズレて重なってしまう。 */
+  :root{ --ad-banner-height:50px; }
+  .bottom-nav.with-ad-banner{
+    bottom:calc(env(safe-area-inset-bottom, 0px) + var(--ad-banner-height, 50px));
+    transition:bottom .2s ease;
+  }
+  body.ad-banner-active .stage{
+    padding-bottom:calc(70px + env(safe-area-inset-bottom, 0px) + var(--ad-banner-height, 50px));
+    transition:padding-bottom .2s ease;
+  }
   .bottom-nav button{
     flex:1;
     display:flex;
@@ -2296,6 +2309,22 @@ const Native = {
         AdMob.addListener('bannerAdFailedToLoad', () => {
           _bannerAdLoaded = false;
           scheduleRenderApp();
+        });
+        // 実際のバナー高さ(ネイティブ側でロード/削除されるたびに発火)を
+        // CSSカスタムプロパティへ反映する。@capacitor-community/admobの
+        // iOS実装はバナーViewをWKWebViewとは別の、rootViewControllerの
+        // 「safeAreaLayoutGuideのbottom」を基準にした独立したネイティブ
+        // オーバーレイとして追加している(DOM外)。そのため画面下端からの
+        // オフセットは「セーフエリア + バナー高さ」の合計になり、
+        // env(safe-area-inset-bottom)を含めずバナー高さだけをbottomに
+        // 足すと、セーフエリア分だけトグルバーとバナーが重なってしまう
+        // (ホームインジケーターが無い旧機種では気づきにくいが、ある機種
+        // では必ず重なる)。adSize:'BANNER'固定(320x50)なので通常は
+        // 高さ50で決め打ちでも大きくは外れないが、実測値が取れる時は
+        // 実測値を優先して使う。
+        AdMob.addListener('bannerAdSizeChanged', (info) => {
+          const h = info && info.height;
+          if (h > 0) document.documentElement.style.setProperty('--ad-banner-height', `${h}px`);
         });
       }
     } catch (e) { /* 広告SDKの初期化に失敗しても本体機能は止めない */ }
@@ -5299,7 +5328,12 @@ function updateBannerState(onLog){
   const nav = document.getElementById('bottomNav');
   if (nav) nav.classList.toggle('with-ad-banner', showSpacer);
   if (shouldShow && !_bannerShown) { _bannerShown = true; Native.showBanner(); }
-  else if (!shouldShow && _bannerShown) { _bannerShown = false; _bannerAdLoaded = false; Native.hideBanner(); }
+  else if (!shouldShow && _bannerShown) {
+    _bannerShown = false;
+    _bannerAdLoaded = false;
+    document.documentElement.style.removeProperty('--ad-banner-height'); // 次回表示時はフォールバック値に戻す
+    Native.hideBanner();
+  }
 }
 
 // 自分以外の操作で対局記録が自動追加された時の簡易通知トースト。
