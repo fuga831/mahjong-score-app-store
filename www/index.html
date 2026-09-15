@@ -1222,6 +1222,56 @@
     margin-top:8px;
   }
 
+  /* ---- renderApp()が致命的にクラッシュした際の最終フォールバック表示 ----
+     通常のモーダル・デバッグバナーの描画経路(renderApp()経由)自体が
+     壊れている可能性があるため、このオーバーレイはrenderApp()を一切
+     経由せず直接DOM操作で表示する(renderFatalErrorFallback参照)。
+     debug-error-banner(z-index:70)よりさらに手前に出す。 ---- */
+  .fatal-error-overlay{
+    position:fixed;
+    inset:0;
+    z-index:90;
+    background:rgba(5,16,12,.88);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:20px;
+  }
+  .fatal-error-box{
+    width:100%;
+    max-width:420px;
+    max-height:80vh;
+    overflow-y:auto;
+    background:#3a1414;
+    border:1.5px solid var(--red);
+    border-radius:14px;
+    padding:18px;
+  }
+  .fatal-error-title{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:900;
+    font-size:1rem;
+    color:var(--red-soft);
+    margin-bottom:8px;
+  }
+  .fatal-error-msg{
+    font-size:.84rem;
+    color:var(--ivory);
+    line-height:1.6;
+    margin-bottom:10px;
+  }
+  .fatal-error-detail{
+    white-space:pre-wrap;
+    word-break:break-word;
+    font-size:.7rem;
+    line-height:1.5;
+    color:var(--ivory-dim);
+    background:rgba(0,0,0,.2);
+    border-radius:8px;
+    padding:8px;
+    margin-bottom:12px;
+  }
+
   /* ---- 課金ステータス・ペイウォール ---- */
   .premium-status-row{ margin-bottom:10px; }
   .premium-badge{
@@ -1714,6 +1764,7 @@
 <nav class="bottom-nav" id="bottomNav"></nav>
 <div id="historyModalRoot"></div>
 <div id="paywallModalRoot"></div>
+<div id="tiebreakDealerModalRoot"></div>
 <div id="accountModalRoot"></div>
 <div id="friendPickerModalRoot"></div>
 <div id="loginPromptModalRoot"></div>
@@ -1724,9 +1775,30 @@
 <div id="notifyBannerRoot"></div>
 <div id="termTipRoot"></div>
 <div id="debugErrorRoot"></div>
+<div id="fatalErrorRoot"></div>
 <input type="file" id="importFileInput" accept="application/json,.json" style="display:none;" onchange="handleImportFile(this.files)">
 
 <script>
+/* ---- グローバルなエラーハンドラ(スクリプトの一番最初に登録) ----
+   renderApp()の外(イベントハンドラ内・async処理内)で発生した、
+   どのtry-catchにも拾われていない例外・Promise拒否を、console.error
+   だけでなく画面上(showDebugError)にも表示する。Xcode/Macが無く
+   実機のコンソールログを直接見る手段が無いため、これが無いと
+   「何かが起きて画面が固まった」という結果しか分からず、原因の
+   特定ができない。showDebugError自体は下の方で定義される関数だが、
+   ここではイベントリスナーを登録するだけ(実際に呼ばれるのはエラー
+   発生時=スクリプト全体の評価が終わった後)なので問題ない。 ---- */
+window.addEventListener('error', (event) => {
+  console.error('[window.onerror]', event.error || event.message, event.filename, event.lineno, event.colno);
+  try { showDebugError('未処理の例外 (window.onerror)', event.error || event.message); }
+  catch (e) { /* showDebugError自体が使えない状況では諦める(consoleには既に出している) */ }
+});
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('[unhandledrejection]', event.reason);
+  try { showDebugError('未処理のPromise拒否 (unhandledrejection)', event.reason); }
+  catch (e) {}
+});
+
 /* =========================================================================
    MahjongScore module — pure calculation logic.
    (In a full project this would live in utils/mahjongScore.ts, independent
@@ -1789,6 +1861,7 @@ const TERM_GLOSSARY = {
   uma: 'ウマ: 対局の最終順位に応じてポイントを増減させるルール。1位・2位はプラス、3位・4位はマイナス。',
   oka: 'オカ: 1位(トップ)が受け取る追加のポイント。参加者全員の供託金を、1位がまとめて受け取るイメージ。',
   chip: 'チップ: ルールによって異なるが、一般的には一発・赤・裏で発生する追加の得点。点数計算とは別に、対局後にまとめて精算。',
+  tiebreakDealer: 'ツモ番が親により近い方が上位になります。',
 };
 function termTipBtn(...keys){
   return keys.map(k => `<button type="button" class="term-tip-btn" onclick="showTermTip(event,'${k}')">?</button>`).join('');
@@ -1965,6 +2038,34 @@ function rankPlayers(entries) {
   return result;
 }
 
+// 素点の同点を、指定された親からの巡目距離(時計回りの座順での近さ)で
+// 厳密な順位に確定させる。ツモ番が親に近い方(=親自身、次に親の下家、…)が
+// 上位。tiebreakDealerが無い場合(この機能の実装前に記録・インポートされた
+// 半荘など)は、従来通り同着帯のまま返す(呼び出し側でウマ・オカを均等按分)。
+function resolveTiesByDealer(ranked, players, tiebreakDealer) {
+  if (!tiebreakDealer || !players.includes(tiebreakDealer)) return ranked;
+  const dealerIdx = players.indexOf(tiebreakDealer);
+  const distanceFromDealer = (name) => {
+    const idx = players.indexOf(name);
+    if (idx < 0) return Infinity;
+    return (idx - dealerIdx + players.length) % players.length;
+  };
+  const byLoRank = new Map();
+  ranked.forEach(r => {
+    if (!byLoRank.has(r.loRank)) byLoRank.set(r.loRank, []);
+    byLoRank.get(r.loRank).push(r);
+  });
+  const resolved = [];
+  byLoRank.forEach((group, loRank) => {
+    if (group.length === 1) { resolved.push(group[0]); return; }
+    [...group]
+      .sort((a, b) => distanceFromDealer(a.name) - distanceFromDealer(b.name))
+      .forEach((r, i) => resolved.push({ ...r, loRank: loRank + i, hiRank: loRank + i, tieCount: 1 }));
+  });
+  resolved.sort((a, b) => a.loRank - b.loRank);
+  return resolved;
+}
+
 function umaForExactRank(rank, uma, playerCount) {
   if (playerCount === 3) {
     const [C] = uma;
@@ -1991,8 +2092,13 @@ function umaForTieGroup(loRank, hiRank, uma, playerCount) {
 function calcHanchanResult(hanchan, settings) {
   const { players, startPoints, returnPoints, playerCount, umaEnabled, uma,
           tobiEnabled, tobiPoints, tobiRecipient } = settings;
-  const entries = players.map(p => ({ name: p, score: hanchan.scores[p] }));
-  const ranked = rankPlayers(entries);
+  // hanchan.scores[p]がundefined/nullになり得るケース(プレイヤー名の変更・
+  // 人数変更後に古い半荘記録を読む等でキーが一致しない場合)への防御。
+  // 実際にこれが原因でrenderLog()が`undefined.toLocaleString()`で例外を
+  // 投げ、得点記録タブが完全に空白のまま固まる不具合を確認したため、
+  // 0点として扱うことでクラッシュせず表示だけは継続できるようにする。
+  const entries = players.map(p => ({ name: p, score: hanchan.scores[p] ?? 0 }));
+  const ranked = resolveTiesByDealer(rankPlayers(entries), players, hanchan.tiebreakDealer);
   const oka = (returnPoints - startPoints) * playerCount / 1000;
   const topGroup = ranked.filter(r => r.loRank === 1);
 
@@ -3171,6 +3277,9 @@ function defaultLogState(){
       revealStep: 0,       // 発表済みの順位グループ数
       revealPeek: false,   // 現在発表中の順位について、タップして名前・得点まで見た状態か
       confirmEndMatch: false,   // 「対局を終了する」の誤タップ防止確認中か
+      tiebreakDealerOpen: false, // 素点同点時の「終局時の親は誰ですか？」確認中か
+      pendingHanchanScores: null,   // ↑確定待ちの素点(chooseTiebreakDealerで使う)
+      pendingHanchanBusterOf: null, // ↑確定待ちの飛ばした人情報
       historyOpen: false,       // 対局履歴モーダルを開いているか
       historyView: 'list',      // 'list' | 'detail' | 'stats'
       historyDetailId: null,
@@ -3742,6 +3851,16 @@ function formIsValid(){
   }
   return true;
 }
+// 素点が同点のプレイヤーが2人以上いるかどうか(1人でもいれば同点順位の
+// 確定に親が必要になる)。
+function hasScoreTie(scores, players){
+  const seen = new Set();
+  for (const p of players) {
+    if (seen.has(scores[p])) return true;
+    seen.add(scores[p]);
+  }
+  return false;
+}
 function recordHanchan(){
   if (isRoomViewerOnly()) return; // 閲覧のみの同卓者は記録できない(代表入力者は1卓につき1人)
   if (!formIsValid()) return;
@@ -3751,9 +3870,39 @@ function recordHanchan(){
   const busterOf = {};
   players.forEach(p => { if (scores[p] < 0 && logState.ui.formBuster[p]) busterOf[p] = logState.ui.formBuster[p]; });
 
+  if (hasScoreTie(scores, players)) {
+    // 同点者がいる場合、自動で順位を決めず「終局時の親は誰か」を聞いてから
+    // 確定する(finalizeRecordHanchanはchooseTiebreakDealer経由で呼ばれる)。
+    logState.ui.tiebreakDealerOpen = true;
+    logState.ui.pendingHanchanScores = scores;
+    logState.ui.pendingHanchanBusterOf = busterOf;
+    scheduleRenderApp();
+    return;
+  }
+  finalizeRecordHanchan(scores, busterOf, null);
+}
+function closeTiebreakDealerPrompt(){
+  logState.ui.tiebreakDealerOpen = false;
+  logState.ui.pendingHanchanScores = null;
+  logState.ui.pendingHanchanBusterOf = null;
+  scheduleRenderApp();
+}
+// 「終局時の親は誰ですか？」で1人選んだ時。選ばれた親を起点に、時計回りの
+// 座順(プレイヤー入力欄の並び順=activePlayers())での巡目距離が近い人ほど
+// 同点内で上位になる(resolveTiesByDealer参照。親自身が同点者に含まれれば
+// 親が自動的に最上位)。
+function chooseTiebreakDealer(dealerName){
+  const scores = logState.ui.pendingHanchanScores;
+  const busterOf = logState.ui.pendingHanchanBusterOf;
+  logState.ui.tiebreakDealerOpen = false;
+  logState.ui.pendingHanchanScores = null;
+  logState.ui.pendingHanchanBusterOf = null;
+  finalizeRecordHanchan(scores, busterOf, dealerName);
+}
+function finalizeRecordHanchan(scores, busterOf, tiebreakDealer){
   if (logState.ui.editingHanchanId !== null) {
     const h = logState.hanchans.find(x => x.id === logState.ui.editingHanchanId);
-    if (h) { h.scores = scores; h.busterOf = busterOf; }
+    if (h) { h.scores = scores; h.busterOf = busterOf; h.tiebreakDealer = tiebreakDealer; }
     logState.ui.editingHanchanId = null;
   } else {
     // この対局で最初の半荘を記録した瞬間の時刻を、あとで履歴に保存する時の
@@ -3761,7 +3910,7 @@ function recordHanchan(){
     if (logState.hanchans.length === 0 && !logState.currentMatchStartedAt) {
       logState.currentMatchStartedAt = new Date().toISOString();
     }
-    logState.hanchans.unshift({ id: logState.hanchanSeq++, scores, busterOf });
+    logState.hanchans.unshift({ id: logState.hanchanSeq++, scores, busterOf, tiebreakDealer });
   }
   logState.ui.confirmEndMatch = false;
   resetFormScores();
@@ -4141,7 +4290,7 @@ function renderSettingsAccordion(){
         </div>
 
         <div class="settings-row">
-          <div class="lbl">プレイヤー名</div>
+          <div class="lbl">プレイヤー名<span class="hint">時計回りの座順(1→2→3→4→1の順に隣)で入力してください</span></div>
           <div class="name-edit-row">
             ${activePlayers().map((p,i)=>{
               const link = logState.settings.participantLinks[p];
@@ -5265,6 +5414,34 @@ function renderPaywallModal(){
     </div>`;
 }
 
+/* ---- 素点同点時の「終局時の親は誰ですか？」確認モーダル ---- */
+// キャンセルすると素点フォームの入力内容はそのまま残るので、ユーザーは
+// スコアを見直すか、もう一度「この半荘を記録」を押して選び直せる。
+function renderTiebreakDealerModal(){
+  const root = document.getElementById('tiebreakDealerModalRoot');
+  if (!root) return;
+  if (!logState.ui.tiebreakDealerOpen) { root.innerHTML = ''; return; }
+  const players = activePlayers();
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">終局時の親は誰ですか？${termTipBtn('tiebreakDealer')}</span>
+          <button class="history-close" onclick="closeTiebreakDealerPrompt()">×</button>
+        </div>
+        <div class="history-modal-body">
+          <p class="paywall-copy">素点が同点のプレイヤーがいます。同点内の順位を自動で決めるため、この半荘が終わった時点の親を選んでください。</p>
+          <div class="history-list">
+            ${players.map(p => `
+              <div class="history-card" onclick="chooseTiebreakDealer('${escKey(p)}')">
+                <div class="history-title">${escapeHtml(p)}</div>
+              </div>`).join('')}
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
 /* ---- 使い方(簡易ヘルプ) ---- */
 // 「使い方」モーダルの各手順。テキストのキャプションは表示せず、画像のみを
 // 順番に並べる(altはスクリーンリーダー用に維持)。imgはwww/help/以下に
@@ -5672,7 +5849,59 @@ function scheduleRenderApp(afterRender){
     cbs.forEach(cb => cb());
   });
 }
+// renderApp()内の各描画処理を個別のtry-catchで囲む。1つの関数が例外を
+// 投げても、他のモーダル・タブの描画は独立して続行できるようにするため
+// (例えば得点記録タブの描画が壊れても、ハンバーガーメニューやペイウォール
+// といった他のUIは正常に操作できる状態を保つ)。tabElementIdを渡した場合、
+// 失敗時にそのタブの中身を「エラーが発生しました」という最低限のメッセージに
+// 差し替える(壊れかけの内容が中途半端に残ったまま・完全な空白のまま、には
+// しない)。
+function safeRender(fn, label, tabElementId){
+  try {
+    fn();
+  } catch (e) {
+    console.error(`[${label}] render error:`, e);
+    try { showDebugError(`${label} 描画エラー`, e); } catch (e2) {}
+    if (tabElementId) {
+      try {
+        const el = document.getElementById(tabElementId);
+        if (el) el.innerHTML = `<div class="check-banner bad" style="margin:16px;">⚠️ この画面の表示中にエラーが発生しました。お手数ですが、操作をやり直すか、アプリを再起動してください。詳細は上のデバッグ表示をご確認ください。</div>`;
+      } catch (e3) {}
+    }
+  }
+}
+// renderApp()自体がここより先で例外を投げ、上記のsafeRenderでも拾いきれない
+// (例: appTitle/bottomNav等、タブの外側の共通要素を書き換える箇所での失敗)
+// ような、最も致命的なケース向けの最終防衛ライン。renderApp()を呼び直すと
+// 同じ原因で無限ループしかねないため、renderFatalErrorFallbackは
+// scheduleRenderApp/renderAppを一切経由せず直接DOMを書き換える。
+let _renderAppCrashed = false;
 function renderApp(){
+  if (_renderAppCrashed) return; // 既に致命的エラーで停止済みなら何もしない(無限ループ防止)
+  try {
+    renderAppInner();
+  } catch (e) {
+    _renderAppCrashed = true;
+    console.error('[renderApp] fatal error:', e);
+    renderFatalErrorFallback(e);
+  }
+}
+function renderFatalErrorFallback(e){
+  const root = document.getElementById('fatalErrorRoot');
+  if (!root) return;
+  let detail;
+  try { detail = formatErrorForDisplay(e); } catch (e2) { detail = String(e); }
+  root.innerHTML = `
+    <div class="fatal-error-overlay">
+      <div class="fatal-error-box">
+        <div class="fatal-error-title">⚠️ エラーが発生しました</div>
+        <div class="fatal-error-msg">画面の再描画中に問題が発生し、続行できなくなりました。お手数ですが、下のボタンから再読み込みしてください。</div>
+        <div class="fatal-error-detail">${escapeHtml(detail)}</div>
+        <button class="record-btn" style="width:100%;" onclick="location.reload()">再読み込み</button>
+      </div>
+    </div>`;
+}
+function renderAppInner(){
   const onLog = logState._activeTab === 'log';
   document.getElementById('appTitle').innerHTML = onLog
     ? '<span class="tile">📋</span>得点記録票'
@@ -5687,19 +5916,20 @@ function renderApp(){
     <button class="${onLog?'':'active'}" onclick="setActiveTab('calc')"><span class="ic">🀄</span>点数計算</button>
     <button class="${onLog?'active':''}" onclick="setActiveTab('log')"><span class="ic">📋</span>得点記録</button>
   `;
-  if (onLog) renderLog(); else render();
-  renderHistoryModal();
-  renderPaywallModal();
-  renderAccountModal();
-  renderFriendPickerModal();
-  renderLoginPromptModal();
-  renderFriendsListModal();
-  renderAddFriendModal();
-  renderHelpModal();
-  renderOtherModal();
-  renderNotifyBanner();
-  renderDebugError();
-  updateBannerState(onLog);
+  safeRender(() => { if (onLog) renderLog(); else render(); }, onLog ? 'renderLog' : 'render', onLog ? 'logTab' : 'calcTab');
+  safeRender(renderHistoryModal, 'renderHistoryModal');
+  safeRender(renderPaywallModal, 'renderPaywallModal');
+  safeRender(renderTiebreakDealerModal, 'renderTiebreakDealerModal');
+  safeRender(renderAccountModal, 'renderAccountModal');
+  safeRender(renderFriendPickerModal, 'renderFriendPickerModal');
+  safeRender(renderLoginPromptModal, 'renderLoginPromptModal');
+  safeRender(renderFriendsListModal, 'renderFriendsListModal');
+  safeRender(renderAddFriendModal, 'renderAddFriendModal');
+  safeRender(renderHelpModal, 'renderHelpModal');
+  safeRender(renderOtherModal, 'renderOtherModal');
+  safeRender(renderNotifyBanner, 'renderNotifyBanner');
+  safeRender(renderDebugError, 'renderDebugError');
+  safeRender(() => updateBannerState(onLog), 'updateBannerState');
 }
 
 // バナー広告(ネイティブのオーバーレイビュー)の表示/非表示を、得点記録票タブに
@@ -5717,7 +5947,8 @@ function updateBannerState(onLog){
   const modalOpen = logState.ui.historyOpen || logState.ui.paywallOpen
     || logState.ui.accountModalOpen || logState.ui.friendPickerOpen
     || logState.ui.loginPromptOpen || logState.ui.friendsListOpen
-    || logState.ui.addFriendOpen || logState.ui.helpOpen || logState.ui.otherMenuOpen;
+    || logState.ui.addFriendOpen || logState.ui.helpOpen || logState.ui.otherMenuOpen
+    || logState.ui.tiebreakDealerOpen;
   const shouldShow = Native.isNativeApp() && onLog && !modalOpen && !isPremiumUnlocked();
   const showSpacer = shouldShow && _bannerAdLoaded;
   document.body.classList.toggle('ad-banner-active', showSpacer);
