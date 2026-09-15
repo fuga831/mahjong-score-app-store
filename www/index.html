@@ -1147,6 +1147,48 @@
     word-break:break-all;
   }
 
+  /* ---- 画面上デバッグ表示(Xcode/Macが無い環境向け) ----
+     実際のエラー内容(code/message)をconsole.errorだけでなく画面にも出す
+     ための共通の仕組み。showDebugError(context, err)から呼ぶ。タップでは
+     消えず、明示的に閉じるかコピーするまで残る(内容を読む・報告する時間を
+     確保するため、他のトースト類と違って自動では消さない)。 */
+  .debug-error-banner{
+    position:fixed;
+    left:10px; right:10px;
+    top:calc(64px + env(safe-area-inset-top, 0px) + 8px);
+    z-index:70;
+    background:#3a1414;
+    border:1.5px solid var(--red);
+    border-radius:12px;
+    padding:10px 12px;
+    box-shadow:var(--shadow);
+    max-height:44vh;
+    overflow-y:auto;
+  }
+  .debug-error-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:8px;
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-size:.76rem;
+    color:var(--red-soft);
+    margin-bottom:5px;
+  }
+  .debug-error-detail{
+    white-space:pre-wrap;
+    word-break:break-word;
+    font-size:.72rem;
+    line-height:1.5;
+    color:var(--ivory);
+  }
+  .debug-error-actions{
+    display:flex;
+    gap:8px;
+    margin-top:8px;
+  }
+
   /* ---- 課金ステータス・ペイウォール ---- */
   .premium-status-row{ margin-bottom:10px; }
   .premium-badge{
@@ -1629,6 +1671,7 @@
 <div id="otherModalRoot"></div>
 <div id="notifyBannerRoot"></div>
 <div id="termTipRoot"></div>
+<div id="debugErrorRoot"></div>
 <input type="file" id="importFileInput" accept="application/json,.json" style="display:none;" onchange="handleImportFile(this.files)">
 
 <script>
@@ -2553,10 +2596,13 @@ const CloudSync = {
   // 呼び出す想定。成功時はaccount.isAnonymousがfalseになり、uidは維持される
   // (匿名ユーザーへのプロバイダlinkとして扱われる設計を想定)。
   async linkGoogle(){
-    if (!this.isAvailable()) return false;
+    if (!this.isAvailable()) { showDebugError('Googleログイン', 'Native.isAvailable()がfalse(ストアアプリ内ではない、またはCloudSync未初期化)'); return false; }
     try {
       const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
-      if (!Auth || !Auth.signInWithGoogle) return false;
+      if (!Auth || !Auth.signInWithGoogle) {
+        showDebugError('Googleログイン', `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, signInWithGoogle=${!!(Auth&&Auth.signInWithGoogle)})。ネイティブ側でプラグインが正しく登録されていない可能性があります。`);
+        return false;
+      }
       const result = await Auth.signInWithGoogle();
       if (result && result.user) {
         logState.account.uid = result.user.uid;
@@ -2565,16 +2611,24 @@ const CloudSync = {
         saveLogState();
         return true;
       }
+      showDebugError('Googleログイン', `signInWithGoogle()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
       return false;
-    } catch (e) { return false; }
+    } catch (e) {
+      console.error('[CloudSync.linkGoogle] failed:', e);
+      showDebugError('Googleログイン (linkGoogle)', e);
+      return false;
+    }
   },
   // App Store Review Guideline 4.8対応: Googleログインを提供する場合、
   // Sign in with Appleも同格の選択肢として必ず用意する。
   async linkApple(){
-    if (!this.isAvailable()) return false;
+    if (!this.isAvailable()) { showDebugError('Appleログイン', 'Native.isAvailable()がfalse(ストアアプリ内ではない、またはCloudSync未初期化)'); return false; }
     try {
       const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
-      if (!Auth || !Auth.signInWithApple) return false;
+      if (!Auth || !Auth.signInWithApple) {
+        showDebugError('Appleログイン', `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, signInWithApple=${!!(Auth&&Auth.signInWithApple)})。ネイティブ側でプラグインが正しく登録されていない可能性があります。`);
+        return false;
+      }
       const result = await Auth.signInWithApple();
       if (result && result.user) {
         logState.account.uid = result.user.uid;
@@ -2583,8 +2637,13 @@ const CloudSync = {
         saveLogState();
         return true;
       }
+      showDebugError('Appleログイン', `signInWithApple()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
       return false;
-    } catch (e) { return false; }
+    } catch (e) {
+      console.error('[CloudSync.linkApple] failed:', e);
+      showDebugError('Appleログイン (linkApple)', e);
+      return false;
+    }
   },
 
   // ユーザーネームは一意。usernames/{normalized}ドキュメントの有無で申請の
@@ -2617,8 +2676,10 @@ const CloudSync = {
       return { ok: true };
     } catch (e) {
       // 汎用メッセージだけだと実機での原因調査ができないため、実際のエラー
-      // (Firestoreの場合は e.code に 'permission-denied' 等が入る)をログに残す。
+      // (Firestoreの場合は e.code に 'permission-denied' 等が入る)を
+      // console.errorだけでなく画面上にも表示する(Xcode接続できない環境向け)。
       console.error('[CloudSync.claimUsername] failed:', e && (e.code || e.message || e));
+      showDebugError('ユーザーネーム設定 (claimUsername)', e);
       return { ok: false, error: 'network' };
     }
   },
@@ -3018,6 +3079,7 @@ function defaultLogState(){
       loginPromptOpen: false,      // 匿名のままでは困る操作をした時のログイン誘導モーダル
       loginPromptReason: null,
       notifyBanner: null,          // 「〇〇さんとの対局記録が追加されました」の簡易トースト
+      debugError: null,            // { context, detail } — 実機にXcode接続できない環境向けの画面上デバッグ表示
       addFriendOpen: false,        // 同卓者指定を介さない、単独の「フレンドを追加」モーダル
       addFriendSearchInput: '',
       addFriendSearchResult: null,
@@ -3153,6 +3215,63 @@ function escapeHtml(str){
   return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 function escKey(str){ return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+
+/* ---- 画面上デバッグ表示(Xcode/Macが無くコンソールを見られない環境向け) ----
+   console.errorだけでなく、実際のエラー内容(code/message等)をそのまま
+   画面上のバナーにも出す共通の仕組み。今後もcatchブロックから
+   showDebugError('文脈の説明', e) を呼ぶだけで使える。 ---- */
+function formatErrorForDisplay(err){
+  if (err === undefined || err === null) return '(エラーオブジェクトなし: undefined/null)';
+  if (typeof err === 'string') return err;
+  if (typeof err !== 'object') return String(err);
+  const parts = [];
+  if (err.code !== undefined) parts.push(`code: ${err.code}`);
+  if (err.message) parts.push(`message: ${err.message}`);
+  if (err.domain) parts.push(`domain: ${err.domain}`); // NSErrorのdomainがブリッジされてくる場合がある
+  if (err.name && !err.message) parts.push(`name: ${err.name}`);
+  if (parts.length === 0) {
+    try { parts.push(JSON.stringify(err)); } catch (e2) { parts.push(String(err)); }
+  }
+  return parts.join('\n');
+}
+function showDebugError(context, err){
+  logState.ui.debugError = { context, detail: formatErrorForDisplay(err) };
+  scheduleRenderApp();
+}
+function dismissDebugError(){
+  logState.ui.debugError = null;
+  scheduleRenderApp();
+}
+async function copyDebugError(){
+  const d = logState.ui.debugError;
+  if (!d) return;
+  const text = `[${d.context}]\n${d.detail}`;
+  try {
+    await navigator.clipboard.writeText(text);
+    logState.ui.notifyBanner = 'エラー内容をコピーしました';
+  } catch (e) {
+    // クリップボードが使えない環境では諦めず、せめてバナーにそのまま流す
+    logState.ui.notifyBanner = text;
+  }
+  scheduleRenderApp();
+}
+function renderDebugError(){
+  const root = document.getElementById('debugErrorRoot');
+  if (!root) return;
+  const d = logState.ui.debugError;
+  if (!d) { root.innerHTML = ''; return; }
+  root.innerHTML = `
+    <div class="debug-error-banner">
+      <div class="debug-error-head">
+        <span>⚠️ デバッグ: ${escapeHtml(d.context)}</span>
+        <button class="history-close" onclick="dismissDebugError()">×</button>
+      </div>
+      <div class="debug-error-detail">${escapeHtml(d.detail)}</div>
+      <div class="debug-error-actions">
+        <button class="preset-btn" onclick="copyDebugError()">📋 コピー</button>
+      </div>
+    </div>`;
+}
 function formatMoney(n){
   const sign = n > 0 ? '+' : n < 0 ? '-' : '';
   return `${sign}${Math.abs(Math.round(n)).toLocaleString('ja-JP')}`;
@@ -3655,8 +3774,16 @@ async function submitUsername(){
   }
 }
 async function loginFromAccountModal(provider){
-  if (provider === 'google') await CloudSync.linkGoogle();
-  else await CloudSync.linkApple();
+  // ボタンのタップ自体がハンドラまで届いているかをまず画面上で確認できる
+  // ようにする(成功すればdismissDebugError()で消える)。
+  showDebugError(`ログインボタン(${provider})`, 'タップを検知しました。サインイン処理を呼び出します…');
+  const ok = provider === 'google' ? await CloudSync.linkGoogle() : await CloudSync.linkApple();
+  if (ok) {
+    dismissDebugError();
+  } else if (logState.ui.debugError && logState.ui.debugError.context === `ログインボタン(${provider})`) {
+    // linkGoogle/linkAppleが例外も投げず詳細も出せなかった(=想定外の失敗経路)場合の最終フォールバック。
+    showDebugError(`ログインボタン(${provider})`, '処理は呼ばれましたが、詳細不明のまま失敗しました(例外なし・エラー情報なし)。');
+  }
   scheduleRenderApp();
 }
 
@@ -4437,6 +4564,46 @@ function calcCareerStats(matchHistory, playerName){
   };
 }
 
+// calcCareerStats()の結果1人分を、成績タブの「メンバー構成ごとの成績」
+// カードと全く同じ指標・見せ方で描画する共通ヘルパー。playerCountは
+// 連対率(4人打ち)/ラス回避率(3人打ち)のどちらの表現を使うかの分岐にのみ使う。
+function renderCareerStatCard(name, st, playerCount){
+  const primaryLine = playerCount === 4
+    ? `<div class="stat-row">連対率 <b>${(st.top2Rate*100).toFixed(0)}%</b></div>`
+    : `<div class="stat-row">トップ率 <b>${(st.topRate*100).toFixed(0)}%</b> ／ ラス回避率 <b>${(st.lastAvoidRate*100).toFixed(0)}%</b></div>`;
+  const secondaryLine = playerCount === 4
+    ? `<div class="stat-row">トップ率 <b>${(st.topRate*100).toFixed(0)}%</b> ／ ラス率 <b>${(st.lastRate*100).toFixed(0)}%</b></div>`
+    : `<div class="stat-row">ラス率 <b>${(st.lastRate*100).toFixed(0)}%</b></div>`;
+  const moneyColor = v => v >= 0 ? '#9fe0bd' : 'var(--red-soft)';
+  return `
+    <div class="stat-card">
+      <div class="stat-name">${escapeHtml(name)}</div>
+      <div class="stat-row">平均順位 <b>${st.avgRank.toFixed(2)}</b></div>
+      <div class="stat-row">試合数 <b>${st.games}半荘</b></div>
+      ${primaryLine}
+      ${secondaryLine}
+      <div class="stat-row">MAX得点 <b>${st.maxScore.toLocaleString()}</b></div>
+      <div class="stat-row">飛んだ回数 <b>${st.tobiCount}回</b></div>
+      <div class="stat-row">平均収支(半荘あたり) <b style="color:${moneyColor(st.avgMoneyPerHanchan)}">${formatMoney(st.avgMoneyPerHanchan)}</b></div>
+      <div class="stat-row">通算収支 <b style="color:${moneyColor(st.totalMoney)}">${formatMoney(st.totalMoney)}</b></div>
+    </div>`;
+}
+// 選んだ人が参加した対局の中で最も多い卓の人数(3人打ち/4人打ち)を返す。
+// 総成績はメンバー構成を問わず全対局を合算するため、3人打ち・4人打ちが
+// 混在している場合に連対率/ラス回避率どちらの表現を使うか決めるために使う
+// (多数決。1件も無ければ4人打ちを既定値とする)。
+function dominantPlayerCountFor(matchHistory, playerName){
+  const counts = {};
+  matchHistory.forEach(m => {
+    const s = m.settingsSnapshot;
+    if (!s || !s.playerNames.slice(0, s.playerCount).includes(playerName)) return;
+    counts[s.playerCount] = (counts[s.playerCount] || 0) + 1;
+  });
+  const keys = Object.keys(counts);
+  if (keys.length === 0) return 4;
+  return Number(keys.reduce((a, b) => counts[a] >= counts[b] ? a : b));
+}
+
 /* ---- 通算成績(「成績」タブに統合。旧ハンバーガーメニュー「アカウント」) ----
    フレンド・卓の概念とは無関係に、この端末に保存されている対局記録
    (logState.matchHistory)だけを対象にした、プレイヤー1人分の通算成績。
@@ -4610,8 +4777,32 @@ function renderHistoryStats(){
     : names[0];
   logState.ui.statsPlayer = selected; // 選んだ結果を覚えておく
 
-  // a) メンバー構成(参加者の組み合わせ)ごとの成績カード。選んだ人が参加した
-  //    対局だけを対象に、これまでと同じカード形式で表示する。
+  // a) 総成績: メンバー構成を問わず、選んだ人が参加した全対局(このタブに
+  //    表示中の範囲=source)を合算する。「メンバー構成ごとの成績」(b)と
+  //    全く同じ指標・カード形式(renderCareerStatCard)で表示したうえで、
+  //    順位分布・平均着順の推移グラフ(旧ハンバーガーメニュー「アカウント」
+  //    タブの内容)も続けて表示する。例外が起きてもb)の表示は道連れにせず、
+  //    画面上にも表示する(showDebugError参照)。
+  const overallCareer = calcCareerStats(source, selected);
+  const overallCardHtml = overallCareer
+    ? renderCareerStatCard(selected, overallCareer, dominantPlayerCountFor(source, selected))
+    : '';
+  let overallChartHtml = '';
+  try {
+    overallChartHtml = renderOverallStatsSection(source, selected);
+  } catch (e) {
+    console.error('[renderHistoryStats] renderOverallStatsSection failed:', e);
+    showDebugError('成績タブ(総成績)', e);
+  }
+  const overallHtml = (overallCardHtml || overallChartHtml) ? `
+    <div class="stat-group">
+      <div class="stat-group-head"><span>🏆 総成績</span><span class="hint">全メンバー構成の合算</span></div>
+      ${overallCardHtml ? `<div class="stat-cards">${overallCardHtml}</div>` : ''}
+      ${overallChartHtml}
+    </div>` : '';
+
+  // b) メンバー構成(参加者の組み合わせ)ごとの成績カード。選んだ人が参加した
+  //    対局だけを対象に、組み合わせごとに分けて表示する。
   const groups = {};
   source.forEach(m => {
     const s = m.settingsSnapshot;
@@ -4627,52 +4818,22 @@ function renderHistoryStats(){
     const totalHanchans = g.matches.reduce((sum,m)=>sum+m.hanchans.length, 0);
     const st = calcCareerStats(g.matches, selected);
     if (!st) return '';
-    const primaryLine = g.playerCount === 4
-      ? `<div class="stat-row">連対率 <b>${(st.top2Rate*100).toFixed(0)}%</b></div>`
-      : `<div class="stat-row">トップ率 <b>${(st.topRate*100).toFixed(0)}%</b> ／ ラス回避率 <b>${(st.lastAvoidRate*100).toFixed(0)}%</b></div>`;
-    const secondaryLine = g.playerCount === 4
-      ? `<div class="stat-row">トップ率 <b>${(st.topRate*100).toFixed(0)}%</b> ／ ラス率 <b>${(st.lastRate*100).toFixed(0)}%</b></div>`
-      : `<div class="stat-row">ラス率 <b>${(st.lastRate*100).toFixed(0)}%</b></div>`;
-    const moneyColor = v => v >= 0 ? '#9fe0bd' : 'var(--red-soft)';
     return `
       <div class="stat-group">
         <div class="stat-group-head"><span>${escapeHtml(g.players.join('・'))}</span><span class="hint">${g.matches.length}対局・${totalHanchans}半荘</span></div>
-        <div class="stat-cards">
-          <div class="stat-card">
-            <div class="stat-name">${escapeHtml(selected)}</div>
-            <div class="stat-row">平均順位 <b>${st.avgRank.toFixed(2)}</b></div>
-            <div class="stat-row">試合数 <b>${st.games}半荘</b></div>
-            ${primaryLine}
-            ${secondaryLine}
-            <div class="stat-row">MAX得点 <b>${st.maxScore.toLocaleString()}</b></div>
-            <div class="stat-row">飛んだ回数 <b>${st.tobiCount}回</b></div>
-            <div class="stat-row">平均収支(半荘あたり) <b style="color:${moneyColor(st.avgMoneyPerHanchan)}">${formatMoney(st.avgMoneyPerHanchan)}</b></div>
-            <div class="stat-row">通算収支 <b style="color:${moneyColor(st.totalMoney)}">${formatMoney(st.totalMoney)}</b></div>
-          </div>
-        </div>
+        <div class="stat-cards">${renderCareerStatCard(selected, st, g.playerCount)}</div>
       </div>`;
   }).join('');
 
-  // b) 通算成績(総半荘数・順位分布・平均着順の推移)。メンバー構成を問わず、
-  //    選んだ人が参加した(このタブに表示中の範囲の)全半荘をまとめて集計する
-  //    (旧ハンバーガーメニュー「アカウント」タブの内容)。例外が起きても
-  //    a)側の表示は道連れにせず、コンソールにログを残して空欄にとどめる。
-  let overallHtml = '';
-  try {
-    overallHtml = renderOverallStatsSection(source, selected);
-  } catch (e) {
-    console.error('[renderHistoryStats] renderOverallStatsSection failed:', e);
-  }
-
   const picker = renderStatsPlayerPicker(names, selected);
-  if (!groupsHtml && !overallHtml) {
+  if (!overallHtml && !groupsHtml) {
     return `${picker}<div class="history-empty">${escapeHtml(selected)}さんの記録がありません</div>`;
   }
-  // 通算成績(サマリー)を個別対局履歴より上に表示する。
+  // 総成績(a)を個別対局履歴(b)より上に表示する。
   return `
     ${picker}
     ${overallHtml}
-    ${groupsHtml ? `<div class="hint" style="margin-bottom:8px;">メンバー構成ごとの成績</div>${groupsHtml}` : ''}
+    ${groupsHtml ? `<div class="hint" style="margin:14px 0 8px;font-weight:700;">メンバー構成ごとの成績</div>${groupsHtml}` : ''}
   `;
 }
 
@@ -5303,6 +5464,7 @@ function renderApp(){
   renderHelpModal();
   renderOtherModal();
   renderNotifyBanner();
+  renderDebugError();
   updateBannerState(onLog);
 }
 
