@@ -35,6 +35,10 @@
 
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;}
+  /* 文字サイズ:大(旧称ジジイモード)。このアプリのほぼ全てのfont-sizeは
+     rem単位(html要素のfont-sizeが基準)で書かれているため、ここを1箇所
+     拡大するだけでアプリ全体の文字が連動して大きくなる。 */
+  html.large-text{ font-size:125%; }
   body{
     background:
       radial-gradient(circle at 20% 15%, rgba(255,255,255,0.035) 0, transparent 40%),
@@ -332,6 +336,45 @@
     color:var(--ink-soft);
     line-height:1.5;
     word-break:break-word;
+  }
+  .fu-breakdown-line{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    column-gap:.25em;
+  }
+
+  /* ---- 専門用語の「?」タップ解説 ---- */
+  .term-tip-btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:14px;height:14px;
+    flex-shrink:0;
+    border-radius:50%;
+    border:1px solid var(--ink-soft);
+    background:var(--felt-2);
+    color:var(--ink-soft);
+    font-size:.6rem;
+    font-weight:700;
+    line-height:1;
+    padding:0;
+    cursor:pointer;
+    vertical-align:middle;
+  }
+  .term-tip-btn:active{background:var(--felt-1);color:var(--ivory);}
+  .term-tip-popover{
+    position:fixed;
+    z-index:60;
+    max-width:min(78vw, 260px);
+    background:var(--felt-1);
+    border:1px solid var(--gold);
+    border-radius:10px;
+    padding:9px 11px;
+    font-size:.72rem;
+    line-height:1.5;
+    color:var(--ivory-dim);
+    box-shadow:var(--shadow);
   }
 
   /* ---- section blocks ---- */
@@ -704,6 +747,7 @@
     gap:8px;
     margin-bottom:10px;
   }
+  .reveal-area.skippable{cursor:pointer;}
   .reveal-card{
     background:linear-gradient(180deg, var(--felt-1), var(--felt-2));
     border:1px solid var(--line);
@@ -760,6 +804,13 @@
     font-size:.72rem;
     color:var(--ink-soft);
     padding:4px 0 2px;
+  }
+  .reveal-skip-hint{
+    text-align:center;
+    font-size:.68rem;
+    color:var(--ink-soft);
+    padding:2px 0 4px;
+    opacity:.75;
   }
 
   .share-icon-btn{
@@ -1564,6 +1615,7 @@
 <div id="helpModalRoot"></div>
 <div id="otherModalRoot"></div>
 <div id="notifyBannerRoot"></div>
+<div id="termTipRoot"></div>
 <input type="file" id="importFileInput" accept="application/json,.json" style="display:none;" onchange="handleImportFile(this.files)">
 
 <script>
@@ -1609,6 +1661,56 @@ function mentsuFu(m){
 function shanponRonFu(terminal){ return terminal ? 4 : 2; }   // = minko value
 function shanponTsumoFu(terminal){ return terminal ? 8 : 4; } // = ankou value
 
+/* ---- 専門用語の「?」タップ解説(符計算の内訳・ウマ/オカ/チップ共通) ----
+   用語の表記自体は変えず、横に小さな?ボタンを添えるだけにして見た目を
+   崩さない。タップすると#termTipRootに吹き出し(位置は画面内に収まるよう
+   JSでクランプ)を出し、もう一度タップ・別の場所をタップ・別の?を
+   タップのいずれでも閉じる。 ---- */
+const TERM_GLOSSARY = {
+  chunchan: '中張牌: 2〜8の数牌のこと。',
+  yaochu: '么九牌: 1・9・字牌のこと。',
+  ankoMinko: '暗刻・明刻: 見せずに揃えた3枚組が暗刻、鳴いて揃えたものが明刻。',
+  ankanMinkanKakan: '暗槓・明槓・加槓: 見せずに揃えた4枚組が暗槓、鳴いて揃えたものが明槓、途中で1枚足したものが加槓。',
+  machi: 'カンチャン・ペンチャン・単騎・シャンポン: カンチャンは間に挟まる牌待ち、ペンチャンは端の牌待ち、単騎は雀頭1枚待ち、シャンポンは対子2組での待ち。',
+  uma: 'ウマ: 対局の最終順位に応じてポイントを増減させるルール。1位・2位はプラス、3位・4位はマイナス。',
+  oka: 'オカ: 1位(トップ)が受け取る追加のポイント。参加者全員の供託金を、1位がまとめて受け取るイメージ。',
+  chip: 'チップ: ルールによって異なるが、一般的には一発・赤・裏で発生する追加の得点。点数計算とは別に、対局後にまとめて精算。',
+};
+function termTipBtn(...keys){
+  return keys.map(k => `<button type="button" class="term-tip-btn" onclick="showTermTip(event,'${k}')">?</button>`).join('');
+}
+function showTermTip(evt, key){
+  evt.stopPropagation();
+  const text = TERM_GLOSSARY[key];
+  if (!text) return;
+  const root = document.getElementById('termTipRoot');
+  if (!root) return;
+  const already = root.dataset.openFor === key;
+  root.innerHTML = '';
+  root.dataset.openFor = '';
+  if (already) return; // 同じ?をもう一度タップしたら閉じるだけ
+  const btn = evt.currentTarget;
+  const rect = btn.getBoundingClientRect();
+  const pop = document.createElement('div');
+  pop.className = 'term-tip-popover';
+  pop.textContent = text;
+  pop.onclick = e => e.stopPropagation();
+  root.appendChild(pop);
+  root.dataset.openFor = key;
+  const margin = 10;
+  const pw = pop.offsetWidth, ph = pop.offsetHeight;
+  let left = rect.left + rect.width / 2 - pw / 2;
+  left = Math.max(margin, Math.min(left, window.innerWidth - pw - margin));
+  let top = rect.bottom + 8;
+  if (top + ph > window.innerHeight - margin) top = rect.top - ph - 8; // 下に収まらなければ上に出す
+  pop.style.left = `${left}px`;
+  pop.style.top = `${top}px`;
+}
+document.addEventListener('click', () => {
+  const root = document.getElementById('termTipRoot');
+  if (root && root.innerHTML) { root.innerHTML = ''; root.dataset.openFor = ''; }
+});
+
 // calcFuBreakdown(state) -> { fuRon, fuTsumo, ron, tsumo } — 符計算を、UIで
 // そのまま表示できる内訳(積み上げ項目の配列)付きで返す。ron/tsumoはそれぞれ
 // { items:[{label,value}], subtotal, rounded, final } の形。
@@ -1634,8 +1736,9 @@ function calcFuBreakdown(s){
   const mentsuItems = s.mentsuList.map(m => ({
     label: `${m.ankou ? '暗' : '明'}${m.isKan ? '槓' : '刻'}(${m.terminal ? '1・9・字' : '中張'})`,
     value: mentsuFu(m),
+    terms: [m.isKan ? 'ankanMinkanKakan' : 'ankoMinko', m.terminal ? 'yaochu' : 'chunchan'],
   }));
-  const waitItem = s.machi === 'bad' ? { label: '待ち(カンチャン・ペンチャン・単騎)', value: 2 } : null; // ryanmen and shanpon both add 0 here
+  const waitItem = s.machi === 'bad' ? { label: '待ち(カンチャン・ペンチャン・単騎)', value: 2, terms: ['machi'] } : null; // ryanmen and shanpon both add 0 here
   const headItem = s.yakuhaiHead ? { label: '雀頭(役牌)', value: 2 } : null;
 
   // isRonごとに、副底→面子→待ち→雀頭→(門前ロン/ツモ)の順で内訳を積み上げる。
@@ -1646,8 +1749,8 @@ function calcFuBreakdown(s){
       // シャンポンの対子は、ロンなら明刻・ツモなら暗刻として扱われるため、
       // ron/tsumoで別の値になる(shanponRonFu/shanponTsumoFu参照)。
       items.push(isRon
-        ? { label: '待ち(シャンポン→明刻扱い)', value: shanponRonFu(s.shanponTerminal) }
-        : { label: '待ち(シャンポン→暗刻扱い)', value: shanponTsumoFu(s.shanponTerminal) });
+        ? { label: '待ち(シャンポン→明刻扱い)', value: shanponRonFu(s.shanponTerminal), terms: ['machi', 'ankoMinko'] }
+        : { label: '待ち(シャンポン→暗刻扱い)', value: shanponTsumoFu(s.shanponTerminal), terms: ['machi', 'ankoMinko'] });
     }
     if (headItem) items.push(headItem);
     if (isRon) {
@@ -2027,14 +2130,20 @@ function render(){
 // 符計算の内訳1本分(ron側 or tsumo側)を「項目1a + 項目b = 小計符 → 切り上げ後符」
 // の文字列に組み立てる。要素が1つしかない(七対子・平和の固定値)場合は
 // 「〇〇(固定)25符」のように単独表示し、冗長な「= 25符」を付けない。
+// 各項目のラベルの後ろに、該当する専門用語があれば小さな?ボタンを添える
+// (用語表記そのものは変更しない)。戻り値はHTML文字列(ラベル部分は
+// escapeHtml済み)。
 function formatFuBreakdown(side){
-  const parts = side.items.map(it => `${it.label}${it.value}符`).join(' + ');
+  const parts = side.items.map(it => {
+    const tips = it.terms ? termTipBtn(...it.terms) : '';
+    return `${escapeHtml(it.label)}${tips}${it.value}符`;
+  }).join(' + ');
   // 項目が1つだけ(七対子・平和の固定値、または鳴きで加符が無いだけの手)の
   // 場合は、冗長な「= 〇〇符」を付けずラベル+値だけを表示する。
-  let text = side.items.length > 1 ? `${parts} = ${side.subtotal}符` : parts;
-  if (side.rounded !== side.subtotal) text += ` → ${side.rounded}符(切り上げ)`;
-  if (side.final !== side.rounded) text += ` → ${side.final}符(鳴きは30符が最低)`;
-  return text;
+  let html = side.items.length > 1 ? `${parts} = ${side.subtotal}符` : parts;
+  if (side.rounded !== side.subtotal) html += ` → ${side.rounded}符(切り上げ)`;
+  if (side.final !== side.rounded) html += ` → ${side.final}符(鳴きは30符が最低)`;
+  return html;
 }
 
 // ロン/ツモで内訳(項目の並び・値)が完全に一致する場合(七対子など)は1行に
@@ -2047,7 +2156,7 @@ function fuBreakdownHtml(breakdown){
   const lines = sameBothSides
     ? [formatFuBreakdown(breakdown.ron)]
     : [`ロン: ${formatFuBreakdown(breakdown.ron)}`, `ツモ: ${formatFuBreakdown(breakdown.tsumo)}`];
-  return `<div class="fu-breakdown">${lines.map(l => `<div>${escapeHtml(l)}</div>`).join('')}</div>`;
+  return `<div class="fu-breakdown">${lines.map(l => `<div class="fu-breakdown-line">${l}</div>`).join('')}</div>`;
 }
 
 function resultHtml(stateLabel, ronFuLabel, tsumoFuLabel, r, breakdown){
@@ -2172,6 +2281,23 @@ const Native = {
         } catch (e) { /* iOS 14未満・Android等では未対応のため無視 */ }
       }
       if (AdMob.initialize) await AdMob.initialize({});
+      // バナー広告の実際のロード成否をリッスンする。updateBannerState()は
+      // 「表示を試みたかどうか」ではなくこのイベントで分かる「実際に
+      // ロードされ表示されているかどうか」でレイアウトの余白(CSSクラス
+      // ad-banner-active/with-ad-banner)を確保するかどうかを判断する
+      // (オフライン・広告在庫切れ等でロードに失敗した場合、CSS側だけが
+      // 余白を確保してしまうと、その余白に何も表示されない「隙間」に
+      // なってしまうため)。
+      if (AdMob.addListener) {
+        AdMob.addListener('bannerAdLoaded', () => {
+          _bannerAdLoaded = true;
+          scheduleRenderApp();
+        });
+        AdMob.addListener('bannerAdFailedToLoad', () => {
+          _bannerAdLoaded = false;
+          scheduleRenderApp();
+        });
+      }
     } catch (e) { /* 広告SDKの初期化に失敗しても本体機能は止めない */ }
   },
   async showBanner(){
@@ -2813,6 +2939,7 @@ function defaultLogState(){
       linkedProviders: { google: false, apple: false },
       notifyOnAutoRecord: true,     // 自分以外の操作で記録が追加された時に通知するか(初期値ON)
       pushPermissionRequested: false, // 通知許可を一度リクエスト済みか(タイミング制御用)
+      largeText: false,             // 文字サイズ:大(旧称ジジイモード)。ONでアプリ全体を1.25倍表示
     },
     friends: [], // [{ uid, username }] ローカルキャッシュ(正はusers/{uid}/friends)
     room: null,  // 進行中の卓。null=単独モード。
@@ -2915,6 +3042,7 @@ function saveLogState(){
 const logState = loadLogState();
 if (logState.hanchans.length > 0) logState.ui.settingsOpen = false;
 saveLogState(); // v1からの移行時などに、v2キーへ即座に書き直しておく
+applyLargeTextClass(); // 保存済みの文字サイズ設定を起動直後から反映する
 
 // 起動時に必ずPlay Billingへ購入履歴を問い合わせて上書きする。ローカル保存の
 // isPremiumだけに頼ると、端末変更・再インストール時に無料枠へ戻ってしまうため。
@@ -3079,12 +3207,43 @@ function setRoundingMode(v){ logState.settings.roundingMode = v; saveLogState();
 function setChipUnitYen(v){ logState.settings.chipUnitYen = v; saveLogState(); scheduleRenderApp(); }
 function toggleAccordion(key){ logState.ui[key] = !logState.ui[key]; scheduleRenderApp(); }
 
-/* ---- 演出モード（終局まで順位・収支を隠す） ---- */
+/* ---- 演出モード（終局まで順位・収支を隠す） ----
+   以前は「次の順位を発表 →」ボタンをタップするたびに1つずつ進む手動送りだった。
+   現在は終局と同時に自動でテンポよく1つずつ発表され、タップすると残りを
+   即座に全部表示してスキップできる(手動送りのボタンは廃止)。 ---- */
+const REVEAL_STEP_INTERVAL_MS = 1100; // 1つの順位を発表してから次を自動発表するまでの間隔
+let _revealTimer = null;
+function clearRevealTimer(){
+  if (_revealTimer) { clearTimeout(_revealTimer); _revealTimer = null; }
+}
+function currentRevealGroupCount(){
+  const s = settingsWithPlayers();
+  const totals = calcTotals(logState.hanchans, logState.chips, s);
+  return revealGroupsFor(activePlayers(), totals, logState.settings.playerCount).length;
+}
+// revealStepが最後まで進んでいなければ、REVEAL_STEP_INTERVAL_MS後に1つ進めて
+// 自分自身を再度予約する(=以後は自動でテンポよく最後まで進んでいく)。
+function scheduleAutoRevealTick(){
+  clearRevealTimer();
+  if (isRoomViewerOnly()) return; // 発表の進行は代表入力者の端末でのみ駆動する
+  const total = currentRevealGroupCount();
+  if (!logState.ui.revealActive || logState.ui.revealStep >= total) return;
+  _revealTimer = setTimeout(() => {
+    _revealTimer = null;
+    if (!logState.ui.revealActive) return; // 途中でキャンセル・リセットされていたら何もしない
+    const t = currentRevealGroupCount();
+    if (logState.ui.revealStep < t) logState.ui.revealStep++;
+    scheduleRenderApp();
+    syncRoomState();
+    scheduleAutoRevealTick();
+  }, REVEAL_STEP_INTERVAL_MS);
+}
 function togglePresentationMode(){
   logState.settings.presentationMode = !logState.settings.presentationMode;
   logState.ui.revealActive = false;
   logState.ui.revealStep = 0;
   logState.ui.confirmEndMatch = false;
+  clearRevealTimer();
   saveLogState(); scheduleRenderApp();
 }
 // 発表順は「2位→3位→…→1位」。1位（優勝）を最後にとっておくことで、
@@ -3109,10 +3268,16 @@ function startReveal(){
   saveLogState();
   scheduleRenderApp();
   syncRoomState();
+  scheduleAutoRevealTick(); // 2番目以降の順位を自動でテンポよく発表していく
 }
-function revealNext(totalGroups){
+// 発表中にユーザーがタップした時のスキップ操作。残り全ての順位を即座に表示する。
+function skipReveal(){
   if (isRoomViewerOnly()) return;
-  if (logState.ui.revealStep < totalGroups) logState.ui.revealStep++;
+  if (!logState.ui.revealActive) return;
+  clearRevealTimer();
+  const total = currentRevealGroupCount();
+  if (logState.ui.revealStep >= total) return; // 既に発表し終えていれば何もしない
+  logState.ui.revealStep = total;
   scheduleRenderApp();
   syncRoomState();
 }
@@ -3184,6 +3349,7 @@ function archiveCurrentMatch(){
   logState.ui.revealActive = false;
   logState.ui.revealStep = 0;
   logState.ui.confirmEndMatch = false;
+  clearRevealTimer();
   cancelEditHanchan_noRender();
   saveLogState();
   scheduleRenderApp();
@@ -3311,6 +3477,7 @@ function recordHanchan(){
   if (logState.settings.presentationMode) {
     logState.ui.revealActive = false;
     logState.ui.revealStep = 0;
+    clearRevealTimer();
   }
   saveLogState();
   scheduleRenderApp();
@@ -3623,6 +3790,17 @@ function toggleNotifyOnAutoRecord(v){
   scheduleRenderApp();
   CloudSync.setNotifyOnAutoRecord(v);
 }
+// 文字サイズ:大(旧称ジジイモード)。端末ローカルの表示設定なのでCloudSync
+// には同期しない(notifyOnAutoRecordと違い、Firestore側で参照する必要が無い)。
+function applyLargeTextClass(){
+  document.documentElement.classList.toggle('large-text', !!logState.account.largeText);
+}
+function toggleLargeText(v){
+  logState.account.largeText = v;
+  saveLogState();
+  applyLargeTextClass();
+  scheduleRenderApp();
+}
 function dismissNotifyBanner(){
   logState.ui.notifyBanner = null;
   scheduleRenderApp();
@@ -3685,7 +3863,7 @@ function renderSettingsAccordion(){
             <input type="checkbox" ${s.returnPoints>s.startPoints?'checked':''} onchange="setOkaEnabled(this.checked)"> オカあり（トップの取り分に+5,000点）
           </label>
           <div class="preview-line">返し点（自動計算）: <b>${s.returnPoints.toLocaleString()}点</b></div>
-          <div class="preview-line">オカ（1位への上乗せ）: <b>${oka>=0?'+':''}${oka.toFixed(1)}pt</b></div>
+          <div class="preview-line">オカ（1位への上乗せ）${termTipBtn('oka')}: <b>${oka>=0?'+':''}${oka.toFixed(1)}pt</b></div>
           <button class="mentsu-add" style="margin-top:8px;" onclick="toggleAccordion('startAdvancedOpen')">${logState.ui.startAdvancedOpen?'▴ 細かい指定を閉じる':'▾ 持ち点・返し点を自分で細かく指定する'}</button>
           ${logState.ui.startAdvancedOpen ? `
             <div class="inline-fields" style="margin-top:8px;">
@@ -3696,7 +3874,7 @@ function renderSettingsAccordion(){
 
         <div class="settings-row">
           <div class="lbl" style="display:flex;justify-content:space-between;align-items:center;">
-            <span>ウマ</span>
+            <span>ウマ${termTipBtn('uma')}</span>
             <label style="font-weight:400;font-size:.72rem;display:flex;align-items:center;gap:5px;">
               <input type="checkbox" ${s.umaEnabled?'checked':''} onchange="setUmaEnabled(this.checked)"> 有効
             </label>
@@ -3755,7 +3933,7 @@ function renderChipsAccordion(){
   return `
     <div class="accordion ${open?'open':''}">
       <div class="accordion-head" onclick="toggleAccordion('chipsOpen')">
-        <div class="t">チップ精算<small>全対局終了後にまとめて入力</small></div>
+        <div class="t">チップ精算${termTipBtn('chip')}<small>全対局終了後にまとめて入力</small></div>
         <div class="chev">▾</div>
       </div>
       ${open ? `
@@ -3981,13 +4159,16 @@ function renderStickyHeader(s, totals){
 
   // 発表中〜発表後は順位カードが積み重なって縦に長くなり得るため、sticky解除
   // (header-block)にして、スクロール時に下のフォームなどを覆い隠さないようにする。
+  // 発表中はREVEAL_STEP_INTERVAL_MSごとに1つずつ自動で発表が進む
+  // (scheduleAutoRevealTick参照)。reveal-areaをタップすると残りを
+  // 即座に全部表示してスキップできる。
   return `<div class="header-block">${roomStatusHtml}${modeSwitchHtml}
-    <div class="reveal-area">
+    <div class="reveal-area ${done ? '' : 'skippable'}" ${done ? '' : 'onclick="skipReveal()"'}>
       ${shownGroups.map(g => revealGroupCardHtml(g, totals)).join('')}
     </div>
     ${done
       ? `<div class="reveal-done">🎉 発表終了！次の半荘を記録するとまた隠れます</div>${renderEndMatchControls(true)}`
-      : `<button class="reveal-btn" onclick="revealNext(${groups.length})">次の順位を発表 →</button>`}
+      : `<div class="reveal-skip-hint">タップで残りを表示</div>`}
   </div>`;
 }
 
@@ -4831,6 +5012,10 @@ function renderOtherModal(){
         </div>
         <div class="history-modal-body">
           <div class="other-menu-list">
+            <div class="other-menu-item" onclick="toggleLargeText(!logState.account.largeText)">
+              <span>文字サイズ: 大</span>
+              <span class="switch ${logState.account.largeText?'on':''}"></span>
+            </div>
             <a class="other-menu-item" href="${LEGAL_CONFIG.termsUrl}" target="_blank" rel="noopener">
               <span>利用規約</span><span class="arrow">›</span>
             </a>
@@ -5095,18 +5280,26 @@ function renderApp(){
 // バナー広告(ネイティブのオーバーレイビュー)の表示/非表示を、得点記録票タブに
 // いるか・モーダルが開いていないか・購入済みでないかに応じて切り替える。
 // 状態が変わった時だけNative.showBanner/hideBannerを呼び、無駄な呼び出しを避ける。
-let _bannerShown = false;
+let _bannerShown = false;       // Native.showBanner()を呼んで表示を試みている状態か
+// 実際にバナー広告がロードされ表示されているか(Native.initAds()内の
+// bannerAdLoaded/bannerAdFailedToLoadリスナーが更新する)。レイアウトの
+// 余白(ad-banner-active/with-ad-bannerクラス)は「表示を試みたか」ではなく
+// こちらで判断する。オフライン・広告在庫切れ等でロードに失敗した状態で
+// CSS側だけ余白を確保すると、その余白に何も表示されない「隙間」が
+// トグルバーの下にできてしまうため。
+let _bannerAdLoaded = false;
 function updateBannerState(onLog){
   const modalOpen = logState.ui.historyOpen || logState.ui.paywallOpen
     || logState.ui.accountModalOpen || logState.ui.friendPickerOpen
     || logState.ui.loginPromptOpen || logState.ui.friendsListOpen
     || logState.ui.addFriendOpen || logState.ui.helpOpen || logState.ui.otherMenuOpen;
   const shouldShow = Native.isNativeApp() && onLog && !modalOpen && !isPremiumUnlocked();
-  document.body.classList.toggle('ad-banner-active', shouldShow);
+  const showSpacer = shouldShow && _bannerAdLoaded;
+  document.body.classList.toggle('ad-banner-active', showSpacer);
   const nav = document.getElementById('bottomNav');
-  if (nav) nav.classList.toggle('with-ad-banner', shouldShow);
+  if (nav) nav.classList.toggle('with-ad-banner', showSpacer);
   if (shouldShow && !_bannerShown) { _bannerShown = true; Native.showBanner(); }
-  else if (!shouldShow && _bannerShown) { _bannerShown = false; Native.hideBanner(); }
+  else if (!shouldShow && _bannerShown) { _bannerShown = false; _bannerAdLoaded = false; Native.hideBanner(); }
 }
 
 // 自分以外の操作で対局記録が自動追加された時の簡易通知トースト。
