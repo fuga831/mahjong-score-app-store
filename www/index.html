@@ -1355,6 +1355,25 @@
   .other-menu-item:active{background:var(--felt-2);}
   .other-menu-item .arrow{color:var(--ink-soft);font-size:.76rem;}
 
+  /* ⚠️ debugSignOut()用の一時的なデバッグボタン。本リリース前に削除すること。
+     赤い画面上デバッグバナー(.debug-error-banner)とも「アカウントを削除」の
+     危険ボタン(.danger-text)とも見分けがつくよう、アンバー系の破線にしている。 */
+  .debug-signout-btn{
+    display:block;
+    width:100%;
+    margin-top:10px;
+    font-family:"Noto Sans JP",sans-serif;
+    font-weight:700;
+    font-size:.8rem;
+    color:#e0a848;
+    background:transparent;
+    border:1.5px dashed #e0a848;
+    border-radius:10px;
+    padding:11px;
+    cursor:pointer;
+  }
+  .debug-signout-btn:active{background:rgba(224,168,72,.12);}
+
   /* ---- accordion ---- */
   .accordion{
     background:var(--felt-1);
@@ -5351,6 +5370,36 @@ async function confirmDeleteAccountFromMenu(){
     scheduleRenderApp();
   }
 }
+
+// ⚠️ 一時的なデバッグ機能。各種バグ検証(ユーザーネーム設定・Google/Apple
+// ログイン等)を何度も繰り返し試すため、アプリを再起動せずに「未ログイン」
+// 状態へ手早く戻すためのもの。本リリース前に削除するか隠すこと
+// (renderOtherModal内の呼び出し元も合わせて)。
+// アカウント削除(confirmDeleteAccountFromMenu)とは異なり、クラウド側の
+// データ(ユーザーネーム・フレンド・対局記録)は一切削除しない。あくまで
+// この端末上のログインセッションをサインアウトし、ローカルのaccount/friends/
+// roomをリセットして、新しい匿名アカウントとして再初期化するだけ。
+async function debugSignOut(){
+  try {
+    const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
+    if (Auth && Auth.signOut) {
+      await Auth.signOut();
+    }
+  } catch (e) {
+    showDebugError('デバッグ:サインアウト', e);
+    // signOut()自体が失敗しても、ローカル側のリセットは続行する
+    // (ローカルだけでも未ログイン状態から試せるようにするため)。
+  }
+  logState.account = defaultLogState().account;
+  logState.friends = [];
+  logState.room = null;
+  logState.ui.otherMenuOpen = false;
+  logState.ui.accountModalOpen = false;
+  logState.ui.notifyBanner = 'デバッグ:サインアウトしました。新しい匿名アカウントとして再初期化します。';
+  saveLogState();
+  scheduleRenderApp();
+  CloudSync.init(); // 新しい匿名アカウントとして再初期化(ensureSignedIn()もこれを待つ)
+}
 function renderOtherModal(){
   const root = document.getElementById('otherModalRoot');
   if (!root) return;
@@ -5371,6 +5420,10 @@ function renderOtherModal(){
       </div>
     `
   );
+  // ⚠️ 一時的なデバッグ機能(debugSignOut参照)。本リリース前に削除すること。
+  const debugSignOutHtml = !CloudSync.isAvailable() ? '' : `
+    <button class="debug-signout-btn" onclick="debugSignOut()">デバッグ: サインアウト</button>
+  `;
   root.innerHTML = `
     <div class="history-modal-overlay">
       <div class="history-modal">
@@ -5395,6 +5448,7 @@ function renderOtherModal(){
             </div>
           </div>
           ${deleteAccountHtml}
+          ${debugSignOutHtml}
         </div>
       </div>
     </div>`;
