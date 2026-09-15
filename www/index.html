@@ -3834,11 +3834,14 @@ function closeFriendPicker(){
   logState.ui.friendPickerSlot = null;
   scheduleRenderApp();
 }
+// ⚠️ ここでscheduleRenderApp()を呼ばないこと(setUsernameInput参照)。
+// renderFriendPickerModal()はroot.innerHTML = ...でモーダル全体(input要素
+// 含む)を毎回作り直すため、1文字入力するたびに再描画するとinput要素そのものが
+// 差し替わってフォーカスが失われ、iOSでソフトウェアキーボードが閉じてしまう。
 function setFriendSearchInput(v){
   logState.ui.friendSearchInput = v;
   logState.ui.friendSearchResult = null;
   logState.ui.friendSearchError = null;
-  scheduleRenderApp();
 }
 async function searchFriendByUsername(){
   const name = (logState.ui.friendSearchInput || '').trim();
@@ -3904,11 +3907,14 @@ function closeAddFriend(){
   logState.ui.addFriendOpen = false;
   scheduleRenderApp();
 }
+// ⚠️ ここでscheduleRenderApp()を呼ばないこと(setUsernameInput参照)。
+// renderAddFriendModal()はroot.innerHTML = ...でモーダル全体(input要素
+// 含む)を毎回作り直すため、1文字入力するたびに再描画するとinput要素そのものが
+// 差し替わってフォーカスが失われ、iOSでソフトウェアキーボードが閉じてしまう。
 function setAddFriendSearchInput(v){
   logState.ui.addFriendSearchInput = v;
   logState.ui.addFriendSearchResult = null;
   logState.ui.addFriendSearchError = null;
-  scheduleRenderApp();
 }
 async function searchAddFriend(){
   const name = (logState.ui.addFriendSearchInput || '').trim();
