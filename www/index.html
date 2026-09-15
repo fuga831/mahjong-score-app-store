@@ -1222,6 +1222,56 @@
     margin-top:8px;
   }
 
+  /* ---- renderApp()が致命的にクラッシュした際の最終フォールバック表示 ----
+     通常のモーダル・デバッグバナーの描画経路(renderApp()経由)自体が
+     壊れている可能性があるため、このオーバーレイはrenderApp()を一切
+     経由せず直接DOM操作で表示する(renderFatalErrorFallback参照)。
+     debug-error-banner(z-index:70)よりさらに手前に出す。 ---- */
+  .fatal-error-overlay{
+    position:fixed;
+    inset:0;
+    z-index:90;
+    background:rgba(5,16,12,.88);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:20px;
+  }
+  .fatal-error-box{
+    width:100%;
+    max-width:420px;
+    max-height:80vh;
+    overflow-y:auto;
+    background:#3a1414;
+    border:1.5px solid var(--red);
+    border-radius:14px;
+    padding:18px;
+  }
+  .fatal-error-title{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:900;
+    font-size:1rem;
+    color:var(--red-soft);
+    margin-bottom:8px;
+  }
+  .fatal-error-msg{
+    font-size:.84rem;
+    color:var(--ivory);
+    line-height:1.6;
+    margin-bottom:10px;
+  }
+  .fatal-error-detail{
+    white-space:pre-wrap;
+    word-break:break-word;
+    font-size:.7rem;
+    line-height:1.5;
+    color:var(--ivory-dim);
+    background:rgba(0,0,0,.2);
+    border-radius:8px;
+    padding:8px;
+    margin-bottom:12px;
+  }
+
   /* ---- 課金ステータス・ペイウォール ---- */
   .premium-status-row{ margin-bottom:10px; }
   .premium-badge{
@@ -1725,9 +1775,30 @@
 <div id="notifyBannerRoot"></div>
 <div id="termTipRoot"></div>
 <div id="debugErrorRoot"></div>
+<div id="fatalErrorRoot"></div>
 <input type="file" id="importFileInput" accept="application/json,.json" style="display:none;" onchange="handleImportFile(this.files)">
 
 <script>
+/* ---- グローバルなエラーハンドラ(スクリプトの一番最初に登録) ----
+   renderApp()の外(イベントハンドラ内・async処理内)で発生した、
+   どのtry-catchにも拾われていない例外・Promise拒否を、console.error
+   だけでなく画面上(showDebugError)にも表示する。Xcode/Macが無く
+   実機のコンソールログを直接見る手段が無いため、これが無いと
+   「何かが起きて画面が固まった」という結果しか分からず、原因の
+   特定ができない。showDebugError自体は下の方で定義される関数だが、
+   ここではイベントリスナーを登録するだけ(実際に呼ばれるのはエラー
+   発生時=スクリプト全体の評価が終わった後)なので問題ない。 ---- */
+window.addEventListener('error', (event) => {
+  console.error('[window.onerror]', event.error || event.message, event.filename, event.lineno, event.colno);
+  try { showDebugError('未処理の例外 (window.onerror)', event.error || event.message); }
+  catch (e) { /* showDebugError自体が使えない状況では諦める(consoleには既に出している) */ }
+});
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('[unhandledrejection]', event.reason);
+  try { showDebugError('未処理のPromise拒否 (unhandledrejection)', event.reason); }
+  catch (e) {}
+});
+
 /* =========================================================================
    MahjongScore module — pure calculation logic.
    (In a full project this would live in utils/mahjongScore.ts, independent
@@ -2021,7 +2092,12 @@ function umaForTieGroup(loRank, hiRank, uma, playerCount) {
 function calcHanchanResult(hanchan, settings) {
   const { players, startPoints, returnPoints, playerCount, umaEnabled, uma,
           tobiEnabled, tobiPoints, tobiRecipient } = settings;
-  const entries = players.map(p => ({ name: p, score: hanchan.scores[p] }));
+  // hanchan.scores[p]がundefined/nullになり得るケース(プレイヤー名の変更・
+  // 人数変更後に古い半荘記録を読む等でキーが一致しない場合)への防御。
+  // 実際にこれが原因でrenderLog()が`undefined.toLocaleString()`で例外を
+  // 投げ、得点記録タブが完全に空白のまま固まる不具合を確認したため、
+  // 0点として扱うことでクラッシュせず表示だけは継続できるようにする。
+  const entries = players.map(p => ({ name: p, score: hanchan.scores[p] ?? 0 }));
   const ranked = resolveTiesByDealer(rankPlayers(entries), players, hanchan.tiebreakDealer);
   const oka = (returnPoints - startPoints) * playerCount / 1000;
   const topGroup = ranked.filter(r => r.loRank === 1);
@@ -5773,7 +5849,59 @@ function scheduleRenderApp(afterRender){
     cbs.forEach(cb => cb());
   });
 }
+// renderApp()内の各描画処理を個別のtry-catchで囲む。1つの関数が例外を
+// 投げても、他のモーダル・タブの描画は独立して続行できるようにするため
+// (例えば得点記録タブの描画が壊れても、ハンバーガーメニューやペイウォール
+// といった他のUIは正常に操作できる状態を保つ)。tabElementIdを渡した場合、
+// 失敗時にそのタブの中身を「エラーが発生しました」という最低限のメッセージに
+// 差し替える(壊れかけの内容が中途半端に残ったまま・完全な空白のまま、には
+// しない)。
+function safeRender(fn, label, tabElementId){
+  try {
+    fn();
+  } catch (e) {
+    console.error(`[${label}] render error:`, e);
+    try { showDebugError(`${label} 描画エラー`, e); } catch (e2) {}
+    if (tabElementId) {
+      try {
+        const el = document.getElementById(tabElementId);
+        if (el) el.innerHTML = `<div class="check-banner bad" style="margin:16px;">⚠️ この画面の表示中にエラーが発生しました。お手数ですが、操作をやり直すか、アプリを再起動してください。詳細は上のデバッグ表示をご確認ください。</div>`;
+      } catch (e3) {}
+    }
+  }
+}
+// renderApp()自体がここより先で例外を投げ、上記のsafeRenderでも拾いきれない
+// (例: appTitle/bottomNav等、タブの外側の共通要素を書き換える箇所での失敗)
+// ような、最も致命的なケース向けの最終防衛ライン。renderApp()を呼び直すと
+// 同じ原因で無限ループしかねないため、renderFatalErrorFallbackは
+// scheduleRenderApp/renderAppを一切経由せず直接DOMを書き換える。
+let _renderAppCrashed = false;
 function renderApp(){
+  if (_renderAppCrashed) return; // 既に致命的エラーで停止済みなら何もしない(無限ループ防止)
+  try {
+    renderAppInner();
+  } catch (e) {
+    _renderAppCrashed = true;
+    console.error('[renderApp] fatal error:', e);
+    renderFatalErrorFallback(e);
+  }
+}
+function renderFatalErrorFallback(e){
+  const root = document.getElementById('fatalErrorRoot');
+  if (!root) return;
+  let detail;
+  try { detail = formatErrorForDisplay(e); } catch (e2) { detail = String(e); }
+  root.innerHTML = `
+    <div class="fatal-error-overlay">
+      <div class="fatal-error-box">
+        <div class="fatal-error-title">⚠️ エラーが発生しました</div>
+        <div class="fatal-error-msg">画面の再描画中に問題が発生し、続行できなくなりました。お手数ですが、下のボタンから再読み込みしてください。</div>
+        <div class="fatal-error-detail">${escapeHtml(detail)}</div>
+        <button class="record-btn" style="width:100%;" onclick="location.reload()">再読み込み</button>
+      </div>
+    </div>`;
+}
+function renderAppInner(){
   const onLog = logState._activeTab === 'log';
   document.getElementById('appTitle').innerHTML = onLog
     ? '<span class="tile">📋</span>得点記録票'
@@ -5788,20 +5916,20 @@ function renderApp(){
     <button class="${onLog?'':'active'}" onclick="setActiveTab('calc')"><span class="ic">🀄</span>点数計算</button>
     <button class="${onLog?'active':''}" onclick="setActiveTab('log')"><span class="ic">📋</span>得点記録</button>
   `;
-  if (onLog) renderLog(); else render();
-  renderHistoryModal();
-  renderPaywallModal();
-  renderTiebreakDealerModal();
-  renderAccountModal();
-  renderFriendPickerModal();
-  renderLoginPromptModal();
-  renderFriendsListModal();
-  renderAddFriendModal();
-  renderHelpModal();
-  renderOtherModal();
-  renderNotifyBanner();
-  renderDebugError();
-  updateBannerState(onLog);
+  safeRender(() => { if (onLog) renderLog(); else render(); }, onLog ? 'renderLog' : 'render', onLog ? 'logTab' : 'calcTab');
+  safeRender(renderHistoryModal, 'renderHistoryModal');
+  safeRender(renderPaywallModal, 'renderPaywallModal');
+  safeRender(renderTiebreakDealerModal, 'renderTiebreakDealerModal');
+  safeRender(renderAccountModal, 'renderAccountModal');
+  safeRender(renderFriendPickerModal, 'renderFriendPickerModal');
+  safeRender(renderLoginPromptModal, 'renderLoginPromptModal');
+  safeRender(renderFriendsListModal, 'renderFriendsListModal');
+  safeRender(renderAddFriendModal, 'renderAddFriendModal');
+  safeRender(renderHelpModal, 'renderHelpModal');
+  safeRender(renderOtherModal, 'renderOtherModal');
+  safeRender(renderNotifyBanner, 'renderNotifyBanner');
+  safeRender(renderDebugError, 'renderDebugError');
+  safeRender(() => updateBannerState(onLog), 'updateBannerState');
 }
 
 // バナー広告(ネイティブのオーバーレイビュー)の表示/非表示を、得点記録票タブに
