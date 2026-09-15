@@ -1706,6 +1706,12 @@
    (In a full project this would live in utils/mahjongScore.ts, independent
    of the UI below, so it can be unit tested on its own.)
    ========================================================================= */
+// scheduleRenderApp()が使う状態。Native.initAds()/initBilling()等、スクリプト
+// 実行のごく初期(起動直後)からshowDebugError()経由で呼ばれることがあるため、
+// スクリプトの先頭で宣言しておく(TDZ回避。定義本体は下のscheduleRenderApp参照)。
+let _renderAppQueued = false;
+let _renderAppCallbacks = [];
+
 const HAN_TIER_INFO = {
   mangan:     { minHan: 5,  name: '満貫',   sub: '5翻' },
   haneman:    { minHan: 6,  name: '跳満',   sub: '6〜7翻' },
@@ -2450,8 +2456,9 @@ const Native = {
         // cordova-plugin-purchaseはCapacitorプラグインではなくCordovaプラグイン
         // なので、window.Capacitor.Plugins一覧には元々現れない(Cordova互換層
         // 経由でwindow.CdvPurchaseとしてグローバルに公開される設計)。そのため
-        // ここでの「見つからない」はwindow.CdvPurchase自体の有無で判定する。
-        showDebugError('課金初期化 (initBilling)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase}, window.cordova=${!!window.cordova})。cordova-plugin-purchaseがネイティブ側に正しく組み込まれていないか、Cordovaのdeviceready前に呼ばれた可能性があります。`);
+        // ここでの「見つからない」はwindow.CdvPurchase自体の有無、および
+        // cordovaPluginListInfo()(cordova_plugins.js由来の登録済み一覧)で判定する。
+        showDebugError('課金初期化 (initBilling)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase})。${cordovaPluginListInfo()}`);
         return;
       }
       _billingReady = true;
@@ -2463,6 +2470,15 @@ const Native = {
       }]);
       store.when().approved(transaction => transaction.verify());
       store.when().verified(receipt => receipt.finish());
+      // レシートのサーバー側検証(verify())が失敗した場合はverifiedではなく
+      // こちらに来る。When型にはerror()というチェーンメソッド自体が存在しない
+      // (store.error()が唯一のグローバルエラーハンドラ)ため、検証失敗はここで拾う。
+      store.when().unverified(receipt => {
+        const payload = receipt && receipt.payload; // Validator.Response.ErrorPayload: { ok:false, status, code, message, data }
+        showDebugError('課金レシート検証失敗 (unverified)', payload
+          ? { code: payload.code, message: `status:${payload.status} ${payload.message || ''}` }
+          : receipt);
+      });
       store.when().productUpdated(() => {
         const product = store.get(MONETIZATION_CONFIG.billingProductId);
         const owned = !!(product && product.owned);
@@ -2502,7 +2518,7 @@ const Native = {
     try {
       const store = window.CdvPurchase && window.CdvPurchase.store;
       if (!store) {
-        showDebugError('購入情報の復元 (restorePurchases)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase}, window.cordova=${!!window.cordova})。`);
+        showDebugError('購入情報の復元 (restorePurchases)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase})。${cordovaPluginListInfo()}`);
         return null;
       }
       await this.initBilling();
@@ -2519,7 +2535,7 @@ const Native = {
     try {
       const store = window.CdvPurchase && window.CdvPurchase.store;
       if (!store) {
-        showDebugError('購入 (purchasePremium)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase}, window.cordova=${!!window.cordova})。cordova-plugin-purchaseがネイティブ側に正しく組み込まれていない可能性があります。`);
+        showDebugError('購入 (purchasePremium)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase})。${cordovaPluginListInfo()}`);
         return false;
       }
       await this.initBilling();
@@ -3310,6 +3326,29 @@ function formatErrorForDisplay(err){
 function showDebugError(context, err){
   logState.ui.debugError = { context, detail: formatErrorForDisplay(err) };
   scheduleRenderApp();
+}
+// cordova-plugin-purchase等のCordovaプラグイン向けの「登録済み一覧」相当。
+// Cordovaプラグインはwindow.Capacitor.Pluginsには現れない(Capacitorプラグイン
+// ではないため)。代わりにCapacitorが自動生成・バンドルするpublic/cordova_plugins.js
+// (cordova.define('cordova/plugin_list', ...)としてビルドに実際に含まれる、
+// インストール済みCordovaプラグインの静的な一覧)を、cordova.jsのモジュール
+// システム経由でcordova.require('cordova/plugin_list')として読み出す。
+// Capacitorはcordova.js・cordova_plugins.jsの両方をWKUserScript(.atDocumentStart)
+// として注入するため、Cordovaプラグインが1つでも存在するアプリでは、
+// アプリ自身のJSが実行される前に必ずこれらが読み込まれている(deviceready
+// を待つ必要はない)。
+function cordovaPluginListInfo(){
+  try {
+    if (!window.cordova) return `window.cordovaが存在しません(Cordovaプラグイン用のJSブリッジ自体が注入されていません)`;
+    if (typeof window.cordova.exec !== 'function') return `window.cordova.execが関数ではありません(cordova.execは${typeof window.cordova.exec})`;
+    if (typeof window.cordova.require !== 'function') return `window.cordova.requireが関数ではありません(モジュールシステムが読み込まれていない可能性)`;
+    const list = window.cordova.require('cordova/plugin_list');
+    if (!Array.isArray(list)) return `cordova.require('cordova/plugin_list')が配列を返しませんでした: ${JSON.stringify(list)}`;
+    if (list.length === 0) return `Cordovaプラグイン一覧は空です(cordova_plugins.jsにCordovaプラグインが1つも含まれていません)`;
+    return `Cordovaプラグイン一覧: ${list.map(p => p.pluginId || p.id).join(', ')}`;
+  } catch (e) {
+    return `cordova.require('cordova/plugin_list')の取得に失敗しました: ${e && e.message}`;
+  }
 }
 function dismissDebugError(){
   logState.ui.debugError = null;
@@ -5524,8 +5563,10 @@ function renderAddFriendModal(){
 // 消えてしまう（＝名前変更などの直後だけ他の項目が反応しなくなる不具合の原因）。
 // 1フレーム分だけ描画を遅らせることで、先に来ているクリックを本来のボタンで
 // 処理させてから、最新のstateで安全に描画し直す。
-let _renderAppQueued = false;
-let _renderAppCallbacks = [];
+// (_renderAppQueued/_renderAppCallbacks自体の宣言はスクリプト先頭に移動済み。
+// showDebugError()経由でNative.initAds()/initBilling()等の起動直後の処理から
+// scheduleRenderApp()が呼ばれることがあり、let宣言がここにあると、その時点では
+// まだ未初期化(TDZ)でReferenceErrorになっていたため。)
 function scheduleRenderApp(afterRender){
   if (afterRender) _renderAppCallbacks.push(afterRender);
   if (_renderAppQueued) return;
