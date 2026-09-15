@@ -35,5 +35,12 @@ if (after !== before) {
   fs.writeFileSync(podfilePath, after);
   console.log('[patch-podfile-google-signin] Podfile: CapacitorFirebaseAuthentication を /Google サブスペックに書き換えました');
 } else if (!before.includes("CapacitorFirebaseAuthentication/Google")) {
-  console.warn('[patch-podfile-google-signin] 警告: Podfile内に想定した行が見つかりませんでした。cap syncの出力形式が変わっていないか確認してください。');
+  // ここに到達するのは、cap syncが生成したPodfileの中に
+  // `pod 'CapacitorFirebaseAuthentication', :path => '...'` という
+  // 想定した形の行が全く見つからなかった場合。
+  // 単なる警告のままだと、GoogleSignInモジュールが解決できない
+  // ビルドがそのままCIを通過してしまう(過去に実際に発生した)ため、
+  // ビルドを確実に失敗させて気付けるようにする。
+  console.error('[patch-podfile-google-signin] エラー: Podfile内に "pod \'CapacitorFirebaseAuthentication\', :path" 形式の行が見つかりませんでした。cap syncの出力形式が変わっていないか、プラグイン自体がPodfileから消えていないか確認してください。');
+  process.exit(1);
 }
