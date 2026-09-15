@@ -1147,6 +1147,48 @@
     word-break:break-all;
   }
 
+  /* ---- 画面上デバッグ表示(Xcode/Macが無い環境向け) ----
+     実際のエラー内容(code/message)をconsole.errorだけでなく画面にも出す
+     ための共通の仕組み。showDebugError(context, err)から呼ぶ。タップでは
+     消えず、明示的に閉じるかコピーするまで残る(内容を読む・報告する時間を
+     確保するため、他のトースト類と違って自動では消さない)。 */
+  .debug-error-banner{
+    position:fixed;
+    left:10px; right:10px;
+    top:calc(64px + env(safe-area-inset-top, 0px) + 8px);
+    z-index:70;
+    background:#3a1414;
+    border:1.5px solid var(--red);
+    border-radius:12px;
+    padding:10px 12px;
+    box-shadow:var(--shadow);
+    max-height:44vh;
+    overflow-y:auto;
+  }
+  .debug-error-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:8px;
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-size:.76rem;
+    color:var(--red-soft);
+    margin-bottom:5px;
+  }
+  .debug-error-detail{
+    white-space:pre-wrap;
+    word-break:break-word;
+    font-size:.72rem;
+    line-height:1.5;
+    color:var(--ivory);
+  }
+  .debug-error-actions{
+    display:flex;
+    gap:8px;
+    margin-top:8px;
+  }
+
   /* ---- 課金ステータス・ペイウォール ---- */
   .premium-status-row{ margin-bottom:10px; }
   .premium-badge{
@@ -1629,6 +1671,7 @@
 <div id="otherModalRoot"></div>
 <div id="notifyBannerRoot"></div>
 <div id="termTipRoot"></div>
+<div id="debugErrorRoot"></div>
 <input type="file" id="importFileInput" accept="application/json,.json" style="display:none;" onchange="handleImportFile(this.files)">
 
 <script>
@@ -2553,10 +2596,13 @@ const CloudSync = {
   // 呼び出す想定。成功時はaccount.isAnonymousがfalseになり、uidは維持される
   // (匿名ユーザーへのプロバイダlinkとして扱われる設計を想定)。
   async linkGoogle(){
-    if (!this.isAvailable()) return false;
+    if (!this.isAvailable()) { showDebugError('Googleログイン', 'Native.isAvailable()がfalse(ストアアプリ内ではない、またはCloudSync未初期化)'); return false; }
     try {
       const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
-      if (!Auth || !Auth.signInWithGoogle) return false;
+      if (!Auth || !Auth.signInWithGoogle) {
+        showDebugError('Googleログイン', `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, signInWithGoogle=${!!(Auth&&Auth.signInWithGoogle)})。ネイティブ側でプラグインが正しく登録されていない可能性があります。`);
+        return false;
+      }
       const result = await Auth.signInWithGoogle();
       if (result && result.user) {
         logState.account.uid = result.user.uid;
@@ -2565,16 +2611,24 @@ const CloudSync = {
         saveLogState();
         return true;
       }
+      showDebugError('Googleログイン', `signInWithGoogle()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
       return false;
-    } catch (e) { return false; }
+    } catch (e) {
+      console.error('[CloudSync.linkGoogle] failed:', e);
+      showDebugError('Googleログイン (linkGoogle)', e);
+      return false;
+    }
   },
   // App Store Review Guideline 4.8対応: Googleログインを提供する場合、
   // Sign in with Appleも同格の選択肢として必ず用意する。
   async linkApple(){
-    if (!this.isAvailable()) return false;
+    if (!this.isAvailable()) { showDebugError('Appleログイン', 'Native.isAvailable()がfalse(ストアアプリ内ではない、またはCloudSync未初期化)'); return false; }
     try {
       const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
-      if (!Auth || !Auth.signInWithApple) return false;
+      if (!Auth || !Auth.signInWithApple) {
+        showDebugError('Appleログイン', `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, signInWithApple=${!!(Auth&&Auth.signInWithApple)})。ネイティブ側でプラグインが正しく登録されていない可能性があります。`);
+        return false;
+      }
       const result = await Auth.signInWithApple();
       if (result && result.user) {
         logState.account.uid = result.user.uid;
@@ -2583,8 +2637,13 @@ const CloudSync = {
         saveLogState();
         return true;
       }
+      showDebugError('Appleログイン', `signInWithApple()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
       return false;
-    } catch (e) { return false; }
+    } catch (e) {
+      console.error('[CloudSync.linkApple] failed:', e);
+      showDebugError('Appleログイン (linkApple)', e);
+      return false;
+    }
   },
 
   // ユーザーネームは一意。usernames/{normalized}ドキュメントの有無で申請の
@@ -2617,8 +2676,10 @@ const CloudSync = {
       return { ok: true };
     } catch (e) {
       // 汎用メッセージだけだと実機での原因調査ができないため、実際のエラー
-      // (Firestoreの場合は e.code に 'permission-denied' 等が入る)をログに残す。
+      // (Firestoreの場合は e.code に 'permission-denied' 等が入る)を
+      // console.errorだけでなく画面上にも表示する(Xcode接続できない環境向け)。
       console.error('[CloudSync.claimUsername] failed:', e && (e.code || e.message || e));
+      showDebugError('ユーザーネーム設定 (claimUsername)', e);
       return { ok: false, error: 'network' };
     }
   },
@@ -3018,6 +3079,7 @@ function defaultLogState(){
       loginPromptOpen: false,      // 匿名のままでは困る操作をした時のログイン誘導モーダル
       loginPromptReason: null,
       notifyBanner: null,          // 「〇〇さんとの対局記録が追加されました」の簡易トースト
+      debugError: null,            // { context, detail } — 実機にXcode接続できない環境向けの画面上デバッグ表示
       addFriendOpen: false,        // 同卓者指定を介さない、単独の「フレンドを追加」モーダル
       addFriendSearchInput: '',
       addFriendSearchResult: null,
@@ -3153,6 +3215,63 @@ function escapeHtml(str){
   return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 function escKey(str){ return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+
+/* ---- 画面上デバッグ表示(Xcode/Macが無くコンソールを見られない環境向け) ----
+   console.errorだけでなく、実際のエラー内容(code/message等)をそのまま
+   画面上のバナーにも出す共通の仕組み。今後もcatchブロックから
+   showDebugError('文脈の説明', e) を呼ぶだけで使える。 ---- */
+function formatErrorForDisplay(err){
+  if (err === undefined || err === null) return '(エラーオブジェクトなし: undefined/null)';
+  if (typeof err === 'string') return err;
+  if (typeof err !== 'object') return String(err);
+  const parts = [];
+  if (err.code !== undefined) parts.push(`code: ${err.code}`);
+  if (err.message) parts.push(`message: ${err.message}`);
+  if (err.domain) parts.push(`domain: ${err.domain}`); // NSErrorのdomainがブリッジされてくる場合がある
+  if (err.name && !err.message) parts.push(`name: ${err.name}`);
+  if (parts.length === 0) {
+    try { parts.push(JSON.stringify(err)); } catch (e2) { parts.push(String(err)); }
+  }
+  return parts.join('\n');
+}
+function showDebugError(context, err){
+  logState.ui.debugError = { context, detail: formatErrorForDisplay(err) };
+  scheduleRenderApp();
+}
+function dismissDebugError(){
+  logState.ui.debugError = null;
+  scheduleRenderApp();
+}
+async function copyDebugError(){
+  const d = logState.ui.debugError;
+  if (!d) return;
+  const text = `[${d.context}]\n${d.detail}`;
+  try {
+    await navigator.clipboard.writeText(text);
+    logState.ui.notifyBanner = 'エラー内容をコピーしました';
+  } catch (e) {
+    // クリップボードが使えない環境では諦めず、せめてバナーにそのまま流す
+    logState.ui.notifyBanner = text;
+  }
+  scheduleRenderApp();
+}
+function renderDebugError(){
+  const root = document.getElementById('debugErrorRoot');
+  if (!root) return;
+  const d = logState.ui.debugError;
+  if (!d) { root.innerHTML = ''; return; }
+  root.innerHTML = `
+    <div class="debug-error-banner">
+      <div class="debug-error-head">
+        <span>⚠️ デバッグ: ${escapeHtml(d.context)}</span>
+        <button class="history-close" onclick="dismissDebugError()">×</button>
+      </div>
+      <div class="debug-error-detail">${escapeHtml(d.detail)}</div>
+      <div class="debug-error-actions">
+        <button class="preset-btn" onclick="copyDebugError()">📋 コピー</button>
+      </div>
+    </div>`;
+}
 function formatMoney(n){
   const sign = n > 0 ? '+' : n < 0 ? '-' : '';
   return `${sign}${Math.abs(Math.round(n)).toLocaleString('ja-JP')}`;
@@ -3655,8 +3774,16 @@ async function submitUsername(){
   }
 }
 async function loginFromAccountModal(provider){
-  if (provider === 'google') await CloudSync.linkGoogle();
-  else await CloudSync.linkApple();
+  // ボタンのタップ自体がハンドラまで届いているかをまず画面上で確認できる
+  // ようにする(成功すればdismissDebugError()で消える)。
+  showDebugError(`ログインボタン(${provider})`, 'タップを検知しました。サインイン処理を呼び出します…');
+  const ok = provider === 'google' ? await CloudSync.linkGoogle() : await CloudSync.linkApple();
+  if (ok) {
+    dismissDebugError();
+  } else if (logState.ui.debugError && logState.ui.debugError.context === `ログインボタン(${provider})`) {
+    // linkGoogle/linkAppleが例外も投げず詳細も出せなかった(=想定外の失敗経路)場合の最終フォールバック。
+    showDebugError(`ログインボタン(${provider})`, '処理は呼ばれましたが、詳細不明のまま失敗しました(例外なし・エラー情報なし)。');
+  }
   scheduleRenderApp();
 }
 
@@ -5303,6 +5430,7 @@ function renderApp(){
   renderHelpModal();
   renderOtherModal();
   renderNotifyBanner();
+  renderDebugError();
   updateBannerState(onLog);
 }
 
