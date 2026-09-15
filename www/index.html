@@ -1714,6 +1714,7 @@
 <nav class="bottom-nav" id="bottomNav"></nav>
 <div id="historyModalRoot"></div>
 <div id="paywallModalRoot"></div>
+<div id="tiebreakDealerModalRoot"></div>
 <div id="accountModalRoot"></div>
 <div id="friendPickerModalRoot"></div>
 <div id="loginPromptModalRoot"></div>
@@ -1789,6 +1790,7 @@ const TERM_GLOSSARY = {
   uma: 'ウマ: 対局の最終順位に応じてポイントを増減させるルール。1位・2位はプラス、3位・4位はマイナス。',
   oka: 'オカ: 1位(トップ)が受け取る追加のポイント。参加者全員の供託金を、1位がまとめて受け取るイメージ。',
   chip: 'チップ: ルールによって異なるが、一般的には一発・赤・裏で発生する追加の得点。点数計算とは別に、対局後にまとめて精算。',
+  tiebreakDealer: 'ツモ番が親により近い方が上位になります。',
 };
 function termTipBtn(...keys){
   return keys.map(k => `<button type="button" class="term-tip-btn" onclick="showTermTip(event,'${k}')">?</button>`).join('');
@@ -1965,6 +1967,34 @@ function rankPlayers(entries) {
   return result;
 }
 
+// 素点の同点を、指定された親からの巡目距離(時計回りの座順での近さ)で
+// 厳密な順位に確定させる。ツモ番が親に近い方(=親自身、次に親の下家、…)が
+// 上位。tiebreakDealerが無い場合(この機能の実装前に記録・インポートされた
+// 半荘など)は、従来通り同着帯のまま返す(呼び出し側でウマ・オカを均等按分)。
+function resolveTiesByDealer(ranked, players, tiebreakDealer) {
+  if (!tiebreakDealer || !players.includes(tiebreakDealer)) return ranked;
+  const dealerIdx = players.indexOf(tiebreakDealer);
+  const distanceFromDealer = (name) => {
+    const idx = players.indexOf(name);
+    if (idx < 0) return Infinity;
+    return (idx - dealerIdx + players.length) % players.length;
+  };
+  const byLoRank = new Map();
+  ranked.forEach(r => {
+    if (!byLoRank.has(r.loRank)) byLoRank.set(r.loRank, []);
+    byLoRank.get(r.loRank).push(r);
+  });
+  const resolved = [];
+  byLoRank.forEach((group, loRank) => {
+    if (group.length === 1) { resolved.push(group[0]); return; }
+    [...group]
+      .sort((a, b) => distanceFromDealer(a.name) - distanceFromDealer(b.name))
+      .forEach((r, i) => resolved.push({ ...r, loRank: loRank + i, hiRank: loRank + i, tieCount: 1 }));
+  });
+  resolved.sort((a, b) => a.loRank - b.loRank);
+  return resolved;
+}
+
 function umaForExactRank(rank, uma, playerCount) {
   if (playerCount === 3) {
     const [C] = uma;
@@ -1992,7 +2022,7 @@ function calcHanchanResult(hanchan, settings) {
   const { players, startPoints, returnPoints, playerCount, umaEnabled, uma,
           tobiEnabled, tobiPoints, tobiRecipient } = settings;
   const entries = players.map(p => ({ name: p, score: hanchan.scores[p] }));
-  const ranked = rankPlayers(entries);
+  const ranked = resolveTiesByDealer(rankPlayers(entries), players, hanchan.tiebreakDealer);
   const oka = (returnPoints - startPoints) * playerCount / 1000;
   const topGroup = ranked.filter(r => r.loRank === 1);
 
@@ -3171,6 +3201,9 @@ function defaultLogState(){
       revealStep: 0,       // 発表済みの順位グループ数
       revealPeek: false,   // 現在発表中の順位について、タップして名前・得点まで見た状態か
       confirmEndMatch: false,   // 「対局を終了する」の誤タップ防止確認中か
+      tiebreakDealerOpen: false, // 素点同点時の「終局時の親は誰ですか？」確認中か
+      pendingHanchanScores: null,   // ↑確定待ちの素点(chooseTiebreakDealerで使う)
+      pendingHanchanBusterOf: null, // ↑確定待ちの飛ばした人情報
       historyOpen: false,       // 対局履歴モーダルを開いているか
       historyView: 'list',      // 'list' | 'detail' | 'stats'
       historyDetailId: null,
@@ -3742,6 +3775,16 @@ function formIsValid(){
   }
   return true;
 }
+// 素点が同点のプレイヤーが2人以上いるかどうか(1人でもいれば同点順位の
+// 確定に親が必要になる)。
+function hasScoreTie(scores, players){
+  const seen = new Set();
+  for (const p of players) {
+    if (seen.has(scores[p])) return true;
+    seen.add(scores[p]);
+  }
+  return false;
+}
 function recordHanchan(){
   if (isRoomViewerOnly()) return; // 閲覧のみの同卓者は記録できない(代表入力者は1卓につき1人)
   if (!formIsValid()) return;
@@ -3751,9 +3794,39 @@ function recordHanchan(){
   const busterOf = {};
   players.forEach(p => { if (scores[p] < 0 && logState.ui.formBuster[p]) busterOf[p] = logState.ui.formBuster[p]; });
 
+  if (hasScoreTie(scores, players)) {
+    // 同点者がいる場合、自動で順位を決めず「終局時の親は誰か」を聞いてから
+    // 確定する(finalizeRecordHanchanはchooseTiebreakDealer経由で呼ばれる)。
+    logState.ui.tiebreakDealerOpen = true;
+    logState.ui.pendingHanchanScores = scores;
+    logState.ui.pendingHanchanBusterOf = busterOf;
+    scheduleRenderApp();
+    return;
+  }
+  finalizeRecordHanchan(scores, busterOf, null);
+}
+function closeTiebreakDealerPrompt(){
+  logState.ui.tiebreakDealerOpen = false;
+  logState.ui.pendingHanchanScores = null;
+  logState.ui.pendingHanchanBusterOf = null;
+  scheduleRenderApp();
+}
+// 「終局時の親は誰ですか？」で1人選んだ時。選ばれた親を起点に、時計回りの
+// 座順(プレイヤー入力欄の並び順=activePlayers())での巡目距離が近い人ほど
+// 同点内で上位になる(resolveTiesByDealer参照。親自身が同点者に含まれれば
+// 親が自動的に最上位)。
+function chooseTiebreakDealer(dealerName){
+  const scores = logState.ui.pendingHanchanScores;
+  const busterOf = logState.ui.pendingHanchanBusterOf;
+  logState.ui.tiebreakDealerOpen = false;
+  logState.ui.pendingHanchanScores = null;
+  logState.ui.pendingHanchanBusterOf = null;
+  finalizeRecordHanchan(scores, busterOf, dealerName);
+}
+function finalizeRecordHanchan(scores, busterOf, tiebreakDealer){
   if (logState.ui.editingHanchanId !== null) {
     const h = logState.hanchans.find(x => x.id === logState.ui.editingHanchanId);
-    if (h) { h.scores = scores; h.busterOf = busterOf; }
+    if (h) { h.scores = scores; h.busterOf = busterOf; h.tiebreakDealer = tiebreakDealer; }
     logState.ui.editingHanchanId = null;
   } else {
     // この対局で最初の半荘を記録した瞬間の時刻を、あとで履歴に保存する時の
@@ -3761,7 +3834,7 @@ function recordHanchan(){
     if (logState.hanchans.length === 0 && !logState.currentMatchStartedAt) {
       logState.currentMatchStartedAt = new Date().toISOString();
     }
-    logState.hanchans.unshift({ id: logState.hanchanSeq++, scores, busterOf });
+    logState.hanchans.unshift({ id: logState.hanchanSeq++, scores, busterOf, tiebreakDealer });
   }
   logState.ui.confirmEndMatch = false;
   resetFormScores();
@@ -4141,7 +4214,7 @@ function renderSettingsAccordion(){
         </div>
 
         <div class="settings-row">
-          <div class="lbl">プレイヤー名</div>
+          <div class="lbl">プレイヤー名<span class="hint">時計回りの座順(1→2→3→4→1の順に隣)で入力してください</span></div>
           <div class="name-edit-row">
             ${activePlayers().map((p,i)=>{
               const link = logState.settings.participantLinks[p];
@@ -5265,6 +5338,34 @@ function renderPaywallModal(){
     </div>`;
 }
 
+/* ---- 素点同点時の「終局時の親は誰ですか？」確認モーダル ---- */
+// キャンセルすると素点フォームの入力内容はそのまま残るので、ユーザーは
+// スコアを見直すか、もう一度「この半荘を記録」を押して選び直せる。
+function renderTiebreakDealerModal(){
+  const root = document.getElementById('tiebreakDealerModalRoot');
+  if (!root) return;
+  if (!logState.ui.tiebreakDealerOpen) { root.innerHTML = ''; return; }
+  const players = activePlayers();
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">終局時の親は誰ですか？${termTipBtn('tiebreakDealer')}</span>
+          <button class="history-close" onclick="closeTiebreakDealerPrompt()">×</button>
+        </div>
+        <div class="history-modal-body">
+          <p class="paywall-copy">素点が同点のプレイヤーがいます。同点内の順位を自動で決めるため、この半荘が終わった時点の親を選んでください。</p>
+          <div class="history-list">
+            ${players.map(p => `
+              <div class="history-card" onclick="chooseTiebreakDealer('${escKey(p)}')">
+                <div class="history-title">${escapeHtml(p)}</div>
+              </div>`).join('')}
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
 /* ---- 使い方(簡易ヘルプ) ---- */
 // 「使い方」モーダルの各手順。テキストのキャプションは表示せず、画像のみを
 // 順番に並べる(altはスクリーンリーダー用に維持)。imgはwww/help/以下に
@@ -5690,6 +5791,7 @@ function renderApp(){
   if (onLog) renderLog(); else render();
   renderHistoryModal();
   renderPaywallModal();
+  renderTiebreakDealerModal();
   renderAccountModal();
   renderFriendPickerModal();
   renderLoginPromptModal();
@@ -5717,7 +5819,8 @@ function updateBannerState(onLog){
   const modalOpen = logState.ui.historyOpen || logState.ui.paywallOpen
     || logState.ui.accountModalOpen || logState.ui.friendPickerOpen
     || logState.ui.loginPromptOpen || logState.ui.friendsListOpen
-    || logState.ui.addFriendOpen || logState.ui.helpOpen || logState.ui.otherMenuOpen;
+    || logState.ui.addFriendOpen || logState.ui.helpOpen || logState.ui.otherMenuOpen
+    || logState.ui.tiebreakDealerOpen;
   const shouldShow = Native.isNativeApp() && onLog && !modalOpen && !isPremiumUnlocked();
   const showSpacer = shouldShow && _bannerAdLoaded;
   document.body.classList.toggle('ad-banner-active', showSpacer);
