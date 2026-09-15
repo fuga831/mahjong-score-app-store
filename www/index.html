@@ -1790,7 +1790,7 @@ function calcFuBreakdown(s){
 
   const isClosed = s.keitai !== 'naki';
   const mentsuItems = s.mentsuList.map(m => ({
-    label: `${m.ankou ? '暗' : '明'}${m.isKan ? '槓' : '刻'}(${m.terminal ? '1・9・字' : '中張'})`,
+    label: `${m.ankou ? '暗' : '明'}${m.isKan ? '槓' : '刻'}(${m.terminal ? '么九牌' : '中張'})`,
     value: mentsuFu(m),
     terms: [m.isKan ? 'ankanMinkanKakan' : 'ankoMinko', m.terminal ? 'yaochu' : 'chunchan'],
   }));
