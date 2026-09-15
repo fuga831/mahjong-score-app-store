@@ -4,9 +4,9 @@
   "private": true,
   "description": "麦雀点数電卓・得点記録票 — Capacitorラップ版(広告+アプリ内課金+マルチプレイヤー機能つき)",
   "scripts": {
-    "sync": "npx cap sync && node scripts/patch-podfile-google-signin.js",
+    "sync": "npx cap sync",
     "sync:android": "npx cap sync android",
-    "sync:ios": "npx cap sync ios && node scripts/patch-podfile-google-signin.js",
+    "sync:ios": "npx cap sync ios",
     "open:android": "npx cap open android",
     "open:ios": "npx cap open ios",
     "add:android": "npx cap add android",
