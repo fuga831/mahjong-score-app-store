@@ -2172,6 +2172,23 @@ const Native = {
         } catch (e) { /* iOS 14未満・Android等では未対応のため無視 */ }
       }
       if (AdMob.initialize) await AdMob.initialize({});
+      // バナー広告の実際のロード成否をリッスンする。updateBannerState()は
+      // 「表示を試みたかどうか」ではなくこのイベントで分かる「実際に
+      // ロードされ表示されているかどうか」でレイアウトの余白(CSSクラス
+      // ad-banner-active/with-ad-banner)を確保するかどうかを判断する
+      // (オフライン・広告在庫切れ等でロードに失敗した場合、CSS側だけが
+      // 余白を確保してしまうと、その余白に何も表示されない「隙間」に
+      // なってしまうため)。
+      if (AdMob.addListener) {
+        AdMob.addListener('bannerAdLoaded', () => {
+          _bannerAdLoaded = true;
+          scheduleRenderApp();
+        });
+        AdMob.addListener('bannerAdFailedToLoad', () => {
+          _bannerAdLoaded = false;
+          scheduleRenderApp();
+        });
+      }
     } catch (e) { /* 広告SDKの初期化に失敗しても本体機能は止めない */ }
   },
   async showBanner(){
@@ -5095,18 +5112,26 @@ function renderApp(){
 // バナー広告(ネイティブのオーバーレイビュー)の表示/非表示を、得点記録票タブに
 // いるか・モーダルが開いていないか・購入済みでないかに応じて切り替える。
 // 状態が変わった時だけNative.showBanner/hideBannerを呼び、無駄な呼び出しを避ける。
-let _bannerShown = false;
+let _bannerShown = false;       // Native.showBanner()を呼んで表示を試みている状態か
+// 実際にバナー広告がロードされ表示されているか(Native.initAds()内の
+// bannerAdLoaded/bannerAdFailedToLoadリスナーが更新する)。レイアウトの
+// 余白(ad-banner-active/with-ad-bannerクラス)は「表示を試みたか」ではなく
+// こちらで判断する。オフライン・広告在庫切れ等でロードに失敗した状態で
+// CSS側だけ余白を確保すると、その余白に何も表示されない「隙間」が
+// トグルバーの下にできてしまうため。
+let _bannerAdLoaded = false;
 function updateBannerState(onLog){
   const modalOpen = logState.ui.historyOpen || logState.ui.paywallOpen
     || logState.ui.accountModalOpen || logState.ui.friendPickerOpen
     || logState.ui.loginPromptOpen || logState.ui.friendsListOpen
     || logState.ui.addFriendOpen || logState.ui.helpOpen || logState.ui.otherMenuOpen;
   const shouldShow = Native.isNativeApp() && onLog && !modalOpen && !isPremiumUnlocked();
-  document.body.classList.toggle('ad-banner-active', shouldShow);
+  const showSpacer = shouldShow && _bannerAdLoaded;
+  document.body.classList.toggle('ad-banner-active', showSpacer);
   const nav = document.getElementById('bottomNav');
-  if (nav) nav.classList.toggle('with-ad-banner', shouldShow);
+  if (nav) nav.classList.toggle('with-ad-banner', showSpacer);
   if (shouldShow && !_bannerShown) { _bannerShown = true; Native.showBanner(); }
-  else if (!shouldShow && _bannerShown) { _bannerShown = false; Native.hideBanner(); }
+  else if (!shouldShow && _bannerShown) { _bannerShown = false; _bannerAdLoaded = false; Native.hideBanner(); }
 }
 
 // 自分以外の操作で対局記録が自動追加された時の簡易通知トースト。
