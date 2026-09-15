@@ -4564,6 +4564,46 @@ function calcCareerStats(matchHistory, playerName){
   };
 }
 
+// calcCareerStats()の結果1人分を、成績タブの「メンバー構成ごとの成績」
+// カードと全く同じ指標・見せ方で描画する共通ヘルパー。playerCountは
+// 連対率(4人打ち)/ラス回避率(3人打ち)のどちらの表現を使うかの分岐にのみ使う。
+function renderCareerStatCard(name, st, playerCount){
+  const primaryLine = playerCount === 4
+    ? `<div class="stat-row">連対率 <b>${(st.top2Rate*100).toFixed(0)}%</b></div>`
+    : `<div class="stat-row">トップ率 <b>${(st.topRate*100).toFixed(0)}%</b> ／ ラス回避率 <b>${(st.lastAvoidRate*100).toFixed(0)}%</b></div>`;
+  const secondaryLine = playerCount === 4
+    ? `<div class="stat-row">トップ率 <b>${(st.topRate*100).toFixed(0)}%</b> ／ ラス率 <b>${(st.lastRate*100).toFixed(0)}%</b></div>`
+    : `<div class="stat-row">ラス率 <b>${(st.lastRate*100).toFixed(0)}%</b></div>`;
+  const moneyColor = v => v >= 0 ? '#9fe0bd' : 'var(--red-soft)';
+  return `
+    <div class="stat-card">
+      <div class="stat-name">${escapeHtml(name)}</div>
+      <div class="stat-row">平均順位 <b>${st.avgRank.toFixed(2)}</b></div>
+      <div class="stat-row">試合数 <b>${st.games}半荘</b></div>
+      ${primaryLine}
+      ${secondaryLine}
+      <div class="stat-row">MAX得点 <b>${st.maxScore.toLocaleString()}</b></div>
+      <div class="stat-row">飛んだ回数 <b>${st.tobiCount}回</b></div>
+      <div class="stat-row">平均収支(半荘あたり) <b style="color:${moneyColor(st.avgMoneyPerHanchan)}">${formatMoney(st.avgMoneyPerHanchan)}</b></div>
+      <div class="stat-row">通算収支 <b style="color:${moneyColor(st.totalMoney)}">${formatMoney(st.totalMoney)}</b></div>
+    </div>`;
+}
+// 選んだ人が参加した対局の中で最も多い卓の人数(3人打ち/4人打ち)を返す。
+// 総成績はメンバー構成を問わず全対局を合算するため、3人打ち・4人打ちが
+// 混在している場合に連対率/ラス回避率どちらの表現を使うか決めるために使う
+// (多数決。1件も無ければ4人打ちを既定値とする)。
+function dominantPlayerCountFor(matchHistory, playerName){
+  const counts = {};
+  matchHistory.forEach(m => {
+    const s = m.settingsSnapshot;
+    if (!s || !s.playerNames.slice(0, s.playerCount).includes(playerName)) return;
+    counts[s.playerCount] = (counts[s.playerCount] || 0) + 1;
+  });
+  const keys = Object.keys(counts);
+  if (keys.length === 0) return 4;
+  return Number(keys.reduce((a, b) => counts[a] >= counts[b] ? a : b));
+}
+
 /* ---- 通算成績(「成績」タブに統合。旧ハンバーガーメニュー「アカウント」) ----
    フレンド・卓の概念とは無関係に、この端末に保存されている対局記録
    (logState.matchHistory)だけを対象にした、プレイヤー1人分の通算成績。
@@ -4737,8 +4777,32 @@ function renderHistoryStats(){
     : names[0];
   logState.ui.statsPlayer = selected; // 選んだ結果を覚えておく
 
-  // a) メンバー構成(参加者の組み合わせ)ごとの成績カード。選んだ人が参加した
-  //    対局だけを対象に、これまでと同じカード形式で表示する。
+  // a) 総成績: メンバー構成を問わず、選んだ人が参加した全対局(このタブに
+  //    表示中の範囲=source)を合算する。「メンバー構成ごとの成績」(b)と
+  //    全く同じ指標・カード形式(renderCareerStatCard)で表示したうえで、
+  //    順位分布・平均着順の推移グラフ(旧ハンバーガーメニュー「アカウント」
+  //    タブの内容)も続けて表示する。例外が起きてもb)の表示は道連れにせず、
+  //    画面上にも表示する(showDebugError参照)。
+  const overallCareer = calcCareerStats(source, selected);
+  const overallCardHtml = overallCareer
+    ? renderCareerStatCard(selected, overallCareer, dominantPlayerCountFor(source, selected))
+    : '';
+  let overallChartHtml = '';
+  try {
+    overallChartHtml = renderOverallStatsSection(source, selected);
+  } catch (e) {
+    console.error('[renderHistoryStats] renderOverallStatsSection failed:', e);
+    showDebugError('成績タブ(総成績)', e);
+  }
+  const overallHtml = (overallCardHtml || overallChartHtml) ? `
+    <div class="stat-group">
+      <div class="stat-group-head"><span>🏆 総成績</span><span class="hint">全メンバー構成の合算</span></div>
+      ${overallCardHtml ? `<div class="stat-cards">${overallCardHtml}</div>` : ''}
+      ${overallChartHtml}
+    </div>` : '';
+
+  // b) メンバー構成(参加者の組み合わせ)ごとの成績カード。選んだ人が参加した
+  //    対局だけを対象に、組み合わせごとに分けて表示する。
   const groups = {};
   source.forEach(m => {
     const s = m.settingsSnapshot;
@@ -4754,52 +4818,22 @@ function renderHistoryStats(){
     const totalHanchans = g.matches.reduce((sum,m)=>sum+m.hanchans.length, 0);
     const st = calcCareerStats(g.matches, selected);
     if (!st) return '';
-    const primaryLine = g.playerCount === 4
-      ? `<div class="stat-row">連対率 <b>${(st.top2Rate*100).toFixed(0)}%</b></div>`
-      : `<div class="stat-row">トップ率 <b>${(st.topRate*100).toFixed(0)}%</b> ／ ラス回避率 <b>${(st.lastAvoidRate*100).toFixed(0)}%</b></div>`;
-    const secondaryLine = g.playerCount === 4
-      ? `<div class="stat-row">トップ率 <b>${(st.topRate*100).toFixed(0)}%</b> ／ ラス率 <b>${(st.lastRate*100).toFixed(0)}%</b></div>`
-      : `<div class="stat-row">ラス率 <b>${(st.lastRate*100).toFixed(0)}%</b></div>`;
-    const moneyColor = v => v >= 0 ? '#9fe0bd' : 'var(--red-soft)';
     return `
       <div class="stat-group">
         <div class="stat-group-head"><span>${escapeHtml(g.players.join('・'))}</span><span class="hint">${g.matches.length}対局・${totalHanchans}半荘</span></div>
-        <div class="stat-cards">
-          <div class="stat-card">
-            <div class="stat-name">${escapeHtml(selected)}</div>
-            <div class="stat-row">平均順位 <b>${st.avgRank.toFixed(2)}</b></div>
-            <div class="stat-row">試合数 <b>${st.games}半荘</b></div>
-            ${primaryLine}
-            ${secondaryLine}
-            <div class="stat-row">MAX得点 <b>${st.maxScore.toLocaleString()}</b></div>
-            <div class="stat-row">飛んだ回数 <b>${st.tobiCount}回</b></div>
-            <div class="stat-row">平均収支(半荘あたり) <b style="color:${moneyColor(st.avgMoneyPerHanchan)}">${formatMoney(st.avgMoneyPerHanchan)}</b></div>
-            <div class="stat-row">通算収支 <b style="color:${moneyColor(st.totalMoney)}">${formatMoney(st.totalMoney)}</b></div>
-          </div>
-        </div>
+        <div class="stat-cards">${renderCareerStatCard(selected, st, g.playerCount)}</div>
       </div>`;
   }).join('');
 
-  // b) 通算成績(総半荘数・順位分布・平均着順の推移)。メンバー構成を問わず、
-  //    選んだ人が参加した(このタブに表示中の範囲の)全半荘をまとめて集計する
-  //    (旧ハンバーガーメニュー「アカウント」タブの内容)。例外が起きても
-  //    a)側の表示は道連れにせず、コンソールにログを残して空欄にとどめる。
-  let overallHtml = '';
-  try {
-    overallHtml = renderOverallStatsSection(source, selected);
-  } catch (e) {
-    console.error('[renderHistoryStats] renderOverallStatsSection failed:', e);
-  }
-
   const picker = renderStatsPlayerPicker(names, selected);
-  if (!groupsHtml && !overallHtml) {
+  if (!overallHtml && !groupsHtml) {
     return `${picker}<div class="history-empty">${escapeHtml(selected)}さんの記録がありません</div>`;
   }
-  // 通算成績(サマリー)を個別対局履歴より上に表示する。
+  // 総成績(a)を個別対局履歴(b)より上に表示する。
   return `
     ${picker}
     ${overallHtml}
-    ${groupsHtml ? `<div class="hint" style="margin-bottom:8px;">メンバー構成ごとの成績</div>${groupsHtml}` : ''}
+    ${groupsHtml ? `<div class="hint" style="margin:14px 0 8px;font-weight:700;">メンバー構成ごとの成績</div>${groupsHtml}` : ''}
   `;
 }
 
