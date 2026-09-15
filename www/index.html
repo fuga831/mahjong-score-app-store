@@ -800,6 +800,13 @@
     50%{transform:translateY(-3px);}
   }
   .reveal-card.reveal-peeked{cursor:pointer;}
+  .reveal-card.reveal-not-yet{
+    opacity:.35;
+    border-style:dashed;
+    box-shadow:none;
+    animation:none;
+  }
+  .reveal-card.reveal-not-yet .reveal-rank{color:var(--ink-soft);}
   .reveal-next-hint{
     text-align:center;
     font-size:.7rem;
@@ -1347,6 +1354,25 @@
   }
   .other-menu-item:active{background:var(--felt-2);}
   .other-menu-item .arrow{color:var(--ink-soft);font-size:.76rem;}
+
+  /* ⚠️ debugSignOut()用の一時的なデバッグボタン。本リリース前に削除すること。
+     赤い画面上デバッグバナー(.debug-error-banner)とも「アカウントを削除」の
+     危険ボタン(.danger-text)とも見分けがつくよう、アンバー系の破線にしている。 */
+  .debug-signout-btn{
+    display:block;
+    width:100%;
+    margin-top:10px;
+    font-family:"Noto Sans JP",sans-serif;
+    font-weight:700;
+    font-size:.8rem;
+    color:#e0a848;
+    background:transparent;
+    border:1.5px dashed #e0a848;
+    border-radius:10px;
+    padding:11px;
+    cursor:pointer;
+  }
+  .debug-signout-btn:active{background:rgba(224,168,72,.12);}
 
   /* ---- accordion ---- */
   .accordion{
@@ -2462,10 +2488,10 @@ const Native = {
         return;
       }
       _billingReady = true;
-      const storePlatform = capacitorPlatform() === 'ios' ? store.Platform.APPLE_APPSTORE : store.Platform.GOOGLE_PLAY;
+      const storePlatform = capacitorPlatform() === 'ios' ? store.APPLE_APPSTORE : store.GOOGLE_PLAY;
       store.register([{
         id: MONETIZATION_CONFIG.billingProductId,
-        type: store.ProductType.NON_CONSUMABLE,
+        type: store.NON_CONSUMABLE,
         platform: storePlatform,
       }]);
       store.when().approved(transaction => transaction.verify());
@@ -2495,9 +2521,23 @@ const Native = {
       if (store.error) {
         store.error(err => showDebugError('課金ストアエラー (store.error)', err));
       }
-      // 修正前は store.initialize([store.GOOGLE_PLAY]) と、Platformを経由しない
-      // 誤った参照になっていた(正しくは store.Platform.GOOGLE_PLAY)。加えて
-      // Android決め打ちだったため、iOSでは課金が一切初期化されていなかった。
+      // ⚠️ store.Platform.APPLE_APPSTORE / store.ProductType.NON_CONSUMABLE のように
+      // Platform/ProductTypeをネストしたプロパティとして参照しないこと。実機で
+      // 「undefined is not an object (evaluating 'store.Platform.APPLE_APPSTORE')」
+      // というエラーが発生することを確認した。実際にインストールされている
+      // cordova-plugin-purchase 13.18.0 のnode_modules/cordova-plugin-purchase/
+      // www/store.js を直接確認したところ、Platform/ProductType/ErrorCode/LogLevel
+      // の各enumはstoreインスタンスに `store.Platform = {...}` という形では
+      // 一切アタッチされておらず、代わりに initCDVPurchase() 内の
+      // `Object.assign(window.CdvPurchase.store, CdvPurchase.LogLevel,
+      // CdvPurchase.ProductType, CdvPurchase.ErrorCode, CdvPurchase.Platform)`
+      // により、各enumのメンバー(APPLE_APPSTORE, GOOGLE_PLAY, NON_CONSUMABLE等)が
+      // storeインスタンス自身にフラットに展開される(「後方互換性のため」との
+      // コメントあり)。公式READMEのサンプルコードも `CdvPurchase.Platform.
+      // APPLE_APPSTORE`(CdvPurchaseの名前空間経由)であり、`store.Platform.*`
+      // という書き方はこのバージョンには存在しない。正しくは store.APPLE_APPSTORE
+      // / store.GOOGLE_PLAY / store.NON_CONSUMABLE のようにstore自身に
+      // フラットなプロパティとして参照する。
       await store.initialize([storePlatform]);
       // store.initialize()が解決しても、商品の詳細(価格・オファー)が
       // ストアから取得済みとは限らない(それはproductUpdatedイベントで
@@ -3058,6 +3098,7 @@ const CloudSync = {
       }
       await Firestore.deleteDocument({ reference: `users/${uid}` });
     } catch (e) {
+      showDebugError('アカウント削除 (Firestoreデータ削除)', e);
       return { ok: false, error: 'network' };
     }
     try {
@@ -3065,6 +3106,7 @@ const CloudSync = {
     } catch (e) {
       // Firestore側のデータは既に削除済み。Authユーザーだけ残ってしまうと次回起動時に
       // その古いセッションのままになりかねないので、サインアウトだけはしておく。
+      showDebugError('アカウント削除 (Auth.deleteUser)', e);
       await Auth.signOut().catch(() => {});
       return { ok: false, error: 'auth', dataDeleted: true };
     }
@@ -4374,6 +4416,15 @@ function revealPendingLabelHtml(group){
       <div class="reveal-tap-hint">👆 タップして発表</div>
     </div>`;
 }
+// まだ発表の順番が回ってきていない順位の、位置だけ確保しておくプレースホルダー。
+// 最終的な表示順(1位が一番上)を発表開始時点から固定しておくために、
+// 全ての順位の枠を最初から用意しておく。
+function revealNotYetCardHtml(group){
+  return `
+    <div class="reveal-card reveal-not-yet">
+      <div class="reveal-rank">${revealRankLabel(group)}</div>
+    </div>`;
+}
 // 発表中で、タップして名前・得点まで見えている順位のカード(2段階目)。
 // もう一度タップすると次の順位へ進む(startReveal/advanceReveal参照)。
 function revealPeekedCardHtml(group, totals, isLast){
@@ -4442,13 +4493,22 @@ function renderStickyHeader(s, totals){
 
   const groups = revealGroupsFor(players, totals, logState.settings.playerCount);
   const done = logState.ui.revealStep >= groups.length;
-  const shownGroups = done ? [...groups].sort((a,b)=>a.loRank-b.loRank) : groups.slice(0, logState.ui.revealStep);
-  const pendingGroup = done ? null : groups[logState.ui.revealStep];
-  const pendingHtml = !pendingGroup ? '' : (
-    logState.ui.revealPeek
-      ? revealPeekedCardHtml(pendingGroup, totals, logState.ui.revealStep === groups.length - 1)
-      : revealPendingLabelHtml(pendingGroup)
-  );
+  // 発表順(2位→3位→…→1位)とは別に、表示位置は最初から常に「1位が一番上、
+  // 以下2位・3位…」という通常の順位順に固定しておく(案1)。各順位の枠は
+  // revealStepがそこまで到達するまで「？」のプレースホルダーのまま、到達したら
+  // タップ待ち→タップで名前・得点、の順に同じ枠の中身だけが変わっていく。
+  // こうすることで、最後に発表される1位のカードが一番下に積み上がってしまう
+  // (発表順で表示していた頃の)問題を避け、発表が終わった瞬間には既に
+  // 1位が一番上に来ている状態になる。
+  const rankedGroups = [...groups].sort((a,b) => a.loRank - b.loRank);
+  const slotsHtml = rankedGroups.map(g => {
+    const revealIndex = groups.indexOf(g);
+    if (done || revealIndex < logState.ui.revealStep) return revealGroupCardHtml(g, totals);
+    if (revealIndex > logState.ui.revealStep) return revealNotYetCardHtml(g);
+    return logState.ui.revealPeek
+      ? revealPeekedCardHtml(g, totals, revealIndex === groups.length - 1)
+      : revealPendingLabelHtml(g);
+  }).join('');
 
   // 発表中〜発表後は順位カードが積み重なって縦に長くなり得るため、sticky解除
   // (header-block)にして、スクロール時に下のフォームなどを覆い隠さないようにする。
@@ -4457,8 +4517,7 @@ function renderStickyHeader(s, totals){
   // (advanceReveal)。
   return `<div class="header-block">${roomStatusHtml}${modeSwitchHtml}
     <div class="reveal-area">
-      ${shownGroups.map(g => revealGroupCardHtml(g, totals)).join('')}
-      ${pendingHtml}
+      ${slotsHtml}
     </div>
     ${done
       ? `<div class="reveal-done">🎉 発表終了！次の半荘を記録するとまた隠れます</div>${renderEndMatchControls(true)}`
@@ -5311,6 +5370,36 @@ async function confirmDeleteAccountFromMenu(){
     scheduleRenderApp();
   }
 }
+
+// ⚠️ 一時的なデバッグ機能。各種バグ検証(ユーザーネーム設定・Google/Apple
+// ログイン等)を何度も繰り返し試すため、アプリを再起動せずに「未ログイン」
+// 状態へ手早く戻すためのもの。本リリース前に削除するか隠すこと
+// (renderOtherModal内の呼び出し元も合わせて)。
+// アカウント削除(confirmDeleteAccountFromMenu)とは異なり、クラウド側の
+// データ(ユーザーネーム・フレンド・対局記録)は一切削除しない。あくまで
+// この端末上のログインセッションをサインアウトし、ローカルのaccount/friends/
+// roomをリセットして、新しい匿名アカウントとして再初期化するだけ。
+async function debugSignOut(){
+  try {
+    const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
+    if (Auth && Auth.signOut) {
+      await Auth.signOut();
+    }
+  } catch (e) {
+    showDebugError('デバッグ:サインアウト', e);
+    // signOut()自体が失敗しても、ローカル側のリセットは続行する
+    // (ローカルだけでも未ログイン状態から試せるようにするため)。
+  }
+  logState.account = defaultLogState().account;
+  logState.friends = [];
+  logState.room = null;
+  logState.ui.otherMenuOpen = false;
+  logState.ui.accountModalOpen = false;
+  logState.ui.notifyBanner = 'デバッグ:サインアウトしました。新しい匿名アカウントとして再初期化します。';
+  saveLogState();
+  scheduleRenderApp();
+  CloudSync.init(); // 新しい匿名アカウントとして再初期化(ensureSignedIn()もこれを待つ)
+}
 function renderOtherModal(){
   const root = document.getElementById('otherModalRoot');
   if (!root) return;
@@ -5331,6 +5420,10 @@ function renderOtherModal(){
       </div>
     `
   );
+  // ⚠️ 一時的なデバッグ機能(debugSignOut参照)。本リリース前に削除すること。
+  const debugSignOutHtml = !CloudSync.isAvailable() ? '' : `
+    <button class="debug-signout-btn" onclick="debugSignOut()">デバッグ: サインアウト</button>
+  `;
   root.innerHTML = `
     <div class="history-modal-overlay">
       <div class="history-modal">
@@ -5355,6 +5448,7 @@ function renderOtherModal(){
             </div>
           </div>
           ${deleteAccountHtml}
+          ${debugSignOutHtml}
         </div>
       </div>
     </div>`;
