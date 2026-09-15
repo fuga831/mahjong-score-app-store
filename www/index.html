@@ -2600,7 +2600,8 @@ const CloudSync = {
     try {
       const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
       if (!Auth || !Auth.signInWithGoogle) {
-        showDebugError('Googleログイン', `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, signInWithGoogle=${!!(Auth&&Auth.signInWithGoogle)})。ネイティブ側でプラグインが正しく登録されていない可能性があります。`);
+        const registered = Object.keys((window.Capacitor && window.Capacitor.Plugins) || {}).join(', ') || '(なし)';
+        showDebugError('Googleログイン', `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, signInWithGoogle=${!!(Auth&&Auth.signInWithGoogle)})。ネイティブ側でプラグインが正しく登録されていない可能性があります。登録済みプラグイン一覧: ${registered}`);
         return false;
       }
       const result = await Auth.signInWithGoogle();
@@ -2626,7 +2627,8 @@ const CloudSync = {
     try {
       const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
       if (!Auth || !Auth.signInWithApple) {
-        showDebugError('Appleログイン', `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, signInWithApple=${!!(Auth&&Auth.signInWithApple)})。ネイティブ側でプラグインが正しく登録されていない可能性があります。`);
+        const registered = Object.keys((window.Capacitor && window.Capacitor.Plugins) || {}).join(', ') || '(なし)';
+        showDebugError('Appleログイン', `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, signInWithApple=${!!(Auth&&Auth.signInWithApple)})。ネイティブ側でプラグインが正しく登録されていない可能性があります。登録済みプラグイン一覧: ${registered}`);
         return false;
       }
       const result = await Auth.signInWithApple();
