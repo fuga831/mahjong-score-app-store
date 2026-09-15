@@ -760,7 +760,6 @@
     gap:8px;
     margin-bottom:10px;
   }
-  .reveal-area.skippable{cursor:pointer;}
   .reveal-card{
     background:linear-gradient(180deg, var(--felt-1), var(--felt-2));
     border:1px solid var(--line);
@@ -773,6 +772,40 @@
   @keyframes reveal-pop{
     from{opacity:0;transform:scale(.92) translateY(4px);}
     to{opacity:1;transform:scale(1) translateY(0);}
+  }
+  .reveal-card.reveal-pending{
+    cursor:pointer;
+    text-align:center;
+    padding:20px 14px;
+    border-style:dashed;
+    border-color:var(--gold-strong);
+    animation:reveal-pop .25s ease-out, reveal-pulse 1.6s ease-in-out infinite;
+  }
+  .reveal-card.reveal-pending .reveal-rank{
+    font-size:1.05rem;
+    margin-bottom:8px;
+  }
+  .reveal-tap-hint{
+    font-size:.78rem;
+    font-weight:700;
+    color:var(--gold-strong);
+    animation:reveal-tap-bounce 1.2s ease-in-out infinite;
+  }
+  @keyframes reveal-pulse{
+    0%,100%{box-shadow:var(--shadow);}
+    50%{box-shadow:0 0 0 4px rgba(212,175,55,.22), var(--shadow);}
+  }
+  @keyframes reveal-tap-bounce{
+    0%,100%{transform:translateY(0);}
+    50%{transform:translateY(-3px);}
+  }
+  .reveal-card.reveal-peeked{cursor:pointer;}
+  .reveal-next-hint{
+    text-align:center;
+    font-size:.7rem;
+    color:var(--ink-soft);
+    margin-top:6px;
+    opacity:.85;
   }
   .reveal-rank{
     font-family:"Zen Maru Gothic",sans-serif;
@@ -817,13 +850,6 @@
     font-size:.72rem;
     color:var(--ink-soft);
     padding:4px 0 2px;
-  }
-  .reveal-skip-hint{
-    text-align:center;
-    font-size:.68rem;
-    color:var(--ink-soft);
-    padding:2px 0 4px;
-    opacity:.75;
   }
 
   .share-icon-btn{
@@ -1805,8 +1831,8 @@ function calcFuBreakdown(s){
       // シャンポンの対子は、ロンなら明刻・ツモなら暗刻として扱われるため、
       // ron/tsumoで別の値になる(shanponRonFu/shanponTsumoFu参照)。
       items.push(isRon
-        ? { label: '待ち(シャンポン→明刻扱い)', value: shanponRonFu(s.shanponTerminal), terms: ['machi', 'ankoMinko'] }
-        : { label: '待ち(シャンポン→暗刻扱い)', value: shanponTsumoFu(s.shanponTerminal), terms: ['machi', 'ankoMinko'] });
+        ? { label: `待ち(シャンポン→明刻扱い, ${s.shanponTerminal ? '么九牌' : '中張'})`, value: shanponRonFu(s.shanponTerminal), terms: ['machi', 'ankoMinko', s.shanponTerminal ? 'yaochu' : 'chunchan'] }
+        : { label: `待ち(シャンポン→暗刻扱い, ${s.shanponTerminal ? '么九牌' : '中張'})`, value: shanponTsumoFu(s.shanponTerminal), terms: ['machi', 'ankoMinko', s.shanponTerminal ? 'yaochu' : 'chunchan'] });
     }
     if (headItem) items.push(headItem);
     if (isRon) {
@@ -2791,6 +2817,7 @@ const CloudSync = {
       logState.chips = data.chips || {};
       logState.ui.revealActive = !!data.revealActive;
       logState.ui.revealStep = data.revealStep || 0;
+      logState.ui.revealPeek = !!data.revealPeek;
       saveLogState();
       await this.subscribeRoom(roomDoc.id);
     } catch (e) { /* オフライン時は次回起動時に再試行される */ }
@@ -2810,7 +2837,7 @@ const CloudSync = {
           participants, participantUids,
           status: 'active', createdAt: Date.now(),
           settings: logState.settings, hanchans: logState.hanchans, chips: logState.chips,
-          revealActive: false, revealStep: 0,
+          revealActive: false, revealStep: 0, revealPeek: false,
         },
       });
       return roomId;
@@ -2853,6 +2880,7 @@ const CloudSync = {
           logState.chips = data.chips || {};
           logState.ui.revealActive = !!data.revealActive;
           logState.ui.revealStep = data.revealStep || 0;
+          logState.ui.revealPeek = !!data.revealPeek;
         }
         logState.room.participants = data.participants || logState.room.participants;
         scheduleRenderApp();
@@ -3045,6 +3073,7 @@ function defaultLogState(){
       formBuster: {},
       revealActive: false, // 演出モードで「終局」ボタンを押したか
       revealStep: 0,       // 発表済みの順位グループ数
+      revealPeek: false,   // 現在発表中の順位について、タップして名前・得点まで見た状態か
       confirmEndMatch: false,   // 「対局を終了する」の誤タップ防止確認中か
       historyOpen: false,       // 対局履歴モーダルを開いているか
       historyView: 'list',      // 'list' | 'detail' | 'stats'
@@ -3203,6 +3232,7 @@ function syncRoomState(){
   CloudSync.updateRoom(logState.room.roomId, {
     hanchans: logState.hanchans, chips: logState.chips,
     revealActive: logState.ui.revealActive, revealStep: logState.ui.revealStep,
+    revealPeek: logState.ui.revealPeek,
   });
 }
 
@@ -3358,42 +3388,21 @@ function setChipUnitYen(v){ logState.settings.chipUnitYen = v; saveLogState(); s
 function toggleAccordion(key){ logState.ui[key] = !logState.ui[key]; scheduleRenderApp(); }
 
 /* ---- 演出モード（終局まで順位・収支を隠す） ----
-   以前は「次の順位を発表 →」ボタンをタップするたびに1つずつ進む手動送りだった。
-   現在は終局と同時に自動でテンポよく1つずつ発表され、タップすると残りを
-   即座に全部表示してスキップできる(手動送りのボタンは廃止)。 ---- */
-const REVEAL_STEP_INTERVAL_MS = 1100; // 1つの順位を発表してから次を自動発表するまでの間隔
-let _revealTimer = null;
-function clearRevealTimer(){
-  if (_revealTimer) { clearTimeout(_revealTimer); _revealTimer = null; }
-}
+   自動タイマーでは進めず、すべてユーザーのタップ操作で進む。
+   各順位は「順位ラベルのみ表示→タップ→名前・得点を表示→タップ→次の順位へ」
+   の2段階になっており、revealStepが「発表を終えて確定した順位グループ数」、
+   revealPeekが「現在発表中の順位について、名前・得点まで見たか」を表す。 ---- */
 function currentRevealGroupCount(){
   const s = settingsWithPlayers();
   const totals = calcTotals(logState.hanchans, logState.chips, s);
   return revealGroupsFor(activePlayers(), totals, logState.settings.playerCount).length;
 }
-// revealStepが最後まで進んでいなければ、REVEAL_STEP_INTERVAL_MS後に1つ進めて
-// 自分自身を再度予約する(=以後は自動でテンポよく最後まで進んでいく)。
-function scheduleAutoRevealTick(){
-  clearRevealTimer();
-  if (isRoomViewerOnly()) return; // 発表の進行は代表入力者の端末でのみ駆動する
-  const total = currentRevealGroupCount();
-  if (!logState.ui.revealActive || logState.ui.revealStep >= total) return;
-  _revealTimer = setTimeout(() => {
-    _revealTimer = null;
-    if (!logState.ui.revealActive) return; // 途中でキャンセル・リセットされていたら何もしない
-    const t = currentRevealGroupCount();
-    if (logState.ui.revealStep < t) logState.ui.revealStep++;
-    scheduleRenderApp();
-    syncRoomState();
-    scheduleAutoRevealTick();
-  }, REVEAL_STEP_INTERVAL_MS);
-}
 function togglePresentationMode(){
   logState.settings.presentationMode = !logState.settings.presentationMode;
   logState.ui.revealActive = false;
   logState.ui.revealStep = 0;
+  logState.ui.revealPeek = false;
   logState.ui.confirmEndMatch = false;
-  clearRevealTimer();
   saveLogState(); scheduleRenderApp();
 }
 // 発表順は「2位→3位→…→1位」。1位（優勝）を最後にとっておくことで、
@@ -3405,7 +3414,8 @@ function startReveal(){
   if (isRoomViewerOnly()) return; // 発表の進行は代表入力者だけが操作できる
   if (logState.hanchans.length === 0) return; // 対局ログが無い状態では発表しても意味が無いので何もしない
   logState.ui.revealActive = true;
-  logState.ui.revealStep = 1; // 「終局」を押した瞬間に最初の順位（2位）まで発表する
+  logState.ui.revealStep = 0; // まず最初の順位（2位）のラベルだけを表示した状態から始める
+  logState.ui.revealPeek = false;
   // 「終局」ボタンを押した区切りの良いタイミングでインタースティシャルを挟む。
   // ただし、半荘を追加してから再び「終局」を押すとrevealActiveは一旦falseに
   // 戻る(recordHanchan参照)ため、同じ対局セッション中に何度も表示されて
@@ -3418,16 +3428,27 @@ function startReveal(){
   saveLogState();
   scheduleRenderApp();
   syncRoomState();
-  scheduleAutoRevealTick(); // 2番目以降の順位を自動でテンポよく発表していく
 }
-// 発表中にユーザーがタップした時のスキップ操作。残り全ての順位を即座に表示する。
-function skipReveal(){
+// 発表中の順位ラベルをタップした時。その順位の名前・得点を表示する(1段階目)。
+function revealCurrentGroup(){
   if (isRoomViewerOnly()) return;
   if (!logState.ui.revealActive) return;
-  clearRevealTimer();
+  if (logState.ui.revealStep >= currentRevealGroupCount()) return; // 既に発表し終えていれば何もしない
+  logState.ui.revealPeek = true;
+  saveLogState();
+  scheduleRenderApp();
+  syncRoomState();
+}
+// 名前・得点が見えている状態でさらにタップした時。次の順位のラベル表示へ進む(2段階目)。
+function advanceReveal(){
+  if (isRoomViewerOnly()) return;
+  if (!logState.ui.revealActive) return;
+  if (!logState.ui.revealPeek) return; // 名前・得点をまだ見ていなければ進めない
   const total = currentRevealGroupCount();
-  if (logState.ui.revealStep >= total) return; // 既に発表し終えていれば何もしない
-  logState.ui.revealStep = total;
+  if (logState.ui.revealStep >= total) return;
+  logState.ui.revealStep++;
+  logState.ui.revealPeek = false;
+  saveLogState();
   scheduleRenderApp();
   syncRoomState();
 }
@@ -3498,8 +3519,8 @@ function archiveCurrentMatch(){
   logState.matchAdShown = false; // 次の対局では「終局」を押した時にまた1回だけ広告を出せるようにする
   logState.ui.revealActive = false;
   logState.ui.revealStep = 0;
+  logState.ui.revealPeek = false;
   logState.ui.confirmEndMatch = false;
-  clearRevealTimer();
   cancelEditHanchan_noRender();
   saveLogState();
   scheduleRenderApp();
@@ -3627,7 +3648,7 @@ function recordHanchan(){
   if (logState.settings.presentationMode) {
     logState.ui.revealActive = false;
     logState.ui.revealStep = 0;
-    clearRevealTimer();
+    logState.ui.revealPeek = false;
   }
   saveLogState();
   scheduleRenderApp();
@@ -4241,18 +4262,40 @@ function revealGroupsFor(players, totals, playerCount){
   groups.sort((a,b) => order.indexOf(a.loRank) - order.indexOf(b.loRank));
   return groups;
 }
-function revealGroupCardHtml(group, totals){
-  const rankLabel = group.loRank===group.hiRank ? `${group.loRank}位` : `${group.loRank}〜${group.hiRank}位`;
+function revealRankLabel(group){
+  return group.loRank===group.hiRank ? `${group.loRank}位` : `${group.loRank}〜${group.hiRank}位`;
+}
+function revealGroupInnerHtml(group, totals){
   const isTop = group.loRank === 1;
   return `
-    <div class="reveal-card ${isTop?'top':''}">
-      <div class="reveal-rank">${isTop?'👑 ':''}${rankLabel}</div>
+      <div class="reveal-rank">${isTop?'👑 ':''}${revealRankLabel(group)}</div>
       ${group.members.map(m => `
         <div class="reveal-member">
           <span class="reveal-name">${escapeHtml(m.name)}</span>
           <span class="reveal-money">${formatMoney(totals.money[m.name])}</span>
           <span class="reveal-pt">${formatPt(totals.pt[m.name])}pt</span>
-        </div>`).join('')}
+        </div>`).join('')}`;
+}
+function revealGroupCardHtml(group, totals){
+  const isTop = group.loRank === 1;
+  return `<div class="reveal-card ${isTop?'top':''}">${revealGroupInnerHtml(group, totals)}</div>`;
+}
+// 発表中で、まだ名前・得点をタップしていない順位のラベルのみカード(1段階目)。
+function revealPendingLabelHtml(group){
+  return `
+    <div class="reveal-card reveal-pending" onclick="revealCurrentGroup()">
+      <div class="reveal-rank">${revealRankLabel(group)}</div>
+      <div class="reveal-tap-hint">👆 タップして発表</div>
+    </div>`;
+}
+// 発表中で、タップして名前・得点まで見えている順位のカード(2段階目)。
+// もう一度タップすると次の順位へ進む(startReveal/advanceReveal参照)。
+function revealPeekedCardHtml(group, totals, isLast){
+  const isTop = group.loRank === 1;
+  return `
+    <div class="reveal-card reveal-peeked ${isTop?'top':''}" onclick="advanceReveal()">
+      ${revealGroupInnerHtml(group, totals)}
+      <div class="reveal-next-hint">👆 タップして${isLast ? '発表を終える' : '次の順位へ'}</div>
     </div>`;
 }
 
@@ -4314,19 +4357,26 @@ function renderStickyHeader(s, totals){
   const groups = revealGroupsFor(players, totals, logState.settings.playerCount);
   const done = logState.ui.revealStep >= groups.length;
   const shownGroups = done ? [...groups].sort((a,b)=>a.loRank-b.loRank) : groups.slice(0, logState.ui.revealStep);
+  const pendingGroup = done ? null : groups[logState.ui.revealStep];
+  const pendingHtml = !pendingGroup ? '' : (
+    logState.ui.revealPeek
+      ? revealPeekedCardHtml(pendingGroup, totals, logState.ui.revealStep === groups.length - 1)
+      : revealPendingLabelHtml(pendingGroup)
+  );
 
   // 発表中〜発表後は順位カードが積み重なって縦に長くなり得るため、sticky解除
   // (header-block)にして、スクロール時に下のフォームなどを覆い隠さないようにする。
-  // 発表中はREVEAL_STEP_INTERVAL_MSごとに1つずつ自動で発表が進む
-  // (scheduleAutoRevealTick参照)。reveal-areaをタップすると残りを
-  // 即座に全部表示してスキップできる。
+  // 発表は完全にタップ駆動(自動タイマーなし): 現在の順位のラベルをタップすると
+  // 名前・得点が表示され(revealCurrentGroup)、さらにタップすると次の順位へ進む
+  // (advanceReveal)。
   return `<div class="header-block">${roomStatusHtml}${modeSwitchHtml}
-    <div class="reveal-area ${done ? '' : 'skippable'}" ${done ? '' : 'onclick="skipReveal()"'}>
+    <div class="reveal-area">
       ${shownGroups.map(g => revealGroupCardHtml(g, totals)).join('')}
+      ${pendingHtml}
     </div>
     ${done
       ? `<div class="reveal-done">🎉 発表終了！次の半荘を記録するとまた隠れます</div>${renderEndMatchControls(true)}`
-      : `<div class="reveal-skip-hint">タップで残りを表示</div>`}
+      : ''}
   </div>`;
 }
 
