@@ -36,17 +36,28 @@ target 'App' do
   # 一体で宣言しているため、これだけで依存関係グラフ・フラグの両方が
   # 正しく解決される。
   #
-  # ただし上の `capacitor_pods`(defブロック)は `npx cap sync ios` を
-  # 実行するたびに @capacitor/cliが自動生成し直すため、
-  # `pod 'CapacitorFirebaseAuthentication/Google'` のようにサブスペックを
-  # 直接ここに書いてもcap syncのたびに消えてしまう
-  # (@capacitor/cli/dist/ios/update.jsのupdatePodfile()が
-  # `pod '<name>', :path => '<path>'` という素の形で毎回書き直すため)。
-  # そのため `npm run sync:ios` / `npm run sync`(生の `npx cap sync` では
-  # なくこちら)経由でcap syncを実行し、直後に
-  # scripts/patch-podfile-google-signin.js がこの行を自動的に
-  # `CapacitorFirebaseAuthentication/Google` へ書き換える運用にしている。
-  # (Codemagic側のビルドスクリプトも同様に `npm run sync:ios` を使う)
+  # 以前は、上の `capacitor_pods`(defブロック)が `npx cap sync ios` の
+  # たびに自動生成し直される(@capacitor/cliのupdatePodfile()が
+  # `pod '<name>', :path => '<path>'` という素の形で毎回書き直す)ことを
+  # 逆手に取り、cap sync直後にこの行を後からスクリプトで
+  # `CapacitorFirebaseAuthentication/Google` に書き換える運用にしていた。
+  # しかし実機検証の結果、明示的なサブスペック指定(`/Google`)で
+  # 消費すると、ビルド自体は成功するのにFirebaseAuthenticationプラグイン
+  # クラスがランタイムに一切登録されない(window.Capacitor.Plugins.
+  # FirebaseAuthenticationがundefinedになる)問題が確認された
+  # (同じ仕組みで動くFirebaseMessaging/FirebaseFirestoreは正常に登録
+  # されるため、Capacitor/CocoaPods全体の問題ではなくこの明示サブスペック
+  # 指定に固有の問題と判断)。
+  #
+  # そのため現在は、patches/@capacitor-firebase+authentication+*.patch
+  # (patch-package、`npm install`のpostinstallで自動適用)で
+  # CapacitorFirebaseAuthentication.podspec自体の `default_subspec` を
+  # 'Lite' から 'Google' に書き換える方式に変更した。これにより、
+  # `capacitor_pods`が生成する素の `pod 'CapacitorFirebaseAuthentication'`
+  # (サブスペック指定なし)のままでもGoogleサブスペックがデフォルトで
+  # 有効になり、FirebaseMessaging/FirebaseFirestoreと全く同じ「サブスペック
+  # 指定なしの素のpod」という消費のされ方に揃う。Podfileを書き換える
+  # スクリプトは不要になったため廃止した(scripts/以下には残っていない)。
 end
 
 post_install do |installer|
