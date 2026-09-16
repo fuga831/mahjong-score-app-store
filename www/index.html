@@ -4435,7 +4435,7 @@ function renderSettingsAccordion(){
         </div>
 
         <div class="settings-row">
-          <div class="lbl">プレイヤー名<span class="hint">時計回りの座順(1→2→3→4→1の順に隣)で入力してください</span></div>
+          <div class="lbl">プレイヤー名<span class="hint">自分から見て右隣の順番(反時計回り)で入力してください</span></div>
           <div class="name-edit-row">
             ${activePlayers().map((p,i)=>{
               const link = logState.settings.participantLinks[p];
