@@ -2443,13 +2443,15 @@ const APP_VERSION = '1.0.0'; // package.jsonのversionと合わせて手動更�
 
 // ハンバーガーメニュー配下の「その他」・購入導線に表示する法務・問い合わせリンク。
 const LEGAL_CONFIG = {
-  // docs/terms.html・docs/privacy.html をGitHub Pagesで公開したURL。
-  // リポジトリ名・公開設定を変更した場合はここも合わせて書き換えること。
-  // Apple/Googleの審査要件により、この2つのURLは「その他」だけでなく購入確認画面
+  // docs/terms.html・docs/privacy.html・docs/support.html をGitHub Pagesで
+  // 公開したURL。リポジトリ名・公開設定を変更した場合はここも合わせて
+  // 書き換えること。Apple/Googleの審査要件により、利用規約・プライバシー
+  // ポリシーの2つのURLは「その他」だけでなく購入確認画面
   // (renderPaywallModal)にも別途表示している。
   termsUrl: 'https://fuga831.github.io/mahjong-score-app-store/terms.html',
   privacyUrl: 'https://fuga831.github.io/mahjong-score-app-store/privacy.html',
-  contactEmail: 'gechi.studio@gmail.com', // docs/terms.html・docs/privacy.html記載の連絡先と同じアドレス
+  supportUrl: 'https://fuga831.github.io/mahjong-score-app-store/support.html', // よくある質問(docs/support.html)
+  contactEmail: 'gechi.studio@gmail.com', // docs/terms.html・docs/privacy.html・docs/support.html記載の連絡先と同じアドレス
 };
 // 実行環境(iOS/Android)を返す。Capacitor.getPlatform()はCapacitor標準の
 // APIで 'ios' | 'android' | 'web' を返す。Web(非ネイティブ)ではNative.
@@ -5614,6 +5616,9 @@ function renderOtherModal(){
               <span>文字サイズ: 大</span>
               <span class="switch ${logState.account.largeText?'on':''}"></span>
             </div>
+            <a class="other-menu-item" href="${LEGAL_CONFIG.supportUrl}" target="_blank" rel="noopener">
+              <span>よくある質問・サポート</span><span class="arrow">›</span>
+            </a>
             <a class="other-menu-item" href="${LEGAL_CONFIG.termsUrl}" target="_blank" rel="noopener">
               <span>利用規約</span><span class="arrow">›</span>
             </a>
