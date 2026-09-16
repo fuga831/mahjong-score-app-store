@@ -3156,6 +3156,21 @@ const CloudSync = {
   // 失敗する(auth/credential-already-in-use等)。機種変更・再インストール後に
   // 元のアカウントへ戻りたいケースはこれに該当するため、その場合のみ
   // signInWithX()にフォールバックし、既存アカウントへ切り替える。
+  //
+  // ③(不具合修正): このフォールバック自体は必要だが、linkWithX()の失敗を
+  // 検知するまでにGoogle/Apple側の認証UI(2段階認証含む)を最後まで1回
+  // 完走してしまい、その後signInWithX()で「もう一度」丸ごと認証UIを
+  // やり直すため、結果として2段階認証などが2回連続で求められていた
+  // (サインアウト→同じアカウントで再サインインする場合、credential-
+  // already-in-useに毎回必ず該当するため、この端末で一度でもそのプロバイダを
+  // リンクしたことがあれば、ほぼ確実にこの二度手間が発生する)。
+  // knownLinkedProviders(account.linkedProvidersと違い、サインアウトしても
+  // クリアしない「この端末でこのプロバイダをリンクした実績があるか」の記憶)を
+  // 見て、既に実績があるプロバイダは最初からsignInWithX()を直接呼び、
+  // 失敗が確定しているlinkWithX()の呼び出し(=1回目の認証UI)を丸ごと
+  // 省略する。初めてそのプロバイダを使う場合(knownLinkedProviders未設定)は、
+  // 従来通りlinkWithX()を先に試す(匿名時代のデータをuid切り替えで
+  // 失わないようにするため、これは変えない)。
   async linkGoogle(){
     if (!this.isAvailable()) { showDebugError('Googleログイン', 'Native.isAvailable()がfalse(ストアアプリ内ではない、またはCloudSync未初期化)'); return false; }
     try {
@@ -3166,20 +3181,25 @@ const CloudSync = {
         return false;
       }
       let result;
-      try {
-        result = await Auth.linkWithGoogle();
-      } catch (e) {
-        if (_isCredentialAlreadyInUseError(e)) {
-          result = await Auth.signInWithGoogle();
-          logState.ui.notifyBanner = 'このGoogleアカウントは既に登録済みのため、既存のアカウントにログインしました。';
-        } else {
-          throw e;
+      if (logState.account.knownLinkedProviders.google) {
+        result = await Auth.signInWithGoogle();
+      } else {
+        try {
+          result = await Auth.linkWithGoogle();
+        } catch (e) {
+          if (_isCredentialAlreadyInUseError(e)) {
+            result = await Auth.signInWithGoogle();
+            logState.ui.notifyBanner = 'このGoogleアカウントは既に登録済みのため、既存のアカウントにログインしました。';
+          } else {
+            throw e;
+          }
         }
       }
       if (result && result.user) {
         logState.account.uid = result.user.uid;
         logState.account.isAnonymous = false;
         logState.account.linkedProviders.google = true;
+        logState.account.knownLinkedProviders.google = true;
         saveLogState();
         return true;
       }
@@ -3203,20 +3223,25 @@ const CloudSync = {
         return false;
       }
       let result;
-      try {
-        result = await Auth.linkWithApple();
-      } catch (e) {
-        if (_isCredentialAlreadyInUseError(e)) {
-          result = await Auth.signInWithApple();
-          logState.ui.notifyBanner = 'このApple IDは既に登録済みのため、既存のアカウントにログインしました。';
-        } else {
-          throw e;
+      if (logState.account.knownLinkedProviders.apple) {
+        result = await Auth.signInWithApple();
+      } else {
+        try {
+          result = await Auth.linkWithApple();
+        } catch (e) {
+          if (_isCredentialAlreadyInUseError(e)) {
+            result = await Auth.signInWithApple();
+            logState.ui.notifyBanner = 'このApple IDは既に登録済みのため、既存のアカウントにログインしました。';
+          } else {
+            throw e;
+          }
         }
       }
       if (result && result.user) {
         logState.account.uid = result.user.uid;
         logState.account.isAnonymous = false;
         logState.account.linkedProviders.apple = true;
+        logState.account.knownLinkedProviders.apple = true;
         saveLogState();
         return true;
       }
@@ -3793,6 +3818,11 @@ function defaultLogState(){
       isAnonymous: true,
       username: null,
       linkedProviders: { google: false, apple: false },
+      // ③: 「この端末でこのプロバイダをリンクした実績があるか」の記憶。
+      // linkedProvidersと違い、debugSignOut()でサインアウトしてもクリアしない
+      // (linkGoogle/linkApple参照。実績があれば2回目以降は2段階認証などを
+      // 含む認証UIを1回で済ませるため、signInWithX()を直接呼ぶ判断に使う)。
+      knownLinkedProviders: { google: false, apple: false },
       notifyOnAutoRecord: true,     // 自分以外の操作で記録が追加された時に通知するか(初期値ON)
       pushPermissionRequested: false, // 通知許可を一度リクエスト済みか(タイミング制御用)
       textSize: 'large',             // 文字サイズ: 'normal'(100%) | 'large'(125%、旧ジジイモード) | 'xlarge'(150%)。アプリの初期状態は'large'。
@@ -3806,6 +3836,7 @@ function defaultLogState(){
       chipsOpen: false,
       startAdvancedOpen: false,
       editingHanchanId: null,
+      confirmDeleteHanchanId: null, // ①: 半荘ログの「×」削除の誤タップ防止確認中か(半荘id)
       formScores: {},
       formScoreSign: {},  // プレイヤー名 -> '+' | '-'(素点入力欄の符号トグル。数字専用キーボードにマイナスが無いための対応)
       formScoreAuto: {},  // プレイヤー名 -> true の間は、他の入力に追随して自動逆算され続ける仮の値(手入力で上書きするとfalseに戻る)
@@ -3925,6 +3956,7 @@ function mergeParsedLogState(parsed){
       ...base.account,
       ...(parsed.account || {}),
       linkedProviders: { ...base.account.linkedProviders, ...((parsed.account || {}).linkedProviders || {}) },
+      knownLinkedProviders: { ...base.account.knownLinkedProviders, ...((parsed.account || {}).knownLinkedProviders || {}) },
       textSize: migrateTextSize(parsed.account, base.account.textSize),
     },
     friends: Array.isArray(parsed.friends) ? parsed.friends : [],
@@ -4710,10 +4742,21 @@ function cancelEditHanchan(){
   resetFormScores();
   scheduleRenderApp();
 }
+// ①: 「×」タップで即削除せず、確認ポップアップを挟む。
+function requestDeleteHanchan(id){
+  if (isRoomViewerOnly()) return;
+  logState.ui.confirmDeleteHanchanId = id;
+  scheduleRenderApp();
+}
+function cancelDeleteHanchan(){
+  logState.ui.confirmDeleteHanchanId = null;
+  scheduleRenderApp();
+}
 function deleteHanchan(id){
   if (isRoomViewerOnly()) return;
   logState.hanchans = logState.hanchans.filter(x => x.id !== id);
   if (logState.ui.editingHanchanId === id) cancelEditHanchan();
+  if (logState.ui.confirmDeleteHanchanId === id) logState.ui.confirmDeleteHanchanId = null;
   saveLogState();
   scheduleRenderApp();
   syncRoomState();
@@ -4938,6 +4981,30 @@ async function linkParticipant(uid, username){
   }
   closeFriendPicker();
   await CloudSync.addFriend(uid, username);
+  scheduleRenderApp();
+}
+// ②: ホスト自身のプレイヤー枠を、検索を介さずワンタップで自分自身へ紐付ける。
+// 既に自分のuid・ユーザーネームが分かっているため、linkParticipant()と違い
+// ネットワーク検索(searchUsername)を経由する必要が無く、フレンド関係にも
+// ならない(自分自身をフレンドとして追加する意味が無いため、addFriendは呼ばない)。
+function linkSelfAsParticipant(){
+  const slot = logState.ui.friendPickerSlot;
+  if (!slot || !logState.account.uid) return;
+  if (!logState.account.username) return; // モーダル側でユーザーネーム未設定時はボタン自体を出していない
+  const dupSlot = findDuplicateLinkSlot(logState.account.uid, slot);
+  if (dupSlot) {
+    logState.ui.friendSearchError = `既に${dupSlot}さんとして自分自身を指定済みです`;
+    scheduleRenderApp();
+    return;
+  }
+  logState.settings.participantLinks[slot] = { uid: logState.account.uid, username: logState.account.username };
+  const idx = logState.settings.playerNames.indexOf(slot);
+  if (idx !== -1) {
+    setPlayerName(idx, logState.account.username);
+  } else {
+    saveLogState();
+  }
+  closeFriendPicker();
   scheduleRenderApp();
 }
 function unlinkParticipant(){
@@ -5713,16 +5780,24 @@ function renderHanchanLog(hanchansList, s, opts){
         <span class="hc-score">${r.score.toLocaleString()}</span>
         <span class="hc-pt ${pt[r.name]>=0?'plus':'minus'}">${formatPt(pt[r.name])}</span>
       </div>`).join('');
+    const confirmingDelete = logState.ui.confirmDeleteHanchanId === h.id;
     return `
       <div class="hanchan-card">
         <div class="hc-head">
           <span class="hc-title">第${dispNum}半荘</span>
           ${readOnly ? '' : `<span class="hc-actions">
             <button onclick="editHanchan(${h.id})">✎</button>
-            <button onclick="deleteHanchan(${h.id})">×</button>
+            <button onclick="requestDeleteHanchan(${h.id})">×</button>
           </span>`}
         </div>
-        <div class="hc-rows">${rows}</div>
+        ${confirmingDelete ? `
+        <div class="end-match-confirm">
+          <span>この半荘の記録を削除しますか？元に戻せません。</span>
+          <div class="end-match-confirm-btns">
+            <button class="preset-btn" onclick="cancelDeleteHanchan()">キャンセル</button>
+            <button class="preset-btn danger" onclick="deleteHanchan(${h.id})">削除する</button>
+          </div>
+        </div>` : `<div class="hc-rows">${rows}</div>`}
       </div>`;
   }).join('');
   return `<section><div class="sec-title">対局ログ<span class="hint">${hanchansList.length}半荘</span></div><div style="display:flex;flex-direction:column;gap:8px;">${cards}</div></section>`;
@@ -6830,7 +6905,18 @@ async function debugSignOut(){
     // signOut()自体が失敗しても、ローカル側のリセットは続行する
     // (ローカルだけでも未ログイン状態から試せるようにするため)。
   }
+  // ③: knownLinkedProviders(この端末でどのプロバイダをリンクした実績が
+  // あるか)だけは、サインアウトしても消さずに引き継ぐ。消してしまうと、
+  // このデバッグ:サインアウト→再ログインのテストサイクルのたびに
+  // linkWithX()が「必ず失敗するとわかっている1回目の認証UI」を毎回
+  // 律儀にやり直し、2段階認証などが二重に求められる不具合が再発する
+  // (confirmDeleteAccountFromMenuでの本当のアカウント削除とは異なり、
+  // ここではFirebase側のGoogle/Appleとの紐付け自体は消えていないため、
+  // 次にlinkWithGoogle/linkWithAppleを呼んでも必ずcredential-already-in-use
+  // になることがわかっている)。
+  const knownLinkedProviders = logState.account.knownLinkedProviders;
   logState.account = defaultLogState().account;
+  logState.account.knownLinkedProviders = knownLinkedProviders;
   logState.friends = [];
   logState.room = null;
   logState.ui.otherMenuOpen = false;
@@ -6962,6 +7048,25 @@ function renderFriendPickerModal(){
   // ⑤: 既に他の枠(アクティブ・控え問わず)へ指定済みのフレンドは、選択肢として
   // 表示しない(この枠自身に既に指定されている本人は、選び直せるよう引き続き表示する)。
   const availableFriends = logState.friends.filter(f => !findDuplicateLinkSlot(f.uid, slot));
+  // ②: 代表入力者(ホスト)自身のプレイヤー枠にも「自分を指定」の導線を出す。
+  // この枠が既に自分自身へ紐付け済みならバナー(下のcurrentLink表示)で
+  // 十分なので出さない。自分が既に別の枠へ指定済みなら(1人が2枠を兼任は
+  // できないため)理由を示して選択肢は出さない。
+  const isSelfLinked = !!(currentLink && logState.account.uid && currentLink.uid === logState.account.uid);
+  const selfDupSlot = (logState.account.uid && !isSelfLinked) ? findDuplicateLinkSlot(logState.account.uid, slot) : null;
+  const selfSectionHtml = (!logState.account.uid || isSelfLinked) ? '' : `
+    <div class="settings-row">
+      <div class="lbl">自分自身</div>
+      ${selfDupSlot
+        ? `<div class="preview-line">既に${escapeHtml(selfDupSlot)}さんとして自分自身を指定済みです。</div>`
+        : logState.account.username
+          ? `<div class="history-card" onclick="linkSelfAsParticipant()">
+               <div class="history-title">🙋 ${escapeHtml(logState.account.username)}(自分)</div>
+               <div class="history-winner">この枠を自分自身として指定 →</div>
+             </div>`
+          : `<div class="preview-line">自分を指定するには、先にユーザーネームを設定してください。</div>
+             <button class="mentsu-add" style="margin-top:6px;" onclick="closeFriendPicker(); openAccountModal();">👤 ユーザーネームを設定する</button>`}
+    </div>`;
   root.innerHTML = `
     <div class="history-modal-overlay">
       <div class="history-modal">
@@ -6971,10 +7076,11 @@ function renderFriendPickerModal(){
         </div>
         <div class="history-modal-body">
           ${currentLink ? `
-            <div class="check-banner ok" style="margin-bottom:10px;">🔗 現在: ${escapeHtml(currentLink.username)}</div>
+            <div class="check-banner ok" style="margin-bottom:10px;">🔗 現在: ${escapeHtml(currentLink.username)}${isSelfLinked ? '(自分)' : ''}</div>
             <button class="mentsu-add danger-text" onclick="unlinkParticipant()">紐付けを解除してゲストに戻す</button>
             <div style="height:12px;"></div>
           ` : ''}
+          ${selfSectionHtml}
           <div class="settings-row">
             <div class="lbl">ユーザーネームで検索</div>
             <div class="inline-fields">
