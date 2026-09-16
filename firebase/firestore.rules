@@ -8,10 +8,15 @@
 //
 // データモデル:
 //   usernames/{normalizedUsername}      -> { uid }
-//   users/{uid}                          -> { username, matchCount, pushToken, ... }
+//   users/{uid}                          -> { username, matchCount, pushToken, isPremium, ... }
 //   users/{uid}/friends/{friendUid}      -> { uid, username, addedAt }
 //   users/{uid}/matchHistory/{matchId}   -> { ...対局データ, participantUids, recordedBy }
 //   rooms/{roomId}                       -> { hostUid, participants, participantUids, status, hanchans, chips, ... }
+//   claimTokens/{token}                  -> { matchId, playerSlot, hostUid, token, createdAt,
+//                                              expiresAt, used, usedBy, matchData }
+//                                          ゲストプレイヤーへの結果受け取りリンク(Universal Links)用。
+//                                          トークン文字列自体が推測困難な乱数(capability URL方式)である
+//                                          ことを前提に、get(単一ドキュメント参照)ベースの検証で完結させている。
 
 rules_version = '2';
 
@@ -102,11 +107,58 @@ service cloud.firestore {
           && (get(/databases/$(database)/documents/users/$(uid)).data.matchCount < 3
               || get(/databases/$(database)/documents/users/$(uid)).data.isPremium == true);
 
+        // ゲストプレイヤーへの結果受け取りリンク(claimTokens)経由での取り込み。
+        // 「自分(uid)がこのmatchIdを受け取る権利がある」ことを、対応する
+        // claimTokensドキュメントが有効(未使用・期限内・matchId一致)かどうかの
+        // get()だけで検証する。書き込むデータ自体にclaimTokenフィールドとして
+        // トークン文字列を含めてもらう必要がある(CloudSync.claimMatchToken参照)。
+        // このcreateとclaimTokens側のupdate(使用済み化)は別々の書き込みで
+        // アトミックではないが、二重取り込みが起きても「同じ内容が重複するだけ」
+        // でありmatchHistory自体は不変(update:false)のため実害は無い。
+        allow create: if isSelf(uid)
+          && request.resource.data.claimToken is string
+          && get(/databases/$(database)/documents/claimTokens/$(request.resource.data.claimToken)).data.matchId == matchId
+          && get(/databases/$(database)/documents/claimTokens/$(request.resource.data.claimToken)).data.used == false
+          && get(/databases/$(database)/documents/claimTokens/$(request.resource.data.claimToken)).data.expiresAt > request.time.toMillis();
+
         // 確定済みの記録は変更不可(過去の記録を後から書き換えられないように)。
         allow update: if false;
         // 自分の記録は自分で削除できる(対局履歴モーダルの削除機能)。
         allow delete: if isSelf(uid);
       }
+    }
+
+    // ---- claimTokens/{token}: ゲストプレイヤーへの結果受け取りリンク ----
+    // トークン文字列(ドキュメントID自体)が長い乱数で推測困難であることを
+    // 前提にした、capability URL方式のアクセス制御。受け取る側は「トークンを
+    // 知っている(URLを開いた)」時点ではまだhostUidでもusedByでもないため、
+    // 単純なisSelf()判定では読めない。そのため get は署名済みユーザーなら
+    // 誰でも許可し(list:falseで一覧列挙は禁止、ドキュメントIDを知らない限り
+    // 到達できない)、代わりに更新(使用済み化)側で厳しく検証する。
+    match /claimTokens/{token} {
+      allow get: if isSignedIn();
+      allow list: if false;
+      // 発行(「リンクを送る」): 自分のuidをhostUidとして、未使用状態でのみ作成できる。
+      allow create: if isSignedIn()
+        && request.resource.data.hostUid == request.auth.uid
+        && request.resource.data.token == token
+        && request.resource.data.used == false
+        && request.resource.data.usedBy == null;
+      // 受け取り確定: 未使用・期限内のトークンだけを、usedとusedBy(自分)以外
+      // 変更せずに更新できる(他のフィールドの改ざん・巻き戻しを防ぐ)。
+      allow update: if isSignedIn()
+        && resource.data.used == false
+        && request.time.toMillis() < resource.data.expiresAt
+        && request.resource.data.used == true
+        && request.resource.data.usedBy == request.auth.uid
+        && request.resource.data.hostUid == resource.data.hostUid
+        && request.resource.data.matchId == resource.data.matchId
+        && request.resource.data.playerSlot == resource.data.playerSlot
+        && request.resource.data.token == resource.data.token
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.expiresAt == resource.data.expiresAt
+        && request.resource.data.matchData == resource.data.matchData;
+      allow delete: if false;
     }
 
     // ---- rooms/{roomId}: 進行中の卓 ----

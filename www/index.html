@@ -680,6 +680,9 @@
     box-shadow:var(--shadow);
   }
   .total-card.top{background:linear-gradient(160deg, var(--felt-2), var(--felt-1));border-color:var(--gold);}
+  .total-card.shareable{cursor:pointer;}
+  .total-card.shareable:active{background:var(--felt-2);}
+  .total-card .share-hint{font-size:.85em;opacity:.7;}
   .total-card .pname{
     font-size:.68rem;
     font-weight:700;
@@ -1818,6 +1821,8 @@
 <div id="addFriendModalRoot"></div>
 <div id="helpModalRoot"></div>
 <div id="otherModalRoot"></div>
+<div id="historyLinkShareModalRoot"></div>
+<div id="claimModalRoot"></div>
 <div id="notifyBannerRoot"></div>
 <div id="termTipRoot"></div>
 <div id="debugErrorRoot"></div>
@@ -2892,6 +2897,29 @@ function _isCredentialAlreadyInUseError(e){
     || msg.includes('already-in-use') || msg.includes('already in use');
 }
 
+/* ---- ゲストプレイヤーへの結果受け取りリンク(Universal Links + claimTokens) ---- */
+// GitHub Pagesのdocs/claim.html(アプリ未インストール時のフォールバック用ページ)と
+// 同じパスをリンク先にする。Universal Links(applinks:fuga831.github.io、
+// ios/App/App/App.entitlements参照)が有効なら、アプリインストール済みの端末では
+// Safariを経由せず直接アプリが起動しこのURLをハンドリングする。
+const CLAIM_LINK_BASE_URL = 'https://fuga831.github.io/mahjong-score-app-store/claim';
+const CLAIM_TOKEN_TTL_MS = 3 * 24 * 60 * 60 * 1000; // 3日間
+// トークンは「知っていれば使える」capability URL方式(このアプリの他の識別子と
+// 同様、Firestoreルール側でも推測困難性を前提にしている)。Math.random()は
+// 暗号論的に安全な乱数ではないため使わず、crypto.getRandomValues/randomUUIDを使う
+// (WKWebView・最近のブラウザなら確実に利用可能。念のため最終フォールバックのみ用意)。
+function generateClaimToken(){
+  try {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID().replace(/-/g, '');
+    if (window.crypto && crypto.getRandomValues) {
+      const bytes = new Uint8Array(20);
+      crypto.getRandomValues(bytes);
+      return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    }
+  } catch (e) {}
+  return Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+}
+
 const CloudSync = {
   isAvailable(){
     // 広告/課金と同じく、マルチプレイヤーもストアアプリの中でのみ有効。
@@ -3157,6 +3185,101 @@ const CloudSync = {
         merge: true,
       });
     } catch (e) { /* オフライン等は無視 */ }
+  },
+
+  // ---- ゲストプレイヤーへの結果受け取りリンク ----
+  // 対局履歴の詳細画面で、ゲスト(participantLinks未紐付け)のプレイヤー枠に対して
+  // 「リンクを送る」を選んだ時に呼ぶ。その対局・その枠専用の使い捨てトークンを
+  // 発行する。matchDataをトークン自身に複製して持たせておくことで、受け取り側は
+  // 「トークンを知っている」だけでmatchHistoryドキュメント本体(host本人にしか
+  // 読み取り権限が無い)を経由せずに内容を確認できる(claimTokens/{token}の
+  // allow get: if isSignedIn(); というシンプルなルールで完結させるための設計。
+  // トークン自体が推測困難な乱数文字列であることが実質的なアクセス制御になる)。
+  async createClaimToken(matchId, playerSlot){
+    if (!this.isAvailable()) return { ok: false };
+    if (!(await this.ensureSignedIn())) return { ok: false };
+    const m = logState.matchHistory.find(x => x.id === matchId);
+    if (!m) return { ok: false };
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      if (!Firestore) return { ok: false };
+      const token = generateClaimToken();
+      const now = Date.now();
+      await Firestore.setDocument({
+        reference: `claimTokens/${token}`,
+        data: {
+          matchId, playerSlot, token,
+          hostUid: logState.account.uid,
+          createdAt: now,
+          expiresAt: now + CLAIM_TOKEN_TTL_MS,
+          used: false,
+          usedBy: null,
+          matchData: {
+            id: m.id,
+            startedAt: m.startedAt,
+            endedAt: m.endedAt,
+            title: m.title || '',
+            settingsSnapshot: m.settingsSnapshot,
+            hanchans: m.hanchans,
+            chips: m.chips,
+            participantUids: m.participantUids || [],
+          },
+        },
+      });
+      return { ok: true, token };
+    } catch (e) {
+      showDebugError('結果受け取りリンクの作成 (createClaimToken)', e);
+      return { ok: false };
+    }
+  },
+  // 受け取り確認画面を開く時に、トークンの中身(有効期限・使用済みかどうか含む)を
+  // 取得する。有効期限切れ・使用済みの判定はここでクライアント側でも行うが、
+  // 実際にclaimする書き込み時にはfirestore.rules側でも同じ条件を再検証する
+  // (クライアント側の判定はあくまでUI表示用で、最終的な可否はルール側が決める)。
+  async fetchClaimToken(token){
+    if (!this.isAvailable()) return { ok: false, error: 'unavailable' };
+    if (!(await this.ensureSignedIn())) return { ok: false, error: 'unavailable' };
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      if (!Firestore) return { ok: false, error: 'unavailable' };
+      const doc = await Firestore.getDocument({ reference: `claimTokens/${token}` });
+      const data = doc && doc.snapshot && doc.snapshot.data;
+      if (!data) return { ok: false, error: 'notfound' };
+      if (data.used) return { ok: false, error: 'used' };
+      if (data.expiresAt && Date.now() > data.expiresAt) return { ok: false, error: 'expired' };
+      return { ok: true, data };
+    } catch (e) {
+      showDebugError('結果受け取りリンクの確認 (fetchClaimToken)', e);
+      return { ok: false, error: 'network' };
+    }
+  },
+  // 「受け取る」を確定する。自分のmatchHistoryへ複製を保存し、トークンを
+  // 使用済みにする(この2つの書き込みはトランザクションではないため、間に
+  // 通信断が挟まると理論上どちらか片方だけ成功する可能性があるが、その場合も
+  // 実害は「もう一度リンクを開けば良いだけ」に留まる設計にしてある:
+  // matchHistory側は既に自分の記録として存在するので何も起きず、トークン側は
+  // used化されていなければ再度この関数が最初からやり直せる)。
+  async claimMatchToken(token, tokenData){
+    if (!this.isAvailable() || !logState.account.uid) return { ok: false };
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      if (!Firestore) return { ok: false };
+      const myUid = logState.account.uid;
+      const md = tokenData.matchData;
+      const entry = {
+        ...md,
+        participantUids: Array.from(new Set([...(md.participantUids || []), myUid])),
+        recordedBy: tokenData.hostUid,
+        claimToken: token, // firestore.rules側でこのトークンの有効性を検証するために必要
+      };
+      await Firestore.setDocument({ reference: `users/${myUid}/matchHistory/${md.id}`, data: entry });
+      await Firestore.updateDocument({ reference: `claimTokens/${token}`, data: { used: true, usedBy: myUid } });
+      delete entry.claimToken; // ローカル保存・表示用のコピーには不要
+      return { ok: true, entry };
+    } catch (e) {
+      showDebugError('結果の受け取り (claimMatchToken)', e);
+      return { ok: false };
+    }
   },
 
   // 起動時にクラウド側のmatchHistoryを取り込み、ローカルにまだ無いもの(=自分が
@@ -3564,6 +3687,17 @@ function defaultLogState(){
       addFriendSearchError: null,
       addFriendSearchChecking: false,
       historyFriendFilter: null,   // { uid, username } — フレンド一覧から「この人との戦歴」を見ている間だけ設定される絞り込み
+      historyLinkShareOpen: false,  // 対局履歴詳細: ゲストへの結果受け取りリンクを送るモーダル
+      historyLinkShareMatchId: null,
+      historyLinkSharePlayerSlot: null,
+      historyLinkShareBusy: false,
+      historyLinkShareError: null,
+      claimOpen: false,             // 受け取ったリンク(?token=)の確認モーダル
+      claimToken: null,
+      claimData: null,              // claimTokensドキュメントの中身(matchData含む)
+      claimBusy: false,
+      claimError: null,
+      claimDone: false,
     },
   };
 }
@@ -3650,6 +3784,26 @@ CloudSync.init().then(async () => {
   await _restorePurchasesOnBoot;
   CloudSync.syncPremiumStatus();
 });
+
+// ---- ゲストプレイヤーへの結果受け取りリンク(Universal Links) ----
+// Universal Links経由でアプリが直接起動された場合、iOS側(AppDelegate.swift の
+// application(_:continue:restorationHandler:))からCapacitorの@capacitor/appプラグイン
+// 経由でappUrlOpenイベントとして中継される(ネイティブ側の追加実装は不要。
+// ios-snippets/associated-domains-notes.md参照)。
+try {
+  const AppPlugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+  if (AppPlugin && AppPlugin.addListener) {
+    AppPlugin.addListener('appUrlOpen', (data) => {
+      if (data && data.url) handleIncomingUrl(data.url);
+    });
+  }
+} catch (e) { /* @capacitor/appが無い/未対応環境では何もしない */ }
+// このWebページ自体を直接 ?token=... 付きで開いた場合(GitHub Pages上での動作確認、
+// Universal Linksが未設定の環境でのフォールバック確認など)にも同じ経路で拾う。
+try {
+  const bootToken = new URLSearchParams(location.search).get('token');
+  if (bootToken) handleIncomingUrl(location.href);
+} catch (e) {}
 
 function activePlayers(){
   return logState.settings.playerNames.slice(0, logState.settings.playerCount);
@@ -4356,6 +4510,8 @@ function openLoginPrompt(reason, afterAction){
   logState.ui.friendPickerOpen = false;
   logState.ui.friendsListOpen = false;
   logState.ui.addFriendOpen = false;
+  logState.ui.historyLinkShareOpen = false;
+  logState.ui.claimOpen = false;
   logState.ui.loginPromptOpen = true;
   logState.ui.loginPromptReason = reason;
   logState.ui._loginPromptAfterAction = afterAction; // ログイン後 or スキップ後に続ける処理
@@ -4511,6 +4667,131 @@ function unlinkParticipant(){
   delete logState.settings.participantLinks[slot];
   saveLogState();
   closeFriendPicker();
+}
+
+/* ---- 対局履歴: ゲストプレイヤーへの結果受け取りリンクを送る ----
+   「既存の指定ボタンの選択肢に追加する」という要望に対応するため、専用の新しい
+   ボタンを画面に増やすのではなく、対局履歴詳細のプレイヤーカード(既存の
+   .total-card、totalCardsHtml参照)自体をタップ対象にし、renderFriendPickerModal
+   と同じ見た目(.history-modal-overlay/.history-modal)を流用したモーダルを開く。
+   対局履歴は確定後は書き換えられない(firestore.rulesのmatchHistory.update=false)
+   ため、既存の「ユーザーネーム検索/フレンドから選ぶ」即時リンクの仕組みはここでは
+   使わず、「リンクを送る」(トークン発行+共有)だけを提供する。 */
+function openHistoryLinkShare(matchId, playerSlot){
+  const doOpen = () => {
+    logState.ui.historyLinkShareOpen = true;
+    logState.ui.historyLinkShareMatchId = matchId;
+    logState.ui.historyLinkSharePlayerSlot = playerSlot;
+    logState.ui.historyLinkShareBusy = false;
+    logState.ui.historyLinkShareError = null;
+    scheduleRenderApp();
+  };
+  if (needsLoginPromptFirst()) {
+    openLoginPrompt('history_link_share', doOpen);
+  } else {
+    doOpen();
+  }
+}
+function closeHistoryLinkShare(){
+  logState.ui.historyLinkShareOpen = false;
+  logState.ui.historyLinkShareMatchId = null;
+  logState.ui.historyLinkSharePlayerSlot = null;
+  logState.ui.historyLinkShareError = null;
+  scheduleRenderApp();
+}
+async function generateAndShareClaimLink(){
+  const matchId = logState.ui.historyLinkShareMatchId;
+  const slot = logState.ui.historyLinkSharePlayerSlot;
+  if (!matchId || !slot) return;
+  logState.ui.historyLinkShareBusy = true;
+  logState.ui.historyLinkShareError = null;
+  scheduleRenderApp();
+  const result = await CloudSync.createClaimToken(matchId, slot);
+  logState.ui.historyLinkShareBusy = false;
+  if (!result.ok) {
+    logState.ui.historyLinkShareError = 'リンクの作成に失敗しました。通信環境をご確認のうえ、もう一度お試しください。';
+    scheduleRenderApp();
+    return;
+  }
+  const url = `${CLAIM_LINK_BASE_URL}?token=${encodeURIComponent(result.token)}`;
+  closeHistoryLinkShare();
+  const text = `${slot}さんへ、麻雀対局の結果をお送りします。\nリンクをタップして受け取ってください(有効期限: 3日間)\n${url}`;
+  await shareText(text, '対局結果を送る');
+}
+
+/* ---- 受け取ったリンク(?token=)の確認 ---- */
+// Universal Links経由(App.addListener('appUrlOpen')、下部の起動処理参照)、または
+// このWebページ自体を直接 ?token=... 付きで開いた場合の両方から呼ばれる。
+function handleIncomingUrl(urlString){
+  try {
+    const url = new URL(urlString, location.href);
+    const token = url.searchParams.get('token');
+    if (token) openClaimFlow(token);
+  } catch (e) { /* 不正なURLは無視 */ }
+}
+async function openClaimFlow(token){
+  logState.ui.claimOpen = true;
+  logState.ui.claimToken = token;
+  logState.ui.claimData = null;
+  logState.ui.claimError = null;
+  logState.ui.claimDone = false;
+  logState.ui.claimBusy = true;
+  scheduleRenderApp();
+  const result = await CloudSync.fetchClaimToken(token);
+  logState.ui.claimBusy = false;
+  if (!result.ok) {
+    logState.ui.claimError = result.error === 'expired' ? 'このリンクの有効期限(3日間)が切れています。'
+      : result.error === 'used' ? 'このリンクは既に使用されています。'
+      : result.error === 'notfound' ? 'このリンクは見つかりませんでした。'
+      : 'リンクを確認できませんでした。通信環境をご確認のうえ、もう一度お試しください。';
+    scheduleRenderApp();
+    return;
+  }
+  logState.ui.claimData = result.data;
+  scheduleRenderApp();
+}
+function closeClaimFlow(){
+  logState.ui.claimOpen = false;
+  logState.ui.claimToken = null;
+  logState.ui.claimData = null;
+  logState.ui.claimError = null;
+  logState.ui.claimDone = false;
+  scheduleRenderApp();
+}
+// 「受け取る」ボタン。匿名のままだと後で機種変更時にデータを失うため、
+// openFriendPicker/openHistoryLinkShareと同じくログインを先に促す
+// (スキップして匿名のまま続けることも可能)。
+function requestClaimMatch(){
+  const doClaim = () => {
+    logState.ui.claimOpen = true;
+    scheduleRenderApp();
+    confirmClaimLink();
+  };
+  if (needsLoginPromptFirst()) {
+    openLoginPrompt('claim_link', doClaim);
+  } else {
+    doClaim();
+  }
+}
+async function confirmClaimLink(){
+  if (!logState.ui.claimData || !logState.ui.claimToken) return;
+  logState.ui.claimBusy = true;
+  logState.ui.claimError = null;
+  scheduleRenderApp();
+  const result = await CloudSync.claimMatchToken(logState.ui.claimToken, logState.ui.claimData);
+  logState.ui.claimBusy = false;
+  if (!result.ok) {
+    logState.ui.claimError = '受け取りに失敗しました。通信環境をご確認のうえ、もう一度お試しください。';
+    scheduleRenderApp();
+    return;
+  }
+  if (!logState.matchHistory.some(m => m.id === result.entry.id)) {
+    logState.matchHistory.push(result.entry);
+    logState.matchHistory.sort((a, b) => new Date(b.endedAt || b.startedAt || 0) - new Date(a.endedAt || a.startedAt || 0));
+    saveLogState();
+  }
+  logState.ui.claimDone = true;
+  scheduleRenderApp();
 }
 
 /* ---- 単独のフレンド追加(同卓者指定を介さずに、ユーザーネーム検索だけで追加する) ---- */
@@ -4870,14 +5151,21 @@ function renderHanchanLog(hanchansList, s, opts){
   return `<section><div class="sec-title">対局ログ<span class="hint">${hanchansList.length}半荘</span></div><div style="display:flex;flex-direction:column;gap:8px;">${cards}</div></section>`;
 }
 
-function totalCardsHtml(order, totals, topMoney, participantLinks){
+// shareMatchId: 対局履歴の詳細画面(renderHistoryDetail)からだけ渡される。指定時、
+// まだアカウント紐付けの無い(=ゲストの)プレイヤーのカードをタップ可能にし、
+// そのプレイヤー枠専用の結果受け取りリンクを送れるようにする(openHistoryLinkShare
+// 参照)。ライブ対局中の表示(renderStickyHeader)では渡さないため、既存の見た目・
+// 挙動は変わらない。新しいボタン要素は増やさず、既存のカード自体をタップ対象にする。
+function totalCardsHtml(order, totals, topMoney, participantLinks, shareMatchId){
   return `
     <div class="total-cards">
       ${order.map(p=>{
         const isTop = totals.money[p]===topMoney && topMoney > 0;
+        const isGuest = !(participantLinks && participantLinks[p]);
+        const shareable = !!shareMatchId && isGuest;
         return `
-        <div class="total-card ${isTop?'top':''}">
-          <div class="pname${premiumNameClass(p, participantLinks)}">${isTop?'<span class="crown">👑</span>':''}${escapeHtml(p)}</div>
+        <div class="total-card ${isTop?'top':''} ${shareable?'shareable':''}" ${shareable?`onclick="openHistoryLinkShare('${escKey(shareMatchId)}','${escKey(p)}')"`:''}>
+          <div class="pname${premiumNameClass(p, participantLinks)}">${isTop?'<span class="crown">👑</span>':''}${escapeHtml(p)}${shareable?' <span class="share-hint">🔗</span>':''}</div>
           ${moneyStackInnerHtml(totals.money[p], totals.chipMoney[p], 'pmoney')}
           <div class="ppt">${formatPt(totals.pt[p])}pt</div>
         </div>`;
@@ -5182,7 +5470,8 @@ function renderHistoryDetail(id){
     <div class="history-detail">
       <div class="history-detail-title-row">${titleHtml}</div>
       <div class="history-detail-meta">${formatMatchDate(m.startedAt, m.endedAt)}・${players.map(p=>`<span class="${premiumNameClass(p, s.participantLinks).trim()}">${escapeHtml(p)}</span>`).join('・')}</div>
-      ${totalCardsHtml(order, totals, topMoney, s.participantLinks)}
+      ${totalCardsHtml(order, totals, topMoney, s.participantLinks, CloudSync.isAvailable() ? id : null)}
+      ${CloudSync.isAvailable() && order.some(p => !s.participantLinks[p]) ? `<div class="history-reminder">💡 ゲストのプレイヤー名をタップすると、結果受け取りリンクを送れます</div>` : ''}
       ${chipSum !== 0 ? `<div class="check-banner bad" style="margin-top:8px;">⚠ チップ合計 ${chipSum>0?'+':''}${chipSum}枚（ゼロサムになっていません）</div>` : ''}
       ${renderHanchanLog(m.hanchans, settingsForCalc, { readOnly: true })}
       <div class="history-detail-actions">
@@ -6104,6 +6393,76 @@ function renderFriendPickerModal(){
     </div>`;
 }
 
+/* ---- 対局履歴: ゲストプレイヤーへの結果受け取りリンクモーダル(renderFriendPickerModalと同じ見た目を流用) ---- */
+function renderHistoryLinkShareModal(){
+  const root = document.getElementById('historyLinkShareModalRoot');
+  if (!root) return;
+  if (!logState.ui.historyLinkShareOpen) { root.innerHTML = ''; return; }
+  const slot = logState.ui.historyLinkSharePlayerSlot;
+  const busy = logState.ui.historyLinkShareBusy;
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">${escapeHtml(slot)}さんへリンクを送る</span>
+          <button class="history-close" onclick="closeHistoryLinkShare()">×</button>
+        </div>
+        <div class="history-modal-body">
+          <p class="paywall-copy">${escapeHtml(slot)}さん専用の受け取りリンクを発行し、LINEなどで送れます。リンクを開くとこの対局結果が${escapeHtml(slot)}さんの成績・対局履歴にも反映されます。</p>
+          ${logState.ui.historyLinkShareError ? `<div class="check-banner bad" style="margin-bottom:10px;">${escapeHtml(logState.ui.historyLinkShareError)}</div>` : ''}
+          <button class="record-btn" style="width:100%;" ${busy?'disabled':''} onclick="generateAndShareClaimLink()">${busy?'作成中…':'🔗 リンクを送る'}</button>
+          <div class="history-reminder">💡 このリンクの有効期限は3日間です。何度でも送り直せます。</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ---- 受け取ったリンク(?token=)の確認モーダル(同じく.history-modalを流用) ---- */
+function renderClaimModal(){
+  const root = document.getElementById('claimModalRoot');
+  if (!root) return;
+  if (!logState.ui.claimOpen) { root.innerHTML = ''; return; }
+  const busy = logState.ui.claimBusy;
+  const data = logState.ui.claimData;
+  const err = logState.ui.claimError;
+  const done = logState.ui.claimDone;
+
+  let bodyHtml;
+  if (done) {
+    bodyHtml = `
+      <div class="check-banner ok" style="margin-bottom:10px;">✓ 受け取りました</div>
+      <p class="paywall-copy">この対局結果を、あなたの成績・対局履歴に反映しました。</p>
+      <button class="record-btn" style="width:100%;" onclick="closeClaimFlow()">閉じる</button>`;
+  } else if (err) {
+    bodyHtml = `
+      <div class="check-banner bad" style="margin-bottom:10px;">${escapeHtml(err)}</div>
+      <button class="mentsu-add" onclick="closeClaimFlow()">閉じる</button>`;
+  } else if (busy || !data) {
+    bodyHtml = `<p class="paywall-copy">確認しています…</p>`;
+  } else {
+    const md = data.matchData;
+    const dateLabel = md ? formatMatchDate(md.startedAt, md.endedAt) : '';
+    bodyHtml = `
+      <p class="paywall-copy">この対局結果はあなた(${escapeHtml(data.playerSlot)}さん)のものです。受け取りますか？</p>
+      ${dateLabel ? `<div class="history-detail-meta">${dateLabel}</div>` : ''}
+      <div class="end-match-confirm-btns" style="margin-top:12px;">
+        <button class="preset-btn" onclick="closeClaimFlow()" ${busy?'disabled':''}>キャンセル</button>
+        <button class="preset-btn" onclick="requestClaimMatch()" ${busy?'disabled':''}>${busy?'受け取り中…':'受け取る'}</button>
+      </div>`;
+  }
+
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">対局結果の受け取り</span>
+          <button class="history-close" onclick="closeClaimFlow()">×</button>
+        </div>
+        <div class="history-modal-body">${bodyHtml}</div>
+      </div>
+    </div>`;
+}
+
 /* ---- マルチプレイヤー: ログイン誘導モーダル ---- */
 function renderLoginPromptModal(){
   const root = document.getElementById('loginPromptModalRoot');
@@ -6300,6 +6659,8 @@ function renderAppInner(){
   safeRender(renderAddFriendModal, 'renderAddFriendModal');
   safeRender(renderHelpModal, 'renderHelpModal');
   safeRender(renderOtherModal, 'renderOtherModal');
+  safeRender(renderHistoryLinkShareModal, 'renderHistoryLinkShareModal');
+  safeRender(renderClaimModal, 'renderClaimModal');
   safeRender(renderNotifyBanner, 'renderNotifyBanner');
   safeRender(renderDebugError, 'renderDebugError');
   safeRender(() => updateBannerState(onLog), 'updateBannerState');

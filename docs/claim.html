@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>対局結果の受け取り | 雀スコア-麻雀点数計算・得点記録</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    line-height: 1.8;
+    color: #222;
+    margin: 0;
+    padding: 0;
+    background: #fafafa;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .card {
+    max-width: 420px;
+    width: 100%;
+    margin: 24px;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 14px;
+    padding: 32px 24px;
+    text-align: center;
+  }
+  .tile {
+    font-size: 2.4rem;
+    margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 1.25rem;
+    margin: 0 0 14px;
+  }
+  p {
+    font-size: 0.95rem;
+    color: #444;
+    margin: 0.6em 0;
+  }
+  .store-link {
+    display: inline-block;
+    margin-top: 20px;
+    background: #2a5db0;
+    color: #fff;
+    text-decoration: none;
+    font-weight: 700;
+    padding: 12px 28px;
+    border-radius: 10px;
+    font-size: 0.95rem;
+  }
+  .hint {
+    margin-top: 22px;
+    font-size: 0.82rem;
+    color: #888;
+  }
+  a.links { color: #2a5db0; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="tile">🀄</div>
+  <h1>雀スコアをインストールしてから、<br>もう一度このリンクを開いてください</h1>
+  <p>このリンクは、麻雀の対局結果を受け取るための専用リンクです。<br>「雀スコア」アプリをインストール後、このリンクをもう一度タップすると、対局結果が自動的に取り込まれます。</p>
+  <!-- TODO: App Store Connectでアプリレコードを作成した後に払い出される数字のApple ID
+       (codemagic.yamlのAPP_STORE_APPLE_IDと同じ値)に置き換えてください。
+       例: https://apps.apple.com/app/id1234567890 -->
+  <a class="store-link" href="https://apps.apple.com/app/idXXXXXXXXXX">App Storeでインストール</a>
+  <p class="hint">既にインストール済みの場合は、このページではなくアプリが直接開くはずです。開かない場合は一度アプリを最新版に更新してから、リンクをもう一度お試しください。</p>
+</div>
+
+</body>
+</html>
