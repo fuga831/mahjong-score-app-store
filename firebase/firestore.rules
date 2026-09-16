@@ -1,10 +1,22 @@
 // firestore.rules — マルチプレイヤー(フレンド・卓・成績共有)機能のセキュリティルール
 //
-// ⚠️ このサンドボックスにはFirebase CLI経由でのデプロイ・エミュレータでの
-// 実地検証ができる環境がありません(npmレジストリへのアクセス不可)。
-// 以下はアプリのクライアント側コード(mahjong-score.html内のCloudSyncオブジェクト)
-// が実際に発行するFirestore呼び出しの形に合わせて書いたルールですが、
-// `firebase emulators:start` 等で必ず実地検証してから本番反映してください。
+// 🚨🚨🚨 このファイルを編集したら、その都度あなた自身の手で
+// Firebaseへ再デプロイしないと一切反映されません 🚨🚨🚨
+//   firebase deploy --only firestore:rules
+// (または Firebase Console > Firestore Database > ルール タブに
+// このファイルの中身を貼り付けて「公開」)。CI/CDでの自動デプロイは
+// 組んでいないため、コミットしただけでは実機・TestFlightビルドの
+// 挙動は一切変わりません。「Missing or insufficient permissions」で
+// 何かの操作が失敗した場合、まずコレを疑ってください
+// (このルール自体は正しくても、実際にFirebase側へデプロイされている
+// ルールが古いままだと、新しく追加した操作は軒並みここで拒否されます)。
+//
+// ⚠️ このサンドボックス(Claude Codeの実行環境)自体にはFirebase CLIで
+// 実際にデプロイできるログイン済みアカウント・エミュレータでの実地検証が
+// できる環境がありません。以下はアプリのクライアント側コード
+// (www/index.html内のCloudSyncオブジェクト)が実際に発行するFirestore
+// 呼び出しの形に合わせて書いたルールですが、`firebase emulators:start`
+// 等で必ず実地検証してから本番反映してください。
 //
 // データモデル:
 //   usernames/{normalizedUsername}      -> { uid }

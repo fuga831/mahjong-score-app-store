@@ -1665,13 +1665,6 @@
     cursor:pointer;
   }
 
-  /* ---- ③ 人数・プレイヤー名・控えメンバー(常時表示パネル) ---- */
-  .player-roster-panel{
-    display:flex;
-    flex-direction:column;
-    gap:12px;
-    margin-bottom:10px;
-  }
 
   /* ---- hanchan input form ---- */
   .score-scale-hint{
@@ -3329,7 +3322,7 @@ const CloudSync = {
       });
       return { ok: true, token };
     } catch (e) {
-      showDebugError('結果受け取りリンクの作成 (createClaimToken)', e);
+      showDebugError('結果受け取りリンクの作成 (createClaimToken)', _appendPermissionDeniedHint(formatErrorForDisplay(e)));
       return { ok: false };
     }
   },
@@ -3664,7 +3657,7 @@ const CloudSync = {
         const detail = failures
           .map(f => `${f.ref}: ${(f.r.reason && (f.r.reason.code || f.r.reason.message)) || f.r.reason}`)
           .join('\n');
-        showDebugError('アカウント削除 (Firestoreデータ削除)', `以下のドキュメントの削除が拒否されました:\n${detail}`);
+        showDebugError('アカウント削除 (Firestoreデータ削除)', _appendPermissionDeniedHint(`以下のドキュメントの削除が拒否されました:\n${detail}`));
         return { ok: false, error: 'network' };
       }
     } catch (e) {
@@ -3735,6 +3728,7 @@ function defaultLogState(){
     room: null,  // 進行中の卓。null=単独モード。
     // { roomId, isHost, hostUid, participants: [{ slot, uid, name, isGuest }] }
     ui: {
+      rosterOpen: true,   // ②: 人数・プレイヤー名・控えメンバーの折りたたみ状態
       settingsOpen: true,
       chipsOpen: false,
       startAdvancedOpen: false,
@@ -4011,6 +4005,17 @@ function formatErrorForDisplay(err){
     try { parts.push(JSON.stringify(err)); } catch (e2) { parts.push(String(err)); }
   }
   return parts.join('\n');
+}
+// Firestoreの"Missing or insufficient permissions"系のエラーは、コード側の
+// バグよりも「firebase/firestore.rulesを編集したのに、実際のFirebase
+// プロジェクトへ firebase deploy --only firestore:rules (またはFirebase
+// Consoleでの手動publish)をまだ実行していない」ケースが非常に多い
+// (このリポジトリにはFirebase CLIでデプロイできる環境が無いため、ルールを
+// 変更するたびに毎回手動でのデプロイが必要)。該当しそうなエラー文言の時だけ、
+// デバッグ表示にこの可能性を明示するヒントを添える。
+function _appendPermissionDeniedHint(text){
+  if (!/permission|insufficient/i.test(text)) return text;
+  return `${text}\n\n💡 心当たりが無い場合、firebase/firestore.rulesを変更した後にFirebase側へデプロイ(firebase deploy --only firestore:rules、またはFirebase Console > Firestore Database > ルール での手動publish)がまだ済んでいない可能性があります。ファイルの内容と実際にデプロイされているルールが一致しているか確認してください。`;
 }
 function showDebugError(context, err){
   logState.ui.debugError = { context, detail: formatErrorForDisplay(err) };
@@ -4876,6 +4881,14 @@ function setActivePresetId(kind, id){
   if (kind === 'rule') logState.ui.activeRulePresetId = id;
   else logState.ui.activeMemberPresetId = id;
 }
+// ②: 折りたたみヘッダーに出す「今どのプリセットが適用中か」の名前。
+// 適用中のプリセットが無ければnull(呼び出し側は何も表示しない)。
+function getActivePresetName(kind){
+  const id = getActivePresetId(kind);
+  if (!id) return null;
+  const preset = getPresetList(kind).find(p => p.id === id);
+  return preset ? preset.name : null;
+}
 function captureMemberPreset(){
   const names = activePlayers();
   const participantLinks = {};
@@ -5242,62 +5255,71 @@ function dismissNotifyBanner(){
 function renderPlayerRosterPanel(){
   const s = logState.settings;
   const benchNames = s.benchNames || [];
+  const open = logState.ui.rosterOpen;
+  const activeMemberPresetName = getActivePresetName('member');
   return `
-    <section class="player-roster-panel">
-      <div class="settings-row">
-        <div class="lbl">人数</div>
-        <div class="preset-row">
-          <button class="preset-btn ${s.playerCount===4?'active':''}" onclick="setPlayerCount(4)">4人打ち</button>
-          <button class="preset-btn ${s.playerCount===3?'active':''}" onclick="setPlayerCount(3)">3人打ち</button>
-        </div>
+    <div class="accordion roster-accordion ${open?'open':''}">
+      <div class="accordion-head" onclick="toggleAccordion('rosterOpen')">
+        <div class="t">人数・プレイヤー名${activeMemberPresetName ? `<small>⭐ ${escapeHtml(activeMemberPresetName)}</small>` : ''}</div>
+        <div class="chev">▾</div>
       </div>
-
-      <div class="settings-row">
-        <div class="lbl">メンバー構成プリセット</div>
-        ${renderPresetChipRow('member')}
-      </div>
-
-      <div class="settings-row">
-        <div class="lbl">プレイヤー名<span class="hint">自分から見て右隣の順番(反時計回り)で入力してください</span></div>
-        <div class="name-edit-row">
-          ${activePlayers().map((p,i)=>{
-            const link = logState.settings.participantLinks[p];
-            const linkBtnHtml = CloudSync.isAvailable() ? (
-              link
-                ? `<button class="link-badge linked" onclick="openFriendPicker('${escKey(p)}')" title="同卓者: ${escapeHtml(link.username)}">🔗 ${escapeHtml(link.username)}</button>`
-                : `<button class="link-badge" onclick="openFriendPicker('${escKey(p)}')" title="同卓者を指定">🔗 指定</button>`
-            ) : '';
-            return `
-            <div class="name-edit-item">
-              <span class="num">${i+1}</span>
-              <input class="text-input" value="${escapeHtml(p)}" onchange="setPlayerName(${i}, this.value)">
-              ${linkBtnHtml}
-            </div>`;
-          }).join('')}
-        </div>
-        ${CloudSync.isAvailable() ? `<div class="preview-line" style="margin-top:2px;">🔗でユーザーネーム・フレンドを指定すると、対局終了時にその人の端末にも自動で結果が届きます</div>` : ''}
-      </div>
-
-      <div class="settings-row">
-        <div class="lbl" style="display:flex;justify-content:space-between;align-items:center;">
-          <span>控えメンバー</span>
-          <span class="switch ${s.benchEnabled?'on':''}" onclick="toggleBenchEnabled()"></span>
-        </div>
-        ${s.benchEnabled ? `
-          <div class="name-edit-row" style="margin-top:8px;">
-            ${benchNames.map((name,i)=>`
-              <div class="name-edit-item">
-                <span class="num">控</span>
-                <input class="text-input" value="${escapeHtml(name)}" onchange="setBenchName(${i}, this.value)">
-                <button class="link-badge swap-badge" onclick="openSubstituteModal(${i})" title="出場させる(交代)">🔄</button>
-                <button class="link-badge danger-text" onclick="removeBenchMember(${i})" title="控えメンバーから削除">×</button>
-              </div>`).join('')}
+      ${open ? `
+      <div class="accordion-body">
+        <div class="settings-row">
+          <div class="lbl">人数</div>
+          <div class="preset-row">
+            <button class="preset-btn ${s.playerCount===4?'active':''}" onclick="setPlayerCount(4)">4人打ち</button>
+            <button class="preset-btn ${s.playerCount===3?'active':''}" onclick="setPlayerCount(3)">3人打ち</button>
           </div>
-          <button class="mentsu-add" style="margin-top:8px;" onclick="addBenchMember()">＋ 控えメンバーを追加</button>
-          <div class="history-reminder">💡 控えメンバーの🔄で、次の半荘(まだ記録していない半荘)からアクティブメンバーの誰かと交代できます。それより前に記録済みの半荘には影響しません。</div>
-        ` : ''}
-      </div>
-    </section>`;
+        </div>
+
+        <div class="settings-row">
+          <div class="lbl">メンバー構成プリセット</div>
+          ${renderPresetChipRow('member')}
+        </div>
+
+        <div class="settings-row">
+          <div class="lbl">プレイヤー名<span class="hint">自分から見て右隣の順番(反時計回り)で入力してください</span></div>
+          <div class="name-edit-row">
+            ${activePlayers().map((p,i)=>{
+              const link = logState.settings.participantLinks[p];
+              const linkBtnHtml = CloudSync.isAvailable() ? (
+                link
+                  ? `<button class="link-badge linked" onclick="openFriendPicker('${escKey(p)}')" title="同卓者: ${escapeHtml(link.username)}">🔗 ${escapeHtml(link.username)}</button>`
+                  : `<button class="link-badge" onclick="openFriendPicker('${escKey(p)}')" title="同卓者を指定">🔗 指定</button>`
+              ) : '';
+              return `
+              <div class="name-edit-item">
+                <span class="num">${i+1}</span>
+                <input class="text-input" value="${escapeHtml(p)}" onchange="setPlayerName(${i}, this.value)">
+                ${linkBtnHtml}
+              </div>`;
+            }).join('')}
+          </div>
+          ${CloudSync.isAvailable() ? `<div class="preview-line" style="margin-top:2px;">🔗でユーザーネーム・フレンドを指定すると、対局終了時にその人の端末にも自動で結果が届きます</div>` : ''}
+        </div>
+
+        <div class="settings-row">
+          <div class="lbl" style="display:flex;justify-content:space-between;align-items:center;">
+            <span>控えメンバー</span>
+            <span class="switch ${s.benchEnabled?'on':''}" onclick="toggleBenchEnabled()"></span>
+          </div>
+          ${s.benchEnabled ? `
+            <div class="name-edit-row" style="margin-top:8px;">
+              ${benchNames.map((name,i)=>`
+                <div class="name-edit-item">
+                  <span class="num">控</span>
+                  <input class="text-input" value="${escapeHtml(name)}" onchange="setBenchName(${i}, this.value)">
+                  <button class="link-badge swap-badge" onclick="openSubstituteModal(${i})" title="出場させる(交代)">🔄</button>
+                  <button class="link-badge danger-text" onclick="removeBenchMember(${i})" title="控えメンバーから削除">×</button>
+                </div>`).join('')}
+            </div>
+            <button class="mentsu-add" style="margin-top:8px;" onclick="addBenchMember()">＋ 控えメンバーを追加</button>
+            <div class="history-reminder">💡 控えメンバーの🔄で、次の半荘(まだ記録していない半荘)からアクティブメンバーの誰かと交代できます。それより前に記録済みの半荘には影響しません。</div>
+          ` : ''}
+        </div>
+      </div>` : ''}
+    </div>`;
 }
 
 function renderSettingsAccordion(){
@@ -5309,11 +5331,12 @@ function renderSettingsAccordion(){
     ? `1位+${s.uma[0]} / 2位±0 / 3位-${s.uma[0]}`
     : `1位+${s.uma[1]} / 2位+${s.uma[0]} / 3位-${s.uma[0]} / 4位-${s.uma[1]}`;
   const oka = (s.returnPoints - s.startPoints) * s.playerCount / 1000;
+  const activeRulePresetName = getActivePresetName('rule');
 
   return `
-    <div class="accordion ${open?'open':''}">
+    <div class="accordion rules-accordion ${open?'open':''}">
       <div class="accordion-head" onclick="toggleAccordion('settingsOpen')">
-        <div class="t">対局ルール設定<small>${s.playerCount}人打ち・${s.startPoints.toLocaleString()}持ち${s.returnPoints.toLocaleString()}返し</small></div>
+        <div class="t">対局ルール設定${activeRulePresetName ? `<small>⭐ ${escapeHtml(activeRulePresetName)}</small>` : ''}</div>
         <div class="chev">▾</div>
       </div>
       ${open ? `
@@ -5623,12 +5646,11 @@ function renderEndMatchControls(isPresentationDone){
       </div>`;
   }
   const label = isPresentationDone ? '🏁 対局を終了して履歴に保存' : '対局を終了する';
-  // ④: 終局(結果発表)のタイミングで、今のメンバー構成をプリセットとして
-  // 保存できる導線。保存自体のロジックはプレイヤー名入力欄まわりの
-  // 「+ 新規保存」(renderPresetChipRow('member'))と同じstartNewPreset()を使う。
-  return `
-    <button class="mentsu-add" style="margin-bottom:8px;" onclick="startNewPreset('member')">📋 このメンバーをプリセットとして保存</button>
-    <button class="end-match-btn" onclick="requestEndMatch()">${label}</button>`;
+  // メンバー構成プリセットの保存導線は、人数・プレイヤー名欄側の
+  // 「+ 新規保存」(renderPresetChipRow('member'))に一本化済み。
+  // ここに重複したボタンを置かない(以前あった「このメンバーをプリセットとして
+  // 保存」ボタンは削除した)。
+  return `<button class="end-match-btn" onclick="requestEndMatch()">${label}</button>`;
 }
 
 function renderRoomStatusHtml(){
