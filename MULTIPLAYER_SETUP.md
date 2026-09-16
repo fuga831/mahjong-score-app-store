@@ -58,13 +58,21 @@ Sign in with Appleも同等に提供する必要がある)を満たす設計で�
 
 ## 3. Firestoreセキュリティルール・インデックスのデプロイ
 
+🚨 **これは初回だけの作業ではありません。** `firebase/firestore.rules` を
+Claude Codeが編集するたび(新しいコレクション・操作を追加した時など)、
+その都度この節のコマンドを再実行してデプロイし直さないと変更は一切
+反映されません。CI/CDでの自動デプロイは組んでいないため、GitHubに
+コミット・マージされただけでは実機・TestFlightビルドの挙動は変わりません。
+「Missing or insufficient permissions」で何らかの操作が失敗した場合、
+まずここ(デプロイ漏れ)を疑ってください。
+
 ```bash
-# firebase/ ディレクトリで(初回のみ)
+# firebase/ ディレクトリで(初回はfirebase login・firebase use --addも必要)
 npm install -g firebase-tools   # または npx firebase-tools
 firebase login
 firebase use --add   # 作成したFirebaseプロジェクトを選択
 
-# ルール・インデックスをデプロイ
+# ルール・インデックスをデプロイ(firestore.rulesを変更するたびに実行)
 firebase deploy --only firestore:rules,firestore:indexes
 ```
 
