@@ -2527,6 +2527,24 @@ function _resolvePendingPurchase(success){
   const resolvers = _pendingPurchaseResolvers.splice(0);
   resolvers.forEach(r => r(success));
 }
+// ネイティブの購入ダイアログが「完了しました」と表示していても、アプリ側の
+// approved/verified/productUpdatedイベントの受信が(実機で確認されたケースでは)
+// 60秒以上遅れることがある。原因調査のため、購入試行1回ごとにどのイベントが
+// いつ届いた(または届かなかった)かを記録しておき、タイムアウト時のデバッグ
+// 表示に含める。Xcode接続できない環境で唯一の手がかりになるため、
+// console.logだけでなく画面上のデバッグ表示にも出す。
+const PURCHASE_TIMEOUT_MS = 90000;
+let _billingTraceLog = [];
+let _billingTraceStart = null;
+function _traceBilling(event){
+  const elapsed = _billingTraceStart != null ? Date.now() - _billingTraceStart : null;
+  _billingTraceLog.push({ elapsed, event });
+  console.log(`[billing] ${event}${elapsed != null ? ` (+${elapsed}ms)` : ''}`);
+}
+function _formatBillingTrace(){
+  if (!_billingTraceLog.length) return '(イベント受信ログなし)';
+  return _billingTraceLog.map(e => `  ${e.elapsed != null ? `+${e.elapsed}ms` : '?'}: ${e.event}`).join('\n');
+}
 
 const Native = {
   isNativeApp(){
@@ -2656,12 +2674,13 @@ const Native = {
         type: store.NON_CONSUMABLE,
         platform: storePlatform,
       }]);
-      store.when().approved(transaction => transaction.verify());
-      store.when().verified(receipt => receipt.finish());
+      store.when().approved(transaction => { _traceBilling('approved'); transaction.verify(); });
+      store.when().verified(receipt => { _traceBilling('verified'); receipt.finish(); });
       // レシートのサーバー側検証(verify())が失敗した場合はverifiedではなく
       // こちらに来る。When型にはerror()というチェーンメソッド自体が存在しない
       // (store.error()が唯一のグローバルエラーハンドラ)ため、検証失敗はここで拾う。
       store.when().unverified(receipt => {
+        _traceBilling('unverified');
         const payload = receipt && receipt.payload; // Validator.Response.ErrorPayload: { ok:false, status, code, message, data }
         showDebugError('課金レシート検証失敗 (unverified)', payload
           ? { code: payload.code, message: `status:${payload.status} ${payload.message || ''}` }
@@ -2670,13 +2689,36 @@ const Native = {
       store.when().productUpdated(() => {
         const product = store.get(MONETIZATION_CONFIG.billingProductId);
         const owned = !!(product && product.owned);
-        if (owned && !logState.settings.isPremium) {
+        _traceBilling(`productUpdated (owned=${owned})`);
+        const wasPremium = logState.settings.isPremium;
+        if (owned && !wasPremium) {
           logState.settings.isPremium = true;
           saveLogState();
           Native.hideBanner();
           scheduleRenderApp();
         }
-        if (owned) _resolvePendingPurchase(true);
+        if (owned) {
+          // purchasePremium()が待機中(60秒のタイムアウト前)ならここで解決される。
+          const hadPendingResolver = _pendingPurchaseResolvers.length > 0;
+          _resolvePendingPurchase(true);
+          // 待機中の呼び出しが無いのにowned=trueで届いた場合、それは
+          // 「タイムアウト後に遅れて届いたイベント」か「アプリ再起動後の
+          // 初回同期」のいずれか。前者(!wasPremiumから今回trueになった)の
+          // 場合だけ、ペイウォールが開いたままなら自動で閉じてユーザーに
+          // 知らせる(「失敗しました」の表示のまま放置しない)。
+          if (!hadPendingResolver && !wasPremium) {
+            logState.ui.paywallErrorMsg = null;
+            if (logState.ui.paywallOpen) {
+              const pendingSource = logState.ui.paywallSource;
+              logState.ui.paywallOpen = false;
+              logState.ui.paywallSource = null;
+              logState.ui.paywallPurchasing = false;
+              if (pendingSource === 'archive') archiveCurrentMatch();
+            }
+            logState.ui.notifyBanner = '購入が反映されました。プレミアム会員になりました🎉';
+            scheduleRenderApp();
+          }
+        }
       });
       // store.order()の失敗など、個別のPromiseの拒否に現れない
       // ストア側の非同期エラー(通信エラー・設定不備等)を拾うためのハンドラ。
@@ -2732,36 +2774,50 @@ const Native = {
       return null;
     }
   },
+  // 戻り値: { success: true } | { success: false, reason: 'not_native'|'error'|'timeout' }
+  //   'timeout'は「決済自体は成立しているがイベント受信が遅れているだけ」の
+  //   可能性が高いケース(実機で確認済み)。呼び出し側は'error'と区別して、
+  //   失敗を断定しない文言を出すこと。タイムアウト後もstore.when().productUpdated()
+  //   は生き続けており、遅れて届けば自動的にisPremiumへ反映される。
   async purchasePremium(){
-    if (!this.isNativeApp()) return false;
+    if (!this.isNativeApp()) return { success: false, reason: 'not_native' };
     try {
       const store = window.CdvPurchase && window.CdvPurchase.store;
       if (!store) {
         showDebugError('購入 (purchasePremium)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase})。${cordovaPluginListInfo()}`);
-        return false;
+        return { success: false, reason: 'error' };
       }
       await this.initBilling();
       const product = store.get(MONETIZATION_CONFIG.billingProductId);
       const offer = product && product.getOffer && product.getOffer();
       if (!offer) {
         showDebugError('購入 (purchasePremium)', `商品「${MONETIZATION_CONFIG.billingProductId}」の購入可能なオファーが見つかりません。product=${product ? `{valid:${product.valid}, canPurchase:${product.canPurchase}, state:${product.state}, offers件数:${(product.offers||[]).length}}` : 'null'}`);
-        return false;
+        return { success: false, reason: 'error' };
       }
+      _billingTraceLog = [];
+      _billingTraceStart = Date.now();
+      _traceBilling('order() 呼び出し開始');
       const resultPromise = new Promise(resolve => {
         _pendingPurchaseResolvers.push(resolve);
-        // 60秒経ってもイベントが来なければ諦める(ユーザーがストアのダイアログを
-        // キャンセルした場合など、approvedイベントが永遠に来ないケースの保険)。
+        // PURCHASE_TIMEOUT_MS経ってもイベントが来なければUI上は諦める
+        // (ユーザーがストアのダイアログをキャンセルした場合など、approved
+        // イベントが永遠に来ないケースの保険)。ただしこのタイムアウトは
+        // あくまで「これ以上UIを待たせない」ためのものであり、
+        // store.when().productUpdated()自体はこの後も生き続けて監視を
+        // 継続する(実機で、ストア側は成立しているのにイベント受信だけ
+        // 60秒以上遅れるケースを確認したため)。
         setTimeout(() => {
           _pendingPurchaseResolvers = _pendingPurchaseResolvers.filter(r => r !== resolve);
-          showDebugError('購入 (purchasePremium)', '60秒待ってもapproved/verifiedイベントが届きませんでした(ストアの購入ダイアログをキャンセルした場合も含みます)。');
+          showDebugError('購入 (purchasePremium)', `${PURCHASE_TIMEOUT_MS / 1000}秒待ってもapproved/verifiedイベントが届きませんでした(ストアの購入ダイアログをキャンセルした場合も含みます)。決済自体は完了しており受信が遅延しているだけの可能性があるため、監視は継続します(遅れて届けば自動的にプレミアム状態へ反映されます)。\n\nイベント受信ログ:\n${_formatBillingTrace()}`);
           resolve(false);
-        }, 60000);
+        }, PURCHASE_TIMEOUT_MS);
       });
       await offer.order();
-      return await resultPromise;
+      const ok = await resultPromise;
+      return ok ? { success: true } : { success: false, reason: 'timeout' };
     } catch (e) {
       showDebugError('購入 (purchasePremium)', e);
-      return false;
+      return { success: false, reason: 'error' };
     }
   },
   getPriceLabel(){
@@ -2810,6 +2866,15 @@ function normalizeUsername(name){
 // 識別子として不可とする。
 function isValidUsernameFormat(name){
   return /^[a-z0-9_぀-ゟ゠-ヿ㐀-䶿一-鿿]{3,20}$/.test(normalizeUsername(name));
+}
+// Firebase AuthのlinkWithX()が「その認証情報は既に別アカウントで使用済み」で
+// 失敗した場合のエラーコード/メッセージを判定する(iOS/Androidでコードの表記ゆれが
+// あるため、code・messageの両方を緩めに(大文字小文字を無視して)見る)。
+function _isCredentialAlreadyInUseError(e){
+  const code = String((e && e.code) || '').toLowerCase();
+  const msg = String((e && e.message) || '').toLowerCase();
+  return code.includes('already-in-use') || code.includes('credential_already_in_use')
+    || msg.includes('already-in-use') || msg.includes('already in use');
 }
 
 const CloudSync = {
@@ -2876,17 +2941,41 @@ const CloudSync = {
 
   // 匿名のままでは困る操作(フレンド追加・複数端末利用)をしようとしたタイミングで
   // 呼び出す想定。成功時はaccount.isAnonymousがfalseになり、uidは維持される
-  // (匿名ユーザーへのプロバイダlinkとして扱われる設計を想定)。
+  // (匿名ユーザーへのプロバイダlinkとして扱われる設計)。
+  //
+  // ⚠️ ここでは必ずAuth.linkWithGoogle/linkWithApple(既存の匿名ユーザーに認証情報を
+  // 「連携」するAPI)を使うこと。以前はAuth.signInWithGoogle/signInWithApple
+  // (「新規サインイン」のAPI)を誤って呼んでおり、匿名時代とは別の新しいuidに
+  // 切り替わってしまっていた。その結果、匿名時代に既にusernames/{name}や
+  // friends/matchHistoryを保存していたユーザーが後からGoogle/Appleでログインすると、
+  // それらのドキュメントは古いuidの持ち物のまま取り残され、以降そのドキュメントへの
+  // 書き込み・削除がfirestore.rules側のisSelf(uid)チェックに落ちて
+  // 「Missing or insufficient permissions」になる実バグの原因だった
+  // (アカウント削除時にusernames/{name}のdeleteDocumentが失敗するケースを実機で確認)。
+  // linkWithX()は「その認証情報は既に別のFirebaseアカウントで使用済み」の場合にだけ
+  // 失敗する(auth/credential-already-in-use等)。機種変更・再インストール後に
+  // 元のアカウントへ戻りたいケースはこれに該当するため、その場合のみ
+  // signInWithX()にフォールバックし、既存アカウントへ切り替える。
   async linkGoogle(){
     if (!this.isAvailable()) { showDebugError('Googleログイン', 'Native.isAvailable()がfalse(ストアアプリ内ではない、またはCloudSync未初期化)'); return false; }
     try {
       const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
-      if (!Auth || !Auth.signInWithGoogle) {
+      if (!Auth || !Auth.linkWithGoogle || !Auth.signInWithGoogle) {
         const registered = Object.keys((window.Capacitor && window.Capacitor.Plugins) || {}).join(', ') || '(なし)';
-        showDebugError('Googleログイン', `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, signInWithGoogle=${!!(Auth&&Auth.signInWithGoogle)})。ネイティブ側でプラグインが正しく登録されていない可能性があります。登録済みプラグイン一覧: ${registered}`);
+        showDebugError('Googleログイン', `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, linkWithGoogle=${!!(Auth&&Auth.linkWithGoogle)})。ネイティブ側でプラグインが正しく登録されていない可能性があります。登録済みプラグイン一覧: ${registered}`);
         return false;
       }
-      const result = await Auth.signInWithGoogle();
+      let result;
+      try {
+        result = await Auth.linkWithGoogle();
+      } catch (e) {
+        if (_isCredentialAlreadyInUseError(e)) {
+          result = await Auth.signInWithGoogle();
+          logState.ui.notifyBanner = 'このGoogleアカウントは既に登録済みのため、既存のアカウントにログインしました。';
+        } else {
+          throw e;
+        }
+      }
       if (result && result.user) {
         logState.account.uid = result.user.uid;
         logState.account.isAnonymous = false;
@@ -2894,7 +2983,7 @@ const CloudSync = {
         saveLogState();
         return true;
       }
-      showDebugError('Googleログイン', `signInWithGoogle()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
+      showDebugError('Googleログイン', `linkWithGoogle()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
       return false;
     } catch (e) {
       console.error('[CloudSync.linkGoogle] failed:', e);
@@ -2908,12 +2997,22 @@ const CloudSync = {
     if (!this.isAvailable()) { showDebugError('Appleログイン', 'Native.isAvailable()がfalse(ストアアプリ内ではない、またはCloudSync未初期化)'); return false; }
     try {
       const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
-      if (!Auth || !Auth.signInWithApple) {
+      if (!Auth || !Auth.linkWithApple || !Auth.signInWithApple) {
         const registered = Object.keys((window.Capacitor && window.Capacitor.Plugins) || {}).join(', ') || '(なし)';
-        showDebugError('Appleログイン', `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, signInWithApple=${!!(Auth&&Auth.signInWithApple)})。ネイティブ側でプラグインが正しく登録されていない可能性があります。登録済みプラグイン一覧: ${registered}`);
+        showDebugError('Appleログイン', `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, linkWithApple=${!!(Auth&&Auth.linkWithApple)})。ネイティブ側でプラグインが正しく登録されていない可能性があります。登録済みプラグイン一覧: ${registered}`);
         return false;
       }
-      const result = await Auth.signInWithApple();
+      let result;
+      try {
+        result = await Auth.linkWithApple();
+      } catch (e) {
+        if (_isCredentialAlreadyInUseError(e)) {
+          result = await Auth.signInWithApple();
+          logState.ui.notifyBanner = 'このApple IDは既に登録済みのため、既存のアカウントにログインしました。';
+        } else {
+          throw e;
+        }
+      }
       if (result && result.user) {
         logState.account.uid = result.user.uid;
         logState.account.isAnonymous = false;
@@ -2921,7 +3020,7 @@ const CloudSync = {
         saveLogState();
         return true;
       }
-      showDebugError('Appleログイン', `signInWithApple()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
+      showDebugError('Appleログイン', `linkWithApple()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
       return false;
     } catch (e) {
       console.error('[CloudSync.linkApple] failed:', e);
@@ -3225,7 +3324,9 @@ const CloudSync = {
   // サブコレクションの一括削除APIが無いため、1件ずつ列挙して削除する
   // (firestore.rulesでusers/{uid}の本人によるdeleteを別途許可済み)。
   // 戻り値: { ok: true } | { ok: false, error, dataDeleted? }
-  //   error: 'unavailable'(非ネイティブ・未サインイン) | 'network'(Firestore削除に失敗) |
+  //   error: 'unavailable'(非ネイティブ・未サインイン) | 'reauth'(ローカルに保持している
+  //          uidとFirebase Authentication側の現在のユーザーが一致しない。再ログインが必要) |
+  //          'network'(Firestore削除に失敗) |
   //          'auth'(Firestoreは削除できたがAuthユーザーの削除に失敗。多くはFirebaseの
   //          「最近のログインが必要」制約によるもので、再ログイン後の再試行を促す想定)
   async deleteAccount(){
@@ -3236,29 +3337,70 @@ const CloudSync = {
     const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
     if (!Firestore || !Auth) return { ok: false, error: 'unavailable' };
     try {
+      // 削除処理の直前に必ずIDトークンを強制リフレッシュしておく。古い(失効・
+      // キャッシュされた)トークンのままFirestoreへリクエストすると、実際には
+      // 有効なサインイン状態でも"Missing or insufficient permissions"になり
+      // うるため、これが原因かどうかを切り分ける。ついでに、Firebase
+      // Authentication側が今どのuidを「現在のユーザー」として認識しているかを
+      // ローカルのlogState.account.uidと突き合わせる。以前linkGoogle/linkApple
+      // がsignInWithX()(新規サインイン)を誤って呼んでおり、匿名時代の古いuidの
+      // ままusernames/friends/matchHistoryドキュメントが残っていた場合、
+      // ここで不一致を検出できる(firestore.rulesのisSelf(uid)はrequest.auth.uidを
+      // 見るため、ローカルのuidが古いとどの操作も一律でpermission-deniedになる)。
+      if (Auth.getIdToken) {
+        await Auth.getIdToken({ forceRefresh: true }).catch(e => {
+          showDebugError('アカウント削除 (IDトークンの強制リフレッシュ)', e);
+        });
+      }
+      if (Auth.getCurrentUser) {
+        const current = await Auth.getCurrentUser().catch(() => null);
+        const currentUid = current && current.user && current.user.uid;
+        if (currentUid && currentUid !== uid) {
+          showDebugError('アカウント削除 (UID不一致)', `ローカルに保持しているuid(${uid})と、Firebase Authenticationの現在のユーザーuid(${currentUid})が一致していません。`);
+          return { ok: false, error: 'reauth' };
+        }
+      }
       // 自分がホストの卓が残っていたら、同卓者を巻き込まないよう先に終了させる。
       if (logState.room && logState.room.roomId && logState.room.isHost) {
         await this.updateRoom(logState.room.roomId, { status: 'ended' }).catch(() => {});
       }
-      // ここから下は「本当に削除できたか」を呼び出し側が信頼できるよう、意図的に
-      // .catch()で握りつぶさない(個々の失敗もそのまま外側のcatchでnetworkエラーに
-      // している)。ホストの卓を閉じる処理だけは付随的な後片付けなのでベストエフォート
-      // で構わないが、それ以外を握りつぶすと「実際は消えていないのに削除成功」と
-      // 誤報告しかねないため。
-      const [friendsRes, historyRes] = await Promise.all([
-        Firestore.getCollection({ reference: `users/${uid}/friends` }),
-        Firestore.getCollection({ reference: `users/${uid}/matchHistory` }),
-      ]);
-      const friendDocs = (friendsRes && friendsRes.snapshots) || [];
-      const historyDocs = (historyRes && historyRes.snapshots) || [];
-      await Promise.all([
-        ...friendDocs.map(d => Firestore.deleteDocument({ reference: `users/${uid}/friends/${d.id}` })),
-        ...historyDocs.map(d => Firestore.deleteDocument({ reference: `users/${uid}/matchHistory/${d.id}` })),
-      ]);
-      if (logState.account.username) {
-        await Firestore.deleteDocument({ reference: `usernames/${normalizeUsername(logState.account.username)}` });
+      // 削除対象のドキュメントパスを先に列挙し、Promise.allSettledで全件試行する。
+      // 「本当に削除できたか」を呼び出し側が信頼できるよう、1つでも失敗すれば
+      // networkエラーとして扱うが、その際にどのパスがどんなエラーで拒否されたかを
+      // 個別に特定してデバッグ表示に出す(Xcode接続できない環境での唯一の手がかり)。
+      // users/{uid}自体は他のドキュメントより後に削除する(先に消すと、もし途中で
+      // 失敗した場合に再試行時のgetCollection等の見通しが悪くなるため)。
+      let friendDocs = [], historyDocs = [];
+      try {
+        const [friendsRes, historyRes] = await Promise.all([
+          Firestore.getCollection({ reference: `users/${uid}/friends` }),
+          Firestore.getCollection({ reference: `users/${uid}/matchHistory` }),
+        ]);
+        friendDocs = (friendsRes && friendsRes.snapshots) || [];
+        historyDocs = (historyRes && historyRes.snapshots) || [];
+      } catch (e) {
+        showDebugError('アカウント削除 (Firestore一覧取得)', e);
+        return { ok: false, error: 'network' };
       }
-      await Firestore.deleteDocument({ reference: `users/${uid}` });
+      const deleteRefs = [
+        ...friendDocs.map(d => `users/${uid}/friends/${d.id}`),
+        ...historyDocs.map(d => `users/${uid}/matchHistory/${d.id}`),
+      ];
+      if (logState.account.username) {
+        deleteRefs.push(`usernames/${normalizeUsername(logState.account.username)}`);
+      }
+      deleteRefs.push(`users/${uid}`);
+      const results = await Promise.allSettled(deleteRefs.map(ref => Firestore.deleteDocument({ reference: ref })));
+      const failures = results
+        .map((r, i) => ({ r, ref: deleteRefs[i] }))
+        .filter(x => x.r.status === 'rejected');
+      if (failures.length) {
+        const detail = failures
+          .map(f => `${f.ref}: ${(f.r.reason && (f.r.reason.code || f.r.reason.message)) || f.r.reason}`)
+          .join('\n');
+        showDebugError('アカウント削除 (Firestoreデータ削除)', `以下のドキュメントの削除が拒否されました:\n${detail}`);
+        return { ok: false, error: 'network' };
+      }
     } catch (e) {
       showDebugError('アカウント削除 (Firestoreデータ削除)', e);
       return { ok: false, error: 'network' };
@@ -3854,9 +3996,9 @@ async function purchaseFromPaywall(){
   logState.ui.paywallPurchasing = true;
   logState.ui.paywallErrorMsg = null;
   scheduleRenderApp();
-  const success = await Native.purchasePremium();
+  const result = await Native.purchasePremium();
   logState.ui.paywallPurchasing = false;
-  if (success) {
+  if (result.success) {
     logState.settings.isPremium = true;
     logState.ui.paywallOpen = false;
     saveLogState();
@@ -3869,6 +4011,13 @@ async function purchaseFromPaywall(){
       logState.ui.paywallSource = null;
       scheduleRenderApp();
     }
+  } else if (result.reason === 'timeout') {
+    // 実機では、ストア側の購入自体は成立しているのにapproved/verifiedイベントの
+    // 受信だけが60秒以上遅れるケースを確認している。「失敗しました」と断定すると
+    // 誤解を招くため、時間を置いてからの「購入を復元」を案内する文言にする
+    // (イベントが遅れて届けばNative側で自動的にプレミアム状態へ反映される)。
+    logState.ui.paywallErrorMsg = '反映に時間がかかっています。少し時間をおいてから、メニューの「購入を復元」をお試しください。決済自体は完了している場合があります。';
+    scheduleRenderApp();
   } else {
     logState.ui.paywallErrorMsg = '購入を完了できませんでした。通信環境をご確認のうえ、もう一度お試しください。';
     scheduleRenderApp();
@@ -5673,7 +5822,9 @@ async function confirmDeleteAccountFromMenu(){
   logState.ui.deletingAccount = false;
 
   if (!result.ok && !result.dataDeleted) {
-    logState.ui.deleteAccountErrorMsg = '削除に失敗しました。通信環境をご確認のうえ、もう一度お試しください。';
+    logState.ui.deleteAccountErrorMsg = result.error === 'reauth'
+      ? 'サインイン情報が古くなっている可能性があります。一度ログアウトのうえ再度ログインしてから、もう一度お試しください。'
+      : '削除に失敗しました。通信環境をご確認のうえ、もう一度お試しください。';
     scheduleRenderApp();
     return;
   }
