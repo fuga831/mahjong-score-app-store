@@ -2280,14 +2280,52 @@ function calcTotals(hanchans, chips, settings) {
       totals[p] += pt[p];
     });
   });
-  const chipSum = settings.players.reduce((s, p) => s + (chips[p] || 0), 0);
+  // ④: totals(上のループ)には、控え交代で退いた元アクティブメンバーなど、
+  // 現在のsettings.players(アクティブな枠)には含まれない過去の参加者も
+  // 既に含まれている。money/chipMoneyも同じ対象全員について計算しないと、
+  // 最終結果画面でその人の収支だけが表示されず結果が欠落してしまう
+  // (交代前に一度でも半荘へ参加していれば、現在の枠に残っていなくても
+  // 収支を表示する)。
+  const allNames = Object.keys(totals);
+  const chipSum = allNames.reduce((s, p) => s + (chips[p] || 0), 0);
   const money = {};
   const chipMoney = {}; // 合計金額(money)のうち、チップ分だけの内訳(円)。表示の2段組みで使う。
-  settings.players.forEach(p => {
+  allNames.forEach(p => {
     chipMoney[p] = (chips[p] || 0) * settings.chipUnitYen;
     money[p] = totals[p] * settings.rate + chipMoney[p];
   });
   return { pt: totals, money, chipMoney, chipImbalance: chipSum !== 0, chipSum };
+}
+
+// ④: 半荘のscoreIds(内部の参加者ID。プレイヤーの実アカウントuidとは無関係)を
+// 手がかりに、この対局(hanchans配列)で実際に記録されたことがある「別人」を、
+// 名前の文字列ではなくIDの個数で数え上げる。改名(setPlayerName)は同じIDの
+// まま名前だけ変わる(=1人のまま)が、控え交代(confirmSubstitute)で入れ替わった
+// 人には必ず新しいIDが振られる(=別人として数えられる)。scoreIdsが無い
+// (この機能追加より前に記録された)古い半荘は、従来通り名前そのものを
+// 擬似IDとして扱う(後方互換)。
+// 戻り値: この対局で実際に半荘へ参加したことがある人の名前の配列(重複なし)。
+function matchParticipantNames(hanchans){
+  const nameById = {};
+  const order = [];
+  // hanchansは新しい半荘が先頭(unshift)なので、末尾(一番古い半荘)から
+  // たどることで、最終的にnameByIdには各IDの最新の名前が残る。
+  for (let i = hanchans.length - 1; i >= 0; i--) {
+    const h = hanchans[i];
+    Object.keys(h.scores || {}).forEach(name => {
+      const id = (h.scoreIds && h.scoreIds[name]) || name;
+      if (!(id in nameById)) order.push(id);
+      nameById[id] = name;
+    });
+  }
+  return order.map(id => nameById[id]);
+}
+// まだ半荘が1つも記録されていない対局では、matchParticipantNamesは空配列に
+// なる(参照できる半荘記録が無いため)。その場合は現在のアクティブな枠の
+// 名前をそのまま使う(結果画面が空欄にならないようにするフォールバック)。
+function participantNamesFor(hanchans, fallbackNames){
+  const names = matchParticipantNames(hanchans);
+  return names.length ? names : fallbackNames;
 }
 
 /* ========================================================================= */
@@ -3690,6 +3728,7 @@ function defaultLogState(){
     settings: {
       playerCount: 4,
       playerNames: ['P1','P2','P3','P4'],
+      playerIds: [genParticipantId(), genParticipantId(), genParticipantId(), genParticipantId()], // ④: playerNamesと対になる内部参加者ID
       startPoints: 25000,
       returnPoints: 30000,
       umaEnabled: true,
@@ -3705,8 +3744,9 @@ function defaultLogState(){
       participantLinks: {}, // { プレイヤー名: {uid, username} } 同卓者としてアカウント紐付けされている場合のみ存在
       benchEnabled: false, // 控えメンバー機能のON/OFF
       benchNames: [],       // 控えメンバーの名前一覧(③)
+      benchIds: [],          // ④: benchNamesと対になる内部参加者ID
     },
-    hanchans: [], // 進行中の対局のみ。{ id, scores:{name:val}, busterOf:{bustedName:busterName}, rulesSnapshot }
+    hanchans: [], // 進行中の対局のみ。{ id, scores:{name:val}, busterOf:{bustedName:busterName}, rulesSnapshot, scoreIds:{name:id} }
     chips: {},    // 進行中の対局のみ。name -> 最終枚数
     hanchanSeq: 1,
     currentMatchStartedAt: null, // 進行中の対局の最初の半荘を記録した時刻(ISO文字列)
@@ -3823,12 +3863,28 @@ function migrateTextSize(parsedAccount, defaultTextSize){
   return defaultTextSize;
 }
 // v1/v2共通の下地処理。matchHistoryはv1データに存在しないため自然に[]で補完される。
+// ④: playerIds/benchIdsが無い(この機能追加より前に保存された)、または
+// 名前配列と長さがずれているデータを、不足分だけ新規IDで補って正規化する。
+function normalizeParticipantIds(settings){
+  if (!Array.isArray(settings.playerIds) || settings.playerIds.length < settings.playerNames.length) {
+    const ids = Array.isArray(settings.playerIds) ? [...settings.playerIds] : [];
+    while (ids.length < settings.playerNames.length) ids.push(genParticipantId());
+    settings.playerIds = ids;
+  }
+  if (!Array.isArray(settings.benchIds) || settings.benchIds.length !== settings.benchNames.length) {
+    const ids = Array.isArray(settings.benchIds) ? [...settings.benchIds] : [];
+    while (ids.length < settings.benchNames.length) ids.push(genParticipantId());
+    ids.length = settings.benchNames.length; // 万が一長すぎる場合は切り詰める
+    settings.benchIds = ids;
+  }
+  return settings;
+}
 function mergeParsedLogState(parsed){
   const base = defaultLogState();
   return {
     ...base,
     ...parsed,
-    settings: { ...base.settings, ...(parsed.settings || {}) },
+    settings: normalizeParticipantIds({ ...base.settings, ...(parsed.settings || {}) }),
     matchHistory: Array.isArray(parsed.matchHistory) ? parsed.matchHistory : [],
     rulePresets: Array.isArray(parsed.rulePresets) ? parsed.rulePresets : [],
     memberPresets: Array.isArray(parsed.memberPresets) ? parsed.memberPresets : [],
@@ -3915,6 +3971,17 @@ try {
 
 function activePlayers(){
   return logState.settings.playerNames.slice(0, logState.settings.playerCount);
+}
+// ④: playerNamesと同じ並び・長さで、各枠の内部参加者ID(実アカウントuidとは
+// 無関係)を保持する配列。activePlayers()と対になるインデックスを返す。
+function activePlayerIds(){
+  return logState.settings.playerIds.slice(0, logState.settings.playerCount);
+}
+// ④: 対局内の参加者(座席の占有者)を識別するための内部ID。実在ユーザーの
+// uidとは無関係(ゲスト・アカウント未連携でも必ず振られる)。改名しても
+// このIDは変わらないが、控え交代で新しく入った人には必ず新しいIDを振る。
+function genParticipantId(){
+  return 'p_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 // calcHanchanResult/calcTotals expect a `players` array on the settings
 // object; logState.settings only stores playerNames+playerCount, so merge
@@ -4117,6 +4184,12 @@ function renamePlayerEverywhere(oldName, newName){
       h.scores[newName] = h.scores[oldName];
       delete h.scores[oldName];
     }
+    // ④: scoreIds(内部参加者ID)もscoresと同じキーで管理しているため、
+    // 改名時はこちらも追随させる(同じIDのまま名前だけ変わる=同一人物扱い)。
+    if (h.scoreIds && Object.prototype.hasOwnProperty.call(h.scoreIds, oldName)) {
+      h.scoreIds[newName] = h.scoreIds[oldName];
+      delete h.scoreIds[oldName];
+    }
     if (h.busterOf) {
       Object.keys(h.busterOf).forEach(k => { if (h.busterOf[k] === oldName) h.busterOf[k] = newName; });
       if (Object.prototype.hasOwnProperty.call(h.busterOf, oldName)) {
@@ -4188,7 +4261,11 @@ function toggleAccordion(key){ logState.ui[key] = !logState.ui[key]; scheduleRen
 function currentRevealGroupCount(){
   const s = settingsWithPlayers();
   const totals = calcTotals(logState.hanchans, logState.chips, s);
-  return revealGroupsFor(activePlayers(), totals, logState.settings.playerCount).length;
+  // ④: 控え交代で人数が増えた対局でも発表グループ数を正しく数えるため、
+  // 現在のアクティブな枠(activePlayers)ではなく、この対局で実際に半荘へ
+  // 参加したことがある全員(participantNamesFor)を対象にする。
+  const players = participantNamesFor(logState.hanchans, activePlayers());
+  return revealGroupsFor(players, totals).length;
 }
 function togglePresentationMode(){
   logState.settings.presentationMode = !logState.settings.presentationMode;
@@ -4198,10 +4275,17 @@ function togglePresentationMode(){
   logState.ui.confirmEndMatch = false;
   saveLogState(); scheduleRenderApp();
 }
-// 発表順は「2位→3位→…→1位」。1位（優勝）を最後にとっておくことで、
+// 発表順は「2位→3位→…→最下位→1位」。1位（優勝）を最後にとっておくことで、
 // 途中の順位から先に発表して最後に一番の見せ場を持ってくる演出。
-function revealOrderFor(playerCount){
-  return playerCount === 3 ? [2, 3, 1] : [2, 3, 4, 1];
+// ④: 控え交代で座席数より参加者が多い対局では最下位が4位・5位…と伸びうる
+// ため、固定の3人打ち/4人打ちではなく、実際の参加人数nを受け取って
+// [2,3,...,n,1]を組み立てる(n=3なら[2,3,1]、n=4なら[2,3,4,1]で従来と同じ)。
+function revealOrderFor(n){
+  if (n <= 1) return n === 1 ? [1] : [];
+  const order = [];
+  for (let r = 2; r <= n; r++) order.push(r);
+  order.push(1);
+  return order;
 }
 function startReveal(){
   if (isRoomViewerOnly()) return; // 発表の進行は代表入力者だけが操作できる
@@ -4519,9 +4603,16 @@ function chooseTiebreakDealer(dealerName){
   finalizeRecordHanchan(scores, busterOf, dealerName);
 }
 function finalizeRecordHanchan(scores, busterOf, tiebreakDealer){
+  // ④: この半荘の実際の参加者(scoresのキー)それぞれに、記録時点で対応する
+  // 内部参加者IDを付与しておく(matchParticipantNames参照。控え交代と改名を
+  // 名前の一致だけに頼らず区別するための土台)。
+  const activeNames = activePlayers();
+  const activeIds = activePlayerIds();
+  const scoreIds = {};
+  activeNames.forEach((n, i) => { if (Object.prototype.hasOwnProperty.call(scores, n)) scoreIds[n] = activeIds[i]; });
   if (logState.ui.editingHanchanId !== null) {
     const h = logState.hanchans.find(x => x.id === logState.ui.editingHanchanId);
-    if (h) { h.scores = scores; h.busterOf = busterOf; h.tiebreakDealer = tiebreakDealer; }
+    if (h) { h.scores = scores; h.busterOf = busterOf; h.tiebreakDealer = tiebreakDealer; h.scoreIds = scoreIds; }
     logState.ui.editingHanchanId = null;
   } else {
     // この対局で最初の半荘を記録した瞬間の時刻を、あとで履歴に保存する時の
@@ -4533,7 +4624,7 @@ function finalizeRecordHanchan(scores, busterOf, tiebreakDealer){
     // 固定する。以後ルール設定パネルの値を変えても、この半荘の計算結果は
     // 変わらない(calcHanchanResult参照)。次の半荘は、このスナップショットの
     // 元になったlogState.settingsをそのまま(何もリセットせず)引き継いで開始する。
-    logState.hanchans.unshift({ id: logState.hanchanSeq++, scores, busterOf, tiebreakDealer, rulesSnapshot: captureRulesSnapshot(logState.settings) });
+    logState.hanchans.unshift({ id: logState.hanchanSeq++, scores, busterOf, tiebreakDealer, scoreIds, rulesSnapshot: captureRulesSnapshot(logState.settings) });
   }
   logState.ui.confirmEndMatch = false;
   resetFormScores();
@@ -4809,6 +4900,7 @@ function toggleBenchEnabled(){
 function addBenchMember(){
   const n = logState.settings.benchNames.length + 1;
   logState.settings.benchNames.push(`控え${n}`);
+  logState.settings.benchIds.push(genParticipantId()); // ④: benchNamesと対になるID配列を維持する
   saveLogState(); scheduleRenderApp();
 }
 function setBenchName(i, value){
@@ -4818,6 +4910,7 @@ function setBenchName(i, value){
 }
 function removeBenchMember(i){
   logState.settings.benchNames.splice(i, 1);
+  logState.settings.benchIds.splice(i, 1); // ④: benchNamesと対になるID配列を維持する
   saveLogState(); scheduleRenderApp();
 }
 // 交代アイコンは控えメンバーの行にある。タップした控えメンバーを、次に
@@ -4848,11 +4941,17 @@ function confirmSubstitute(slotIndex){
   const benchIndex = logState.ui.substituteBenchIndex;
   if (benchIndex == null) return;
   const benchNames = logState.settings.benchNames;
+  const benchIds = logState.settings.benchIds;
   const incoming = benchNames[benchIndex];
   const outgoing = logState.settings.playerNames[slotIndex];
+  const outgoingId = logState.settings.playerIds[slotIndex];
   if (incoming == null || outgoing == null) return;
   logState.settings.playerNames[slotIndex] = incoming;
+  // ④: 交代でアクティブ枠に入る人には、名前が偶然同じでも必ず新しいIDを
+  // 振る(「別人が入った」ことを明示的に記録する。改名との違いはここだけ)。
+  logState.settings.playerIds[slotIndex] = genParticipantId();
   benchNames.splice(benchIndex, 1, outgoing); // 退いた人がそのまま控えメンバー欄に入る(入れ替え)
+  benchIds.splice(benchIndex, 1, outgoingId); // 退いた人の(半荘記録済みの)IDをそのまま控え欄に持ち越す
   // まだ記録していない入力欄に、退いた人の分として未確定の点数が入力途中
   // だった場合、別人の点数を新しい人が引き継いでしまわないようクリアする。
   delete logState.ui.formScores[outgoing];
@@ -4907,6 +5006,12 @@ function applyMemberPreset(id){
   const preset = logState.memberPresets.find(p => p.id === id);
   if (!preset) return;
   const names = preset.members.playerNames;
+  const prevNames = logState.settings.playerNames;
+  const prevIds = logState.settings.playerIds;
+  // ④: 名前が変わらない枠は同一人物とみなし既存のIDを維持する。名前が
+  // 変わる枠は改名か別人かを判別できないため、安全側に倒して新しいIDを
+  // 振る(=交代と同じ扱い)。
+  logState.settings.playerIds = names.map((name, i) => (name === prevNames[i] && prevIds[i]) || genParticipantId());
   logState.settings.playerCount = names.length;
   logState.settings.playerNames = [...names];
   names.forEach(p => {
@@ -5568,10 +5673,13 @@ function totalCardsHtml(order, totals, topMoney, participantLinks, shareMatchId)
 // 演出モード用: 現在の合計収支(円)で順位グループ(同着はまとめる)を作り、
 // 「2位→3位→…→1位」の順に並べ替える。同着で複数の順位にまたがる場合は
 // そのグループのいちばん良い方の順位（loRank）を発表順の基準にする。
-function revealGroupsFor(players, totals, playerCount){
+// ④: playersは座席数(playerCount)固定ではなく、この対局で実際に半荘へ
+// 参加したことがある全員(可変長。呼び出し側はparticipantNamesFor参照)。
+// 発表順序もplayers.length(実際の参加人数)から組み立てる。
+function revealGroupsFor(players, totals){
   const entries = players.map(p => ({ name: p, score: Math.round((totals.money[p]||0) * 100) / 100 }));
   const ranked = rankPlayers(entries);
-  const order = revealOrderFor(playerCount);
+  const order = revealOrderFor(players.length);
   const seen = new Set();
   const groups = [];
   ranked.forEach(r => {
@@ -5664,7 +5772,11 @@ function renderRoomStatusHtml(){
 }
 
 function renderStickyHeader(s, totals){
-  const players = activePlayers();
+  // ④: 結果表示(最終結果・演出モードの発表)は、現在のアクティブな枠
+  // (activePlayers、座席数固定)ではなく、この対局で実際に半荘へ参加した
+  // ことがある全員(participantNamesFor、可変長)を対象にする。控え交代で
+  // 座席数より参加者が多くなった対局でも、退いた人の結果を欠落させない。
+  const players = participantNamesFor(logState.hanchans, activePlayers());
   const presentation = logState.settings.presentationMode;
   const viewerOnly = isRoomViewerOnly();
   const modeSwitchHtml = `
@@ -5688,7 +5800,7 @@ function renderStickyHeader(s, totals){
     </div>`;
   }
 
-  const groups = revealGroupsFor(players, totals, logState.settings.playerCount);
+  const groups = revealGroupsFor(players, totals);
   const done = logState.ui.revealStep >= groups.length;
   // 発表順(2位→3位→…→1位)とは別に、表示位置は最初から常に「1位が一番上、
   // 以下2位・3位…」という通常の順位順に固定しておく(案1)。各順位の枠は
@@ -5818,7 +5930,10 @@ function renderHistoryList(){
   }
   const cards = list.map(m => {
     const s = m.settingsSnapshot;
-    const players = s.playerNames.slice(0, s.playerCount);
+    // ④: 最終ロースター(settingsSnapshot、座席数固定)ではなく、この対局で
+    // 実際に半荘へ参加したことがある全員を対象にする(控え交代で退いた人が
+    // 一覧のタイトル・優勝者表示から漏れないようにする)。
+    const players = participantNamesFor(m.hanchans, s.playerNames.slice(0, s.playerCount));
     const totals = calcTotals(m.hanchans, m.chips, { ...s, players });
     const order = [...players].sort((a,b)=>totals.money[b]-totals.money[a]);
     const winner = order[0];
@@ -5840,7 +5955,10 @@ function renderHistoryDetail(id){
   const m = logState.matchHistory.find(x => x.id === id);
   if (!m) return `<div class="history-empty">見つかりませんでした</div>`;
   const s = m.settingsSnapshot;
-  const players = s.playerNames.slice(0, s.playerCount);
+  // ④: 最終ロースター(settingsSnapshot、座席数固定)ではなく、この対局で
+  // 実際に半荘へ参加したことがある全員を対象にする(控え交代で退いた人の
+  // 結果が詳細画面から欠落しないようにする)。
+  const players = participantNamesFor(m.hanchans, s.playerNames.slice(0, s.playerCount));
   const settingsForCalc = { ...s, players };
   const totals = calcTotals(m.hanchans, m.chips, settingsForCalc);
   const order = [...players].sort((a,b)=>totals.money[b]-totals.money[a]);
@@ -6340,15 +6458,17 @@ async function shareText(text, title){
 function shareCurrentResult(){
   const s = settingsWithPlayers();
   const totals = calcTotals(logState.hanchans, logState.chips, s);
-  const order = [...s.players].sort((a,b)=>totals.money[b]-totals.money[a]);
+  // ④: 控え交代で退いた元アクティブメンバーもシェアするテキストに含める。
+  const players = participantNamesFor(logState.hanchans, s.players);
+  const order = [...players].sort((a,b)=>totals.money[b]-totals.money[a]);
   const header = order.length ? `🀄 現在${order[0]}さんがトップ！収支${formatMoney(totals.money[order[0]])}` : '';
-  shareText(buildShareText(s.players, totals, header));
+  shareText(buildShareText(players, totals, header));
 }
 function shareMatchResult(id){
   const m = logState.matchHistory.find(x => x.id === id);
   if (!m) return;
   const s = m.settingsSnapshot;
-  const players = s.playerNames.slice(0, s.playerCount);
+  const players = participantNamesFor(m.hanchans, s.playerNames.slice(0, s.playerCount));
   const totals = calcTotals(m.hanchans, m.chips, { ...s, players });
   const order = [...players].sort((a,b)=>totals.money[b]-totals.money[a]);
   const header = order.length ? `🀄 ${order[0]}さん第1位！収支${formatMoney(totals.money[order[0]])}` : '';
