@@ -213,14 +213,38 @@ workflows:
 
       - name: Build ipa for distribution
         script: |
+          # ⚠️ xcode-project build-ipa は、デフォルトでxcodebuildの出力を
+          # xcpretty(整形ツール)に通してから画面に表示する。xcpretty は
+          # 自分が認識できるパターンに一致しない失敗(スクリプトフェーズの
+          # エラー等)の詳細行を出力から落としてしまうことがあり、実際に
+          # 「警告しか出ずエラーの本文が画面に表示されない」不具合の原因は
+          # これだった可能性が高い(2026年9月、xcode 26.6でのアーカイブ失敗調査)。
+          # --disable-xcpretty で整形をやめ、xcodebuildの生の出力(error:行を
+          # 含む)をそのまま流す。あわせて-vでcodemagic-cli-tools自体の
+          # ログも詳細化する。
+          #
+          # 標準出力・標準エラー出力の両方を、画面表示用のストリームに流し
+          # つつ tee でファイルにも丸ごと保存しておく(ビルド失敗時、画面の
+          # ログだけでは途中で見切れる・折りたたまれることがあるため、
+          # 後から artifacts 経由でダウンロードして全文を確認できるように
+          # する)。`cmd | tee file` だけだと $? が tee 自身の終了コード
+          # (ほぼ常に0)になってしまい、xcode-project build-ipa が失敗して
+          # いてもこのステップ自体が「成功」扱いになってしまうため、
+          # set -o pipefail でパイプの左側(xcode-project build-ipa)の
+          # 終了コードを正しく伝播させる。
+          set -o pipefail
           cd $CM_BUILD_DIR/ios/App
           xcode-project build-ipa \
             --workspace "$XCODE_WORKSPACE" \
-            --scheme "$XCODE_SCHEME"
+            --scheme "$XCODE_SCHEME" \
+            --disable-xcpretty \
+            -v \
+            2>&1 | tee "$CM_BUILD_DIR/xcodebuild_full.log"
 
     artifacts:
       - ios/App/build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
+      - $CM_BUILD_DIR/xcodebuild_full.log
       - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
 
     publishing:
