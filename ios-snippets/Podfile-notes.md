@@ -4,9 +4,32 @@
 `npx cap sync ios` を実行するたびに `pod install` 相当の処理が自動で走ります
 (手動で `pod install` を叩く必要は基本的にありません)。
 
-以下は、`@capacitor-firebase/*` 系プラグイン特有の注意点です
-(このサンドボックスでは実際に `pod install` を実行して検証できていません。
-エラーが出た場合は各プラグインのGitHub Issueや公式ドキュメントを確認してください)。
+以下は、`@capacitor-firebase/*` 系プラグイン特有の注意点です。
+
+⚠️ このサンドボックスにはCocoaPods自体(`gem install cocoapods`)は入っており、
+`pod deintegrate`・`Pod::Podfile.from_file`によるPodfileの構文検証・
+`xcodeproj` gemによる`project.pbxproj`の読み込み検証は実際に実行できます。
+ただし依存関係解決(`pod install`)は、CocoaPodsのCDNベースのtrunkリポジトリ
+(`cdn.jsdelivr.net`)への通信がこの環境のネットワークポリシーでブロックされて
+おり実行できません(`pod install`は`CDN: trunk Repo update failed`で失敗します。
+実機・Codemagic等の通常のネットワーク環境では問題なく動作するはずです)。
+エラーが出た場合は各プラグインのGitHub Issueや公式ドキュメントを確認してください。
+
+## 0. User Script Sandboxing(Xcode 15以降)でアーカイブビルドが失敗する場合
+
+Codemagicでのアーカイブビルドが、具体的なエラー行のないまま
+`Failed to archive App.xcworkspace`(exit code 65)で失敗し、ログに
+「Create Symlinks to Header Folders」等のPodスクリプトフェーズの警告が
+並ぶ場合、Xcode 15以降の「User Script Sandboxing」がPodのスクリプト
+フェーズのファイルアクセスをブロックしていることが原因であることが多い。
+`Podfile`の`post_install`フックで全Podターゲットに対して
+`ENABLE_USER_SCRIPT_SANDBOXING = 'NO'`を設定済み(下記参照)。あわせて
+`ios/App/App.xcodeproj`側(Appターゲット・プロジェクトの両方、Debug/Release
+各設定)にも同じ設定を明示的に追加済み。設定を変更した後は、CI側の
+`pod install`ステップ(`codemagic.yaml`の「Install CocoaPods dependencies」)
+で自動的にPodsが再生成される(このリポジトリは`Pods/`・`Podfile.lock`を
+コミットしていないため、CIの実行は常にクリーンな`pod install`になり、
+事前の`pod deintegrate`は本質的に不要)。
 
 ## 1. `use_frameworks!` が必要になる場合がある
 

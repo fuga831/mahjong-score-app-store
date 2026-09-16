@@ -63,4 +63,17 @@ end
 
 post_install do |installer|
   assertDeploymentTarget(installer)
+  # Xcode 15以降の「User Script Sandboxing」は、Podの各ターゲットに含まれる
+  # スクリプトフェーズ(「Create Symlinks to Header Folders」等)のファイル
+  # システムアクセスを制限する。宣言したoutputの外にアクセスするスクリプトが
+  # あると、アーカイブビルドが具体的なエラー行を残さないまま
+  # "Failed to archive App.xcworkspace"(exit code 65)で落ちることがある
+  # (Codemagicでの実際の失敗で確認)。CocoaPodsが生成する各Podのターゲットは
+  # このサンドボックス対応が未整備なものが多いため、全ターゲットで明示的に
+  # 無効化する。
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      config.build_settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'NO'
+    end
+  end
 end
