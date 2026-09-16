@@ -33,6 +33,10 @@
     --shadow: 0 3px 0 rgba(0,0,0,0.28), 0 6px 14px rgba(0,0,0,0.35);
   }
 
+  /* プレミアム会員のプレイヤー名表示(結果発表画面・対局履歴・成績タブ等、
+     プレイヤー名が出る箇所全般で共通のクラス名を使う。isPlayerPremiumDisplay()参照)。 */
+  .premium-name{ color:var(--gold-strong); }
+
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;}
   /* 文字サイズ:大(旧称ジジイモード)。このアプリのほぼ全てのfont-sizeは
@@ -579,14 +583,6 @@
     width:100%;
     font-size:.68rem;
     color:#7c9d8b;
-  }
-
-  footer{
-    text-align:center;
-    font-size:.65rem;
-    color:#5f8570;
-    margin-top:2px;
-    letter-spacing:.03em;
   }
 
   #calcTab, #logTab{
@@ -1806,8 +1802,6 @@
       <div class="sec-title">符数<span class="hint">中級者・上級者向け</span></div>
       <input class="num-input" id="manualFuInput" type="number" step="10" inputmode="numeric" placeholder="符数（例: 40）" onchange="setManualFu(parseInt(this.value,10)||0)">
     </section>
-
-    <footer>符は自動で10の位に切り上げ・支払いは100点に切り上げ</footer>
   </div>
 
   <div id="logTab" style="display:none;"></div>
@@ -2695,6 +2689,7 @@ const Native = {
           logState.settings.isPremium = true;
           saveLogState();
           Native.hideBanner();
+          CloudSync.syncPremiumStatus(); // フレンドの表示名を金色にする機能・無料枠判定用
           scheduleRenderApp();
         }
         if (owned) {
@@ -2836,6 +2831,26 @@ const Native = {
 function isPremiumUnlocked(){
   if (!Native.isNativeApp()) return true;
   return !!logState.settings.isPremium;
+}
+
+// プレイヤー名の表示を金色にするかどうかの判定。ゲスト(participantLinksに
+// 紐付けが無い=ユーザーネームを指定していない)は対象外。自分自身は
+// logState.settings.isPremium(実際の購入フラグ。isPremiumUnlocked()は
+// 非ネイティブ環境で常にtrueを返してしまうため、ここでは使わない)を、
+// フレンドはrefreshFriends()で同期済みのfriends[].isPremiumキャッシュを見る。
+// participantLinksを省略した場合は現在編集中の対局(logState.settings)を見るが、
+// 対局履歴の表示では、その対局が終了した時点のsettingsSnapshot.participantLinks
+// を明示的に渡す(現在の紐付け状況ではなく、記録時点の紐付けを使うため)。
+function isPlayerPremiumDisplay(playerName, participantLinks){
+  const links = participantLinks || logState.settings.participantLinks;
+  const link = links && links[playerName];
+  if (!link || !link.uid) return false;
+  if (link.uid === logState.account.uid) return !!logState.settings.isPremium;
+  const friend = logState.friends.find(f => f.uid === link.uid);
+  return !!(friend && friend.isPremium);
+}
+function premiumNameClass(playerName, participantLinks){
+  return isPlayerPremiumDisplay(playerName, participantLinks) ? ' premium-name' : '';
 }
 
 /* =========================================================================
@@ -3112,9 +3127,36 @@ const CloudSync = {
       const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
       const res = await Firestore.getCollection({ reference: `users/${logState.account.uid}/friends` });
       const docs = (res && res.snapshots) || [];
-      logState.friends = docs.map(d => d.data);
+      const friends = docs.map(d => d.data);
+      // 各フレンドの現在の課金状態(users/{uid}.isPremium、syncPremiumStatus()参照)も
+      // 合わせて取得しておく。プレイヤー名を金色にする判定(premiumNameClass)で、
+      // 自分以外(フレンド)の課金状態を都度Firestoreへ問い合わせずに参照できるようにする
+      // ため。friendsドキュメント自体には保存しない(常に最新のusers/{uid}を正とする)。
+      await Promise.all(friends.map(async f => {
+        try {
+          const doc = await Firestore.getDocument({ reference: `users/${f.uid}` });
+          f.isPremium = !!(doc && doc.snapshot && doc.snapshot.data && doc.snapshot.data.isPremium);
+        } catch (e) { f.isPremium = false; }
+      }));
+      logState.friends = friends;
       saveLogState();
     } catch (e) { /* オフライン時はローカルキャッシュのfriendsをそのまま使う */ }
+  },
+  // 自分のisPremiumをusers/{uid}へ同期する。firestore.rulesの無料枠判定
+  // (get(users/{uid}).data.isPremium、archiveMatchFanout参照)や、フレンドの
+  // 表示名を金色にする機能(refreshFriends参照)から参照できるようにするため。
+  // 失敗しても致命的ではないのでベストエフォート(次回同期のタイミングで揃う)。
+  async syncPremiumStatus(){
+    if (!this.isAvailable() || !logState.account.uid) return;
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      if (!Firestore) return;
+      await Firestore.setDocument({
+        reference: `users/${logState.account.uid}`,
+        data: { isPremium: !!logState.settings.isPremium },
+        merge: true,
+      });
+    } catch (e) { /* オフライン等は無視 */ }
   },
 
   // 起動時にクラウド側のmatchHistoryを取り込み、ローカルにまだ無いもの(=自分が
@@ -3589,7 +3631,7 @@ applyTextSizeClass(); // 保存済みの文字サイズ設定を起動直後か�
 // isPremiumだけに頼ると、端末変更・再インストール時に無料枠へ戻ってしまうため。
 // (非ネイティブ環境ではrestorePurchases()がnullを返し、何も上書きしない。)
 Native.initAds();
-(async () => {
+const _restorePurchasesOnBoot = (async () => {
   const restored = await Native.restorePurchases();
   if (restored !== null && restored !== logState.settings.isPremium) {
     logState.settings.isPremium = restored;
@@ -3599,7 +3641,15 @@ Native.initAds();
 })();
 // マルチプレイヤー(フレンド・卓)機能の起動処理。匿名認証を確立し、フレンド
 // 一覧を最新化し、前回終了時に進行中の卓があれば再購読する。
-CloudSync.init().then(() => scheduleRenderApp());
+CloudSync.init().then(async () => {
+  scheduleRenderApp();
+  // 起動時の購入復元(上記)の結果が出揃うのを待ってから、自分のisPremiumを
+  // users/{uid}へ同期する(サインイン完了=account.uid確定を待つ必要があるため
+  // CloudSync.init()の完了後に行う。フレンドの表示名を金色にする機能・
+  // firestore.rulesの無料枠判定が参照する)。
+  await _restorePurchasesOnBoot;
+  CloudSync.syncPremiumStatus();
+});
 
 function activePlayers(){
   return logState.settings.playerNames.slice(0, logState.settings.playerCount);
@@ -4046,6 +4096,7 @@ async function restorePurchasesFromMenu(){
     logState.settings.isPremium = true;
     saveLogState();
     Native.hideBanner();
+    CloudSync.syncPremiumStatus(); // フレンドの表示名を金色にする機能・無料枠判定用
     logState.ui.billingMsg = '購入情報を復元しました。広告が削除され、記録し放題になりました。';
   } else if (restored === false) {
     logState.ui.billingMsg = '有効な購入が見つかりませんでした。';
@@ -4439,7 +4490,17 @@ async function linkParticipant(uid, username){
   const slot = logState.ui.friendPickerSlot;
   if (!slot) return;
   logState.settings.participantLinks[slot] = { uid, username };
-  saveLogState();
+  // 指定した瞬間、同じ行のプレイヤー名入力欄にもそのユーザーネームを自動入力する。
+  // setPlayerName()はrenamePlayerEverywhere()経由でparticipantLinksのキーも
+  // 追従して書き換えるため、直前に設定した上のリンクもslot→usernameへ正しく
+  // 引き継がれる(以後プレイヤー名を手動で書き換えても、renamePlayerEverywhere()が
+  // 都度リンクのキーを追従させるので紐付け自体は解除されない)。
+  const idx = logState.settings.playerNames.indexOf(slot);
+  if (idx !== -1) {
+    setPlayerName(idx, username);
+  } else {
+    saveLogState();
+  }
   closeFriendPicker();
   await CloudSync.addFriend(uid, username);
   scheduleRenderApp();
@@ -4790,7 +4851,7 @@ function renderHanchanLog(hanchansList, s, opts){
     const rows = [...ranked].sort((a,b)=>a.loRank-b.loRank).map(r=>`
       <div class="hc-row ${r.loRank===1?'rank1':''}">
         <span class="hc-rank">${r.loRank===r.hiRank ? r.loRank : `${r.loRank}-${r.hiRank}`}</span>
-        <span class="hc-name">${escapeHtml(r.name)}</span>
+        <span class="hc-name${premiumNameClass(r.name, s.participantLinks)}">${escapeHtml(r.name)}</span>
         <span class="hc-score">${r.score.toLocaleString()}</span>
         <span class="hc-pt ${pt[r.name]>=0?'plus':'minus'}">${formatPt(pt[r.name])}</span>
       </div>`).join('');
@@ -4809,14 +4870,14 @@ function renderHanchanLog(hanchansList, s, opts){
   return `<section><div class="sec-title">対局ログ<span class="hint">${hanchansList.length}半荘</span></div><div style="display:flex;flex-direction:column;gap:8px;">${cards}</div></section>`;
 }
 
-function totalCardsHtml(order, totals, topMoney){
+function totalCardsHtml(order, totals, topMoney, participantLinks){
   return `
     <div class="total-cards">
       ${order.map(p=>{
         const isTop = totals.money[p]===topMoney && topMoney > 0;
         return `
         <div class="total-card ${isTop?'top':''}">
-          <div class="pname">${isTop?'<span class="crown">👑</span>':''}${escapeHtml(p)}</div>
+          <div class="pname${premiumNameClass(p, participantLinks)}">${isTop?'<span class="crown">👑</span>':''}${escapeHtml(p)}</div>
           ${moneyStackInnerHtml(totals.money[p], totals.chipMoney[p], 'pmoney')}
           <div class="ppt">${formatPt(totals.pt[p])}pt</div>
         </div>`;
@@ -4851,7 +4912,7 @@ function revealGroupInnerHtml(group, totals){
       <div class="reveal-rank">${isTop?'👑 ':''}${revealRankLabel(group)}</div>
       ${group.members.map(m => `
         <div class="reveal-member">
-          <span class="reveal-name">${escapeHtml(m.name)}</span>
+          <span class="reveal-name${premiumNameClass(m.name)}">${escapeHtml(m.name)}</span>
           <div class="reveal-money-stack">${moneyStackInnerHtml(totals.money[m.name], totals.chipMoney[m.name], 'reveal-money')}</div>
           <span class="reveal-pt">${formatPt(totals.pt[m.name])}pt</span>
         </div>`).join('')}`;
@@ -4933,7 +4994,7 @@ function renderStickyHeader(s, totals){
   if (!presentation) {
     const order = [...players].sort((a,b)=> totals.money[b]-totals.money[a]);
     const topMoney = order.length ? totals.money[order[0]] : 0;
-    return `<div class="sticky-header">${roomStatusHtml}${modeSwitchHtml}${totalCardsHtml(order, totals, topMoney)}${renderEndMatchControls(false)}</div>`;
+    return `<div class="sticky-header">${roomStatusHtml}${modeSwitchHtml}${totalCardsHtml(order, totals, topMoney, s.participantLinks)}${renderEndMatchControls(false)}</div>`;
   }
 
   if (!logState.ui.revealActive) {
@@ -5120,8 +5181,8 @@ function renderHistoryDetail(id){
   return `
     <div class="history-detail">
       <div class="history-detail-title-row">${titleHtml}</div>
-      <div class="history-detail-meta">${formatMatchDate(m.startedAt, m.endedAt)}・${escapeHtml(players.join('・'))}</div>
-      ${totalCardsHtml(order, totals, topMoney)}
+      <div class="history-detail-meta">${formatMatchDate(m.startedAt, m.endedAt)}・${players.map(p=>`<span class="${premiumNameClass(p, s.participantLinks).trim()}">${escapeHtml(p)}</span>`).join('・')}</div>
+      ${totalCardsHtml(order, totals, topMoney, s.participantLinks)}
       ${chipSum !== 0 ? `<div class="check-banner bad" style="margin-top:8px;">⚠ チップ合計 ${chipSum>0?'+':''}${chipSum}枚（ゼロサムになっていません）</div>` : ''}
       ${renderHanchanLog(m.hanchans, settingsForCalc, { readOnly: true })}
       <div class="history-detail-actions">
@@ -5226,7 +5287,7 @@ function renderCareerStatCard(name, st, playerCount){
   const moneyColor = v => v >= 0 ? '#9fe0bd' : 'var(--red-soft)';
   return `
     <div class="stat-card">
-      <div class="stat-name">${escapeHtml(name)}</div>
+      <div class="stat-name${premiumNameClass(name)}">${escapeHtml(name)}</div>
       <div class="stat-row">平均順位 <b>${st.avgRank.toFixed(2)}</b></div>
       <div class="stat-row">試合数 <b>${st.games}半荘</b></div>
       ${primaryLine}
