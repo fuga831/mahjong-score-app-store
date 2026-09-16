@@ -43,6 +43,7 @@ Sign in with Apple設定を、`Podfile-notes.md` を読んでCocoaPods関連の�
 | `AppDelegate-additions.swift` | プッシュ通知のデバイストークンをFirebase Messagingに渡すための`AppDelegate.swift`への追記 |
 | `Podfile-notes.md` | `@capacitor-firebase/*`系プラグインが要求するCocoaPods関連の注意点(`use_frameworks!`など) |
 | `apple-sign-in-notes.md` | Apple Developer Portal・Firebaseコンソール側でSign in with Appleを有効化する手順、審査ガイドライン4.8対応の確認事項 |
+| `associated-domains-notes.md` | ゲストプレイヤーへの結果受け取りリンク(Universal Links)用。Associated Domains Capability・apple-app-site-associationファイルの配置場所(ドメインのルート、このリポジトリのdocs/配下ではない点に注意)について |
 
 ## Android版との関係
 

@@ -16,8 +16,8 @@
 #    反映した上で、生成された `ios/` フォルダ一式をgitにコミットしてください。
 #
 # 2. Apple Developer PortalでこのアプリのApp ID(Bundle ID)を作成し、
-#    Sign in with Apple・Push Notifications の2つのCapabilityを**先に**
-#    有効化しておくこと(`ios-snippets/entitlements-additions.md` 参照)。
+#    Sign in with Apple・Push Notifications・Associated Domainsの3つのCapabilityを
+#    **先に**有効化しておくこと(`ios-snippets/entitlements-additions.md` 参照)。
 #    `app-store-connect fetch-signing-files --create` は「有効化済みの
 #    Capabilityを含むプロファイル」を取得・生成するだけで、Capability自体を
 #    有効化してはくれません。

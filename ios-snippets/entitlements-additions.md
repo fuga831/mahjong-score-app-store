@@ -2,7 +2,7 @@
 
 `npx cap add ios` 後、Xcodeで `ios/App/App.xcworkspace` を開き、
 プロジェクトナビゲータで `App` ターゲットを選択 → 「Signing & Capabilities」タブ →
-「+ Capability」から、以下の3つを追加してください。
+「+ Capability」から、以下の4つを追加してください。
 
 ## 1. Sign in with Apple
 
@@ -40,9 +40,17 @@ Archiveビルドを作る際、Xcode/Apple側が自動的に `production` へ読
 (`Info.plist-additions.xml` の `UIBackgroundModes` と同じ内容が、
 Xcodeの操作でも反映されます。plistを直接編集した場合はこの手順は不要)。
 
+## 4. Associated Domains(Universal Links)
+
+「+ Capability」→「Associated Domains」を追加し、`applinks:fuga831.github.io` を
+1件登録してください。この内容は `App.entitlements` に既に追記済みです。
+Apple Developer Portal側の対応設定・apple-app-site-associationファイルの配置場所
+(このリポジトリのdocs/配下では**ありません**)については `associated-domains-notes.md`
+を参照してください。
+
 ## Firebase Cloud Messaging 用の APNs 認証キー
 
-上記3つはXcode/アプリ側の設定。これとは別に、Firebaseコンソール側にも
+上記4つはXcode/アプリ側の設定。これとは別に、Firebaseコンソール側にも
 APNs認証キー(.p8ファイル)のアップロードが必要です。
 これは `MULTIPLAYER_SETUP.md` にまとめて記載します(Apple Developer Portalで
 「Keys」からAPNs用のキーを新規作成 → Firebaseコンソールの

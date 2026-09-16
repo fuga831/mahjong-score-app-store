@@ -33,12 +33,17 @@
     --shadow: 0 3px 0 rgba(0,0,0,0.28), 0 6px 14px rgba(0,0,0,0.35);
   }
 
+  /* プレミアム会員のプレイヤー名表示(結果発表画面・対局履歴・成績タブ等、
+     プレイヤー名が出る箇所全般で共通のクラス名を使う。isPlayerPremiumDisplay()参照)。 */
+  .premium-name{ color:var(--gold-strong); }
+
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;}
   /* 文字サイズ:大(旧称ジジイモード)。このアプリのほぼ全てのfont-sizeは
      rem単位(html要素のfont-sizeが基準)で書かれているため、ここを1箇所
      拡大するだけでアプリ全体の文字が連動して大きくなる。 */
-  html.large-text{ font-size:125%; }
+  html.text-size-large{ font-size:125%; }
+  html.text-size-xlarge{ font-size:150%; } /* 大(125%)のさらに1.2倍 */
   body{
     background:
       radial-gradient(circle at 20% 15%, rgba(255,255,255,0.035) 0, transparent 40%),
@@ -74,6 +79,7 @@
     font-family:"Zen Maru Gothic",sans-serif;
     font-weight:900;
     font-size:1.05rem;
+    line-height:1.2;
     letter-spacing:.06em;
     color:var(--gold-strong);
     margin:2px 4px 0;
@@ -112,8 +118,11 @@
   }
   .title-row h1{margin:2px 0 0;flex:1;min-width:0;}
   .hamburger-btn{
+    display:flex;
+    align-items:center;
+    justify-content:center;
     flex-shrink:0;
-    width:34px;height:34px;
+    width:2.1em;height:2.1em;
     border-radius:10px;
     border:1px solid var(--line);
     background:var(--felt-1);
@@ -576,14 +585,6 @@
     color:#7c9d8b;
   }
 
-  footer{
-    text-align:center;
-    font-size:.65rem;
-    color:#5f8570;
-    margin-top:2px;
-    letter-spacing:.03em;
-  }
-
   #calcTab, #logTab{
     display:flex;
     flex-direction:column;
@@ -679,6 +680,9 @@
     box-shadow:var(--shadow);
   }
   .total-card.top{background:linear-gradient(160deg, var(--felt-2), var(--felt-1));border-color:var(--gold);}
+  .total-card.shareable{cursor:pointer;}
+  .total-card.shareable:active{background:var(--felt-2);}
+  .total-card .share-hint{font-size:.85em;opacity:.7;}
   .total-card .pname{
     font-size:.68rem;
     font-weight:700;
@@ -706,6 +710,22 @@
     font-variant-numeric:tabular-nums;
   }
   .crown{font-size:.7rem;}
+  /* ---- 金額の2段組み表示(合計金額+チップ内訳)。総合結果・対局履歴の
+     詳細・演出モードの発表カードで共通して使う(moneyStackInnerHtml参照)。
+     上段(.pmoney/.reveal-money)は既存のまま、下段はひとまわり小さく・
+     控えめな色で、プラス/マイナスの配色だけ既存ルール(#9fe0bd/red-soft)
+     を踏襲しつつopacityを落として目立たせすぎないようにしている。 ---- */
+  .money-chip-sub{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-variant-numeric:tabular-nums;
+    font-size:.62rem;
+    opacity:.75;
+    white-space:nowrap;
+  }
+  .money-chip-sub.plus{color:#9fe0bd;}
+  .money-chip-sub.minus{color:var(--red-soft);}
+  .total-card .money-chip-sub{margin-top:1px;}
 
   /* ---- 演出モード切り替えスイッチ（画面右上） ---- */
   .mode-switch-row{
@@ -846,6 +866,12 @@
     color:var(--ivory);
     flex-shrink:0;
   }
+  .reveal-money-stack{
+    display:flex;
+    flex-direction:column;
+    align-items:flex-end;
+    flex-shrink:0;
+  }
   .reveal-pt{
     font-size:.66rem;
     color:var(--ink-soft);
@@ -860,11 +886,15 @@
   }
 
   .share-icon-btn{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex-shrink:0;
     border:1px solid var(--line);
     background:var(--felt-1);
     color:var(--ivory-dim);
     border-radius:8px;
-    width:26px;height:26px;
+    width:2.2em;height:2.2em;
     font-size:.78rem;
     line-height:1;
     cursor:pointer;
@@ -1507,6 +1537,27 @@
     width:100%;
   }
   .num-input:focus{outline:none;border-color:var(--gold);}
+  /* 素点入力の符号(+/-)トグルボタン。数字専用キーボードにマイナス記号が
+     無いための対応(toggleFormScoreSign参照)。 */
+  .sign-toggle-btn{
+    flex-shrink:0;
+    width:2.1em;
+    height:2.1em;
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:900;
+    font-size:1rem;
+    line-height:1;
+    color:var(--ivory);
+    background:var(--felt-2);
+    border:1.5px solid var(--line);
+    border-radius:9px;
+  }
+  .sign-toggle-btn.minus{color:var(--red-soft);border-color:var(--red-soft);}
+  .sign-toggle-btn.plus{color:#9fe0bd;}
+  .sign-toggle-btn:active{background:var(--felt-1);}
+  /* 残り1人分の素点を自動逆算した仮の値(autoFillLastPlayerScore参照)。
+     手入力で上書きするまでの間、破線で「まだ仮の値」だと分かるようにする。 */
+  .num-input.auto-filled{border-style:dashed;color:var(--ivory-dim);}
   /* タップミスで±100点などが加算される入力欄標準の増減ボタンを消す */
   .num-input::-webkit-outer-spin-button,
   .num-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
@@ -1559,6 +1610,68 @@
     cursor:pointer;
   }
   .link-badge.linked{background:var(--gold);color:var(--ink);border-color:var(--gold-strong);}
+  .link-badge.swap-badge{max-width:none;padding:6px 8px;}
+
+  /* ---- ②④共通: プリセット(ルール/メンバー構成)のチップ行 ---- */
+  .preset-chip-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+    margin-top:4px;
+  }
+  .preset-chip{
+    display:flex;
+    align-items:stretch;
+    border:1.5px solid var(--line);
+    border-radius:999px;
+    background:var(--felt-2);
+    overflow:hidden;
+  }
+  .preset-chip.active{border-color:var(--gold-strong);}
+  .preset-chip-main{
+    font-family:"Noto Sans JP",sans-serif;
+    font-size:.72rem;
+    font-weight:700;
+    color:var(--ink-soft);
+    background:transparent;
+    border:0;
+    padding:6px 4px 6px 10px;
+    cursor:pointer;
+    max-width:9em;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .preset-chip.active .preset-chip-main{color:var(--gold-strong);}
+  .preset-chip-menu{
+    font-size:.72rem;
+    color:var(--ink-soft);
+    background:transparent;
+    border:0;
+    border-left:1px solid var(--line);
+    padding:6px 9px;
+    cursor:pointer;
+  }
+  .preset-chip.active .preset-chip-menu{color:var(--gold-strong);border-left-color:var(--gold-strong);}
+  .preset-chip-new{
+    font-family:"Noto Sans JP",sans-serif;
+    font-size:.72rem;
+    font-weight:700;
+    color:var(--ink-soft);
+    background:var(--felt-1);
+    border:1.5px dashed var(--line);
+    border-radius:999px;
+    padding:6px 12px;
+    cursor:pointer;
+  }
+
+  /* ---- ③ 人数・プレイヤー名・控えメンバー(常時表示パネル) ---- */
+  .player-roster-panel{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+    margin-bottom:10px;
+  }
 
   /* ---- hanchan input form ---- */
   .score-scale-hint{
@@ -1754,8 +1867,6 @@
       <div class="sec-title">符数<span class="hint">中級者・上級者向け</span></div>
       <input class="num-input" id="manualFuInput" type="number" step="10" inputmode="numeric" placeholder="符数（例: 40）" onchange="setManualFu(parseInt(this.value,10)||0)">
     </section>
-
-    <footer>符は自動で10の位に切り上げ・支払いは100点に切り上げ</footer>
   </div>
 
   <div id="logTab" style="display:none;"></div>
@@ -1772,6 +1883,12 @@
 <div id="addFriendModalRoot"></div>
 <div id="helpModalRoot"></div>
 <div id="otherModalRoot"></div>
+<div id="historyLinkShareModalRoot"></div>
+<div id="claimModalRoot"></div>
+<div id="presetMenuModalRoot"></div>
+<div id="presetNameModalRoot"></div>
+<div id="deletePresetConfirmModalRoot"></div>
+<div id="substituteModalRoot"></div>
 <div id="notifyBannerRoot"></div>
 <div id="termTipRoot"></div>
 <div id="debugErrorRoot"></div>
@@ -2087,11 +2204,40 @@ function umaForTieGroup(loRank, hiRank, uma, playerCount) {
   return sum / count;
 }
 
-// calcHanchanResult(hanchan, settings) -> { pt: {name: ptDelta}, ranked }
-// pt is this hanchan's own contribution only (not a running total).
+// 半荘ごとのルールスナップショット(①)に含めるフィールド。人数(playerCount)は
+// 「対局ルール設定」パネルの外に移動した項目だが、ウマの段組み判定・オカの
+// 頭数計算にルール計算そのものが必要とするため、集計の正確さのために
+// スナップショットには含める(プリセット保存の対象からは②の仕様どおり除く)。
+const RULE_SNAPSHOT_FIELDS = ['startPoints', 'returnPoints', 'playerCount', 'umaEnabled', 'uma',
+  'tobiEnabled', 'tobiPoints', 'tobiRecipient', 'rate', 'roundingMode', 'chipUnitYen'];
+function captureRulesSnapshot(settings){
+  const snap = {};
+  RULE_SNAPSHOT_FIELDS.forEach(k => { snap[k] = Array.isArray(settings[k]) ? [...settings[k]] : settings[k]; });
+  return snap;
+}
+// ②: お気に入りルールプリセットの保存対象は「人数を除く」全項目。
+const RULE_PRESET_FIELDS = RULE_SNAPSHOT_FIELDS.filter(k => k !== 'playerCount');
+function captureRulePreset(settings){
+  const snap = {};
+  RULE_PRESET_FIELDS.forEach(k => { snap[k] = Array.isArray(settings[k]) ? [...settings[k]] : settings[k]; });
+  return snap;
+}
+
+// calcHanchanResult(hanchan, settings) -> { pt: {name: ptDelta}, ranked, players }
+// pt is this hanchan's own contribution only (not a running total)。
+// ① 半荘ごとのルールスナップショット: hanchan.rulesSnapshotがあればそちらを
+// 優先して使う(半荘記録後にルール設定パネルの値を変えても、既に記録済みの
+// 半荘の計算結果は変わらない)。無ければ従来通り現在のsettingsを使う
+// (スナップショット導入前に記録された古いデータとの後方互換)。
+// ③ 控えメンバーとの交代により、半荘ごとに実際の参加者が異なりうるため、
+// 参加者はsettings.players(現在のアクティブ一覧)ではなく、この半荘が実際に
+// 記録した hanchan.scores のキーから決める(scoresが空の場合だけ、これから
+// 記録する半荘のプレビュー用にsettings.playersへフォールバックする)。
 function calcHanchanResult(hanchan, settings) {
-  const { players, startPoints, returnPoints, playerCount, umaEnabled, uma,
-          tobiEnabled, tobiPoints, tobiRecipient } = settings;
+  const rules = hanchan.rulesSnapshot || settings;
+  const { startPoints, returnPoints, playerCount, umaEnabled, uma,
+          tobiEnabled, tobiPoints, tobiRecipient } = rules;
+  const players = Object.keys(hanchan.scores).length ? Object.keys(hanchan.scores) : settings.players;
   // hanchan.scores[p]がundefined/nullになり得るケース(プレイヤー名の変更・
   // 人数変更後に古い半荘記録を読む等でキーが一致しない場合)への防御。
   // 実際にこれが原因でrenderLog()が`undefined.toLocaleString()`で例外を
@@ -2106,7 +2252,7 @@ function calcHanchanResult(hanchan, settings) {
   players.forEach(p => { pt[p] = 0; });
 
   ranked.forEach(r => {
-    pt[r.name] += applyRounding(r.score - returnPoints, settings.roundingMode);
+    pt[r.name] += applyRounding(r.score - returnPoints, rules.roundingMode);
     if (umaEnabled) pt[r.name] += umaForTieGroup(r.loRank, r.hiRank, uma, playerCount);
     if (r.loRank === 1) pt[r.name] += oka / topGroup.length;
   });
@@ -2124,23 +2270,31 @@ function calcHanchanResult(hanchan, settings) {
     });
   }
 
-  return { pt, ranked };
+  return { pt, ranked, players };
 }
 
 // calcTotals(hanchans, chips, settings) -> per-player running pt/yen totals.
+// ③: 各半荘の実際の参加者(calcHanchanResultが返すplayers、控え交代で現在の
+// settings.playersと食い違うことがある)ごとにptを積み上げる。控えに回って
+// 不在だった半荘は、その人のptに一切加算しない(0点として数えることもしない)。
 function calcTotals(hanchans, chips, settings) {
   const totals = {};
   settings.players.forEach(p => { totals[p] = 0; });
   hanchans.forEach(h => {
-    const { pt } = calcHanchanResult(h, settings);
-    settings.players.forEach(p => { totals[p] += pt[p]; });
+    const { pt, players } = calcHanchanResult(h, settings);
+    players.forEach(p => {
+      if (!(p in totals)) totals[p] = 0;
+      totals[p] += pt[p];
+    });
   });
   const chipSum = settings.players.reduce((s, p) => s + (chips[p] || 0), 0);
   const money = {};
+  const chipMoney = {}; // 合計金額(money)のうち、チップ分だけの内訳(円)。表示の2段組みで使う。
   settings.players.forEach(p => {
-    money[p] = totals[p] * settings.rate + (chips[p] || 0) * settings.chipUnitYen;
+    chipMoney[p] = (chips[p] || 0) * settings.chipUnitYen;
+    money[p] = totals[p] * settings.rate + chipMoney[p];
   });
-  return { pt: totals, money, chipImbalance: chipSum !== 0, chipSum };
+  return { pt: totals, money, chipMoney, chipImbalance: chipSum !== 0, chipSum };
 }
 
 /* ========================================================================= */
@@ -2473,6 +2627,24 @@ function _resolvePendingPurchase(success){
   const resolvers = _pendingPurchaseResolvers.splice(0);
   resolvers.forEach(r => r(success));
 }
+// ネイティブの購入ダイアログが「完了しました」と表示していても、アプリ側の
+// approved/verified/productUpdatedイベントの受信が(実機で確認されたケースでは)
+// 60秒以上遅れることがある。原因調査のため、購入試行1回ごとにどのイベントが
+// いつ届いた(または届かなかった)かを記録しておき、タイムアウト時のデバッグ
+// 表示に含める。Xcode接続できない環境で唯一の手がかりになるため、
+// console.logだけでなく画面上のデバッグ表示にも出す。
+const PURCHASE_TIMEOUT_MS = 90000;
+let _billingTraceLog = [];
+let _billingTraceStart = null;
+function _traceBilling(event){
+  const elapsed = _billingTraceStart != null ? Date.now() - _billingTraceStart : null;
+  _billingTraceLog.push({ elapsed, event });
+  console.log(`[billing] ${event}${elapsed != null ? ` (+${elapsed}ms)` : ''}`);
+}
+function _formatBillingTrace(){
+  if (!_billingTraceLog.length) return '(イベント受信ログなし)';
+  return _billingTraceLog.map(e => `  ${e.elapsed != null ? `+${e.elapsed}ms` : '?'}: ${e.event}`).join('\n');
+}
 
 const Native = {
   isNativeApp(){
@@ -2602,12 +2774,13 @@ const Native = {
         type: store.NON_CONSUMABLE,
         platform: storePlatform,
       }]);
-      store.when().approved(transaction => transaction.verify());
-      store.when().verified(receipt => receipt.finish());
+      store.when().approved(transaction => { _traceBilling('approved'); transaction.verify(); });
+      store.when().verified(receipt => { _traceBilling('verified'); receipt.finish(); });
       // レシートのサーバー側検証(verify())が失敗した場合はverifiedではなく
       // こちらに来る。When型にはerror()というチェーンメソッド自体が存在しない
       // (store.error()が唯一のグローバルエラーハンドラ)ため、検証失敗はここで拾う。
       store.when().unverified(receipt => {
+        _traceBilling('unverified');
         const payload = receipt && receipt.payload; // Validator.Response.ErrorPayload: { ok:false, status, code, message, data }
         showDebugError('課金レシート検証失敗 (unverified)', payload
           ? { code: payload.code, message: `status:${payload.status} ${payload.message || ''}` }
@@ -2616,13 +2789,37 @@ const Native = {
       store.when().productUpdated(() => {
         const product = store.get(MONETIZATION_CONFIG.billingProductId);
         const owned = !!(product && product.owned);
-        if (owned && !logState.settings.isPremium) {
+        _traceBilling(`productUpdated (owned=${owned})`);
+        const wasPremium = logState.settings.isPremium;
+        if (owned && !wasPremium) {
           logState.settings.isPremium = true;
           saveLogState();
           Native.hideBanner();
+          CloudSync.syncPremiumStatus(); // フレンドの表示名を金色にする機能・無料枠判定用
           scheduleRenderApp();
         }
-        if (owned) _resolvePendingPurchase(true);
+        if (owned) {
+          // purchasePremium()が待機中(60秒のタイムアウト前)ならここで解決される。
+          const hadPendingResolver = _pendingPurchaseResolvers.length > 0;
+          _resolvePendingPurchase(true);
+          // 待機中の呼び出しが無いのにowned=trueで届いた場合、それは
+          // 「タイムアウト後に遅れて届いたイベント」か「アプリ再起動後の
+          // 初回同期」のいずれか。前者(!wasPremiumから今回trueになった)の
+          // 場合だけ、ペイウォールが開いたままなら自動で閉じてユーザーに
+          // 知らせる(「失敗しました」の表示のまま放置しない)。
+          if (!hadPendingResolver && !wasPremium) {
+            logState.ui.paywallErrorMsg = null;
+            if (logState.ui.paywallOpen) {
+              const pendingSource = logState.ui.paywallSource;
+              logState.ui.paywallOpen = false;
+              logState.ui.paywallSource = null;
+              logState.ui.paywallPurchasing = false;
+              if (pendingSource === 'archive') archiveCurrentMatch();
+            }
+            logState.ui.notifyBanner = '購入が反映されました。プレミアム会員になりました🎉';
+            scheduleRenderApp();
+          }
+        }
       });
       // store.order()の失敗など、個別のPromiseの拒否に現れない
       // ストア側の非同期エラー(通信エラー・設定不備等)を拾うためのハンドラ。
@@ -2678,36 +2875,50 @@ const Native = {
       return null;
     }
   },
+  // 戻り値: { success: true } | { success: false, reason: 'not_native'|'error'|'timeout' }
+  //   'timeout'は「決済自体は成立しているがイベント受信が遅れているだけ」の
+  //   可能性が高いケース(実機で確認済み)。呼び出し側は'error'と区別して、
+  //   失敗を断定しない文言を出すこと。タイムアウト後もstore.when().productUpdated()
+  //   は生き続けており、遅れて届けば自動的にisPremiumへ反映される。
   async purchasePremium(){
-    if (!this.isNativeApp()) return false;
+    if (!this.isNativeApp()) return { success: false, reason: 'not_native' };
     try {
       const store = window.CdvPurchase && window.CdvPurchase.store;
       if (!store) {
         showDebugError('購入 (purchasePremium)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase})。${cordovaPluginListInfo()}`);
-        return false;
+        return { success: false, reason: 'error' };
       }
       await this.initBilling();
       const product = store.get(MONETIZATION_CONFIG.billingProductId);
       const offer = product && product.getOffer && product.getOffer();
       if (!offer) {
         showDebugError('購入 (purchasePremium)', `商品「${MONETIZATION_CONFIG.billingProductId}」の購入可能なオファーが見つかりません。product=${product ? `{valid:${product.valid}, canPurchase:${product.canPurchase}, state:${product.state}, offers件数:${(product.offers||[]).length}}` : 'null'}`);
-        return false;
+        return { success: false, reason: 'error' };
       }
+      _billingTraceLog = [];
+      _billingTraceStart = Date.now();
+      _traceBilling('order() 呼び出し開始');
       const resultPromise = new Promise(resolve => {
         _pendingPurchaseResolvers.push(resolve);
-        // 60秒経ってもイベントが来なければ諦める(ユーザーがストアのダイアログを
-        // キャンセルした場合など、approvedイベントが永遠に来ないケースの保険)。
+        // PURCHASE_TIMEOUT_MS経ってもイベントが来なければUI上は諦める
+        // (ユーザーがストアのダイアログをキャンセルした場合など、approved
+        // イベントが永遠に来ないケースの保険)。ただしこのタイムアウトは
+        // あくまで「これ以上UIを待たせない」ためのものであり、
+        // store.when().productUpdated()自体はこの後も生き続けて監視を
+        // 継続する(実機で、ストア側は成立しているのにイベント受信だけ
+        // 60秒以上遅れるケースを確認したため)。
         setTimeout(() => {
           _pendingPurchaseResolvers = _pendingPurchaseResolvers.filter(r => r !== resolve);
-          showDebugError('購入 (purchasePremium)', '60秒待ってもapproved/verifiedイベントが届きませんでした(ストアの購入ダイアログをキャンセルした場合も含みます)。');
+          showDebugError('購入 (purchasePremium)', `${PURCHASE_TIMEOUT_MS / 1000}秒待ってもapproved/verifiedイベントが届きませんでした(ストアの購入ダイアログをキャンセルした場合も含みます)。決済自体は完了しており受信が遅延しているだけの可能性があるため、監視は継続します(遅れて届けば自動的にプレミアム状態へ反映されます)。\n\nイベント受信ログ:\n${_formatBillingTrace()}`);
           resolve(false);
-        }, 60000);
+        }, PURCHASE_TIMEOUT_MS);
       });
       await offer.order();
-      return await resultPromise;
+      const ok = await resultPromise;
+      return ok ? { success: true } : { success: false, reason: 'timeout' };
     } catch (e) {
       showDebugError('購入 (purchasePremium)', e);
-      return false;
+      return { success: false, reason: 'error' };
     }
   },
   getPriceLabel(){
@@ -2726,6 +2937,26 @@ const Native = {
 function isPremiumUnlocked(){
   if (!Native.isNativeApp()) return true;
   return !!logState.settings.isPremium;
+}
+
+// プレイヤー名の表示を金色にするかどうかの判定。ゲスト(participantLinksに
+// 紐付けが無い=ユーザーネームを指定していない)は対象外。自分自身は
+// logState.settings.isPremium(実際の購入フラグ。isPremiumUnlocked()は
+// 非ネイティブ環境で常にtrueを返してしまうため、ここでは使わない)を、
+// フレンドはrefreshFriends()で同期済みのfriends[].isPremiumキャッシュを見る。
+// participantLinksを省略した場合は現在編集中の対局(logState.settings)を見るが、
+// 対局履歴の表示では、その対局が終了した時点のsettingsSnapshot.participantLinks
+// を明示的に渡す(現在の紐付け状況ではなく、記録時点の紐付けを使うため)。
+function isPlayerPremiumDisplay(playerName, participantLinks){
+  const links = participantLinks || logState.settings.participantLinks;
+  const link = links && links[playerName];
+  if (!link || !link.uid) return false;
+  if (link.uid === logState.account.uid) return !!logState.settings.isPremium;
+  const friend = logState.friends.find(f => f.uid === link.uid);
+  return !!(friend && friend.isPremium);
+}
+function premiumNameClass(playerName, participantLinks){
+  return isPlayerPremiumDisplay(playerName, participantLinks) ? ' premium-name' : '';
 }
 
 /* =========================================================================
@@ -2756,6 +2987,38 @@ function normalizeUsername(name){
 // 識別子として不可とする。
 function isValidUsernameFormat(name){
   return /^[a-z0-9_぀-ゟ゠-ヿ㐀-䶿一-鿿]{3,20}$/.test(normalizeUsername(name));
+}
+// Firebase AuthのlinkWithX()が「その認証情報は既に別アカウントで使用済み」で
+// 失敗した場合のエラーコード/メッセージを判定する(iOS/Androidでコードの表記ゆれが
+// あるため、code・messageの両方を緩めに(大文字小文字を無視して)見る)。
+function _isCredentialAlreadyInUseError(e){
+  const code = String((e && e.code) || '').toLowerCase();
+  const msg = String((e && e.message) || '').toLowerCase();
+  return code.includes('already-in-use') || code.includes('credential_already_in_use')
+    || msg.includes('already-in-use') || msg.includes('already in use');
+}
+
+/* ---- ゲストプレイヤーへの結果受け取りリンク(Universal Links + claimTokens) ---- */
+// GitHub Pagesのdocs/claim.html(アプリ未インストール時のフォールバック用ページ)と
+// 同じパスをリンク先にする。Universal Links(applinks:fuga831.github.io、
+// ios/App/App/App.entitlements参照)が有効なら、アプリインストール済みの端末では
+// Safariを経由せず直接アプリが起動しこのURLをハンドリングする。
+const CLAIM_LINK_BASE_URL = 'https://fuga831.github.io/mahjong-score-app-store/claim';
+const CLAIM_TOKEN_TTL_MS = 3 * 24 * 60 * 60 * 1000; // 3日間
+// トークンは「知っていれば使える」capability URL方式(このアプリの他の識別子と
+// 同様、Firestoreルール側でも推測困難性を前提にしている)。Math.random()は
+// 暗号論的に安全な乱数ではないため使わず、crypto.getRandomValues/randomUUIDを使う
+// (WKWebView・最近のブラウザなら確実に利用可能。念のため最終フォールバックのみ用意)。
+function generateClaimToken(){
+  try {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID().replace(/-/g, '');
+    if (window.crypto && crypto.getRandomValues) {
+      const bytes = new Uint8Array(20);
+      crypto.getRandomValues(bytes);
+      return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    }
+  } catch (e) {}
+  return Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
 }
 
 const CloudSync = {
@@ -2822,17 +3085,41 @@ const CloudSync = {
 
   // 匿名のままでは困る操作(フレンド追加・複数端末利用)をしようとしたタイミングで
   // 呼び出す想定。成功時はaccount.isAnonymousがfalseになり、uidは維持される
-  // (匿名ユーザーへのプロバイダlinkとして扱われる設計を想定)。
+  // (匿名ユーザーへのプロバイダlinkとして扱われる設計)。
+  //
+  // ⚠️ ここでは必ずAuth.linkWithGoogle/linkWithApple(既存の匿名ユーザーに認証情報を
+  // 「連携」するAPI)を使うこと。以前はAuth.signInWithGoogle/signInWithApple
+  // (「新規サインイン」のAPI)を誤って呼んでおり、匿名時代とは別の新しいuidに
+  // 切り替わってしまっていた。その結果、匿名時代に既にusernames/{name}や
+  // friends/matchHistoryを保存していたユーザーが後からGoogle/Appleでログインすると、
+  // それらのドキュメントは古いuidの持ち物のまま取り残され、以降そのドキュメントへの
+  // 書き込み・削除がfirestore.rules側のisSelf(uid)チェックに落ちて
+  // 「Missing or insufficient permissions」になる実バグの原因だった
+  // (アカウント削除時にusernames/{name}のdeleteDocumentが失敗するケースを実機で確認)。
+  // linkWithX()は「その認証情報は既に別のFirebaseアカウントで使用済み」の場合にだけ
+  // 失敗する(auth/credential-already-in-use等)。機種変更・再インストール後に
+  // 元のアカウントへ戻りたいケースはこれに該当するため、その場合のみ
+  // signInWithX()にフォールバックし、既存アカウントへ切り替える。
   async linkGoogle(){
     if (!this.isAvailable()) { showDebugError('Googleログイン', 'Native.isAvailable()がfalse(ストアアプリ内ではない、またはCloudSync未初期化)'); return false; }
     try {
       const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
-      if (!Auth || !Auth.signInWithGoogle) {
+      if (!Auth || !Auth.linkWithGoogle || !Auth.signInWithGoogle) {
         const registered = Object.keys((window.Capacitor && window.Capacitor.Plugins) || {}).join(', ') || '(なし)';
-        showDebugError('Googleログイン', `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, signInWithGoogle=${!!(Auth&&Auth.signInWithGoogle)})。ネイティブ側でプラグインが正しく登録されていない可能性があります。登録済みプラグイン一覧: ${registered}`);
+        showDebugError('Googleログイン', `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, linkWithGoogle=${!!(Auth&&Auth.linkWithGoogle)})。ネイティブ側でプラグインが正しく登録されていない可能性があります。登録済みプラグイン一覧: ${registered}`);
         return false;
       }
-      const result = await Auth.signInWithGoogle();
+      let result;
+      try {
+        result = await Auth.linkWithGoogle();
+      } catch (e) {
+        if (_isCredentialAlreadyInUseError(e)) {
+          result = await Auth.signInWithGoogle();
+          logState.ui.notifyBanner = 'このGoogleアカウントは既に登録済みのため、既存のアカウントにログインしました。';
+        } else {
+          throw e;
+        }
+      }
       if (result && result.user) {
         logState.account.uid = result.user.uid;
         logState.account.isAnonymous = false;
@@ -2840,7 +3127,7 @@ const CloudSync = {
         saveLogState();
         return true;
       }
-      showDebugError('Googleログイン', `signInWithGoogle()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
+      showDebugError('Googleログイン', `linkWithGoogle()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
       return false;
     } catch (e) {
       console.error('[CloudSync.linkGoogle] failed:', e);
@@ -2854,12 +3141,22 @@ const CloudSync = {
     if (!this.isAvailable()) { showDebugError('Appleログイン', 'Native.isAvailable()がfalse(ストアアプリ内ではない、またはCloudSync未初期化)'); return false; }
     try {
       const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
-      if (!Auth || !Auth.signInWithApple) {
+      if (!Auth || !Auth.linkWithApple || !Auth.signInWithApple) {
         const registered = Object.keys((window.Capacitor && window.Capacitor.Plugins) || {}).join(', ') || '(なし)';
-        showDebugError('Appleログイン', `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, signInWithApple=${!!(Auth&&Auth.signInWithApple)})。ネイティブ側でプラグインが正しく登録されていない可能性があります。登録済みプラグイン一覧: ${registered}`);
+        showDebugError('Appleログイン', `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, linkWithApple=${!!(Auth&&Auth.linkWithApple)})。ネイティブ側でプラグインが正しく登録されていない可能性があります。登録済みプラグイン一覧: ${registered}`);
         return false;
       }
-      const result = await Auth.signInWithApple();
+      let result;
+      try {
+        result = await Auth.linkWithApple();
+      } catch (e) {
+        if (_isCredentialAlreadyInUseError(e)) {
+          result = await Auth.signInWithApple();
+          logState.ui.notifyBanner = 'このApple IDは既に登録済みのため、既存のアカウントにログインしました。';
+        } else {
+          throw e;
+        }
+      }
       if (result && result.user) {
         logState.account.uid = result.user.uid;
         logState.account.isAnonymous = false;
@@ -2867,7 +3164,7 @@ const CloudSync = {
         saveLogState();
         return true;
       }
-      showDebugError('Appleログイン', `signInWithApple()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
+      showDebugError('Appleログイン', `linkWithApple()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
       return false;
     } catch (e) {
       console.error('[CloudSync.linkApple] failed:', e);
@@ -2959,9 +3256,131 @@ const CloudSync = {
       const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
       const res = await Firestore.getCollection({ reference: `users/${logState.account.uid}/friends` });
       const docs = (res && res.snapshots) || [];
-      logState.friends = docs.map(d => d.data);
+      const friends = docs.map(d => d.data);
+      // 各フレンドの現在の課金状態(users/{uid}.isPremium、syncPremiumStatus()参照)も
+      // 合わせて取得しておく。プレイヤー名を金色にする判定(premiumNameClass)で、
+      // 自分以外(フレンド)の課金状態を都度Firestoreへ問い合わせずに参照できるようにする
+      // ため。friendsドキュメント自体には保存しない(常に最新のusers/{uid}を正とする)。
+      await Promise.all(friends.map(async f => {
+        try {
+          const doc = await Firestore.getDocument({ reference: `users/${f.uid}` });
+          f.isPremium = !!(doc && doc.snapshot && doc.snapshot.data && doc.snapshot.data.isPremium);
+        } catch (e) { f.isPremium = false; }
+      }));
+      logState.friends = friends;
       saveLogState();
     } catch (e) { /* オフライン時はローカルキャッシュのfriendsをそのまま使う */ }
+  },
+  // 自分のisPremiumをusers/{uid}へ同期する。firestore.rulesの無料枠判定
+  // (get(users/{uid}).data.isPremium、archiveMatchFanout参照)や、フレンドの
+  // 表示名を金色にする機能(refreshFriends参照)から参照できるようにするため。
+  // 失敗しても致命的ではないのでベストエフォート(次回同期のタイミングで揃う)。
+  async syncPremiumStatus(){
+    if (!this.isAvailable() || !logState.account.uid) return;
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      if (!Firestore) return;
+      await Firestore.setDocument({
+        reference: `users/${logState.account.uid}`,
+        data: { isPremium: !!logState.settings.isPremium },
+        merge: true,
+      });
+    } catch (e) { /* オフライン等は無視 */ }
+  },
+
+  // ---- ゲストプレイヤーへの結果受け取りリンク ----
+  // 対局履歴の詳細画面で、ゲスト(participantLinks未紐付け)のプレイヤー枠に対して
+  // 「リンクを送る」を選んだ時に呼ぶ。その対局・その枠専用の使い捨てトークンを
+  // 発行する。matchDataをトークン自身に複製して持たせておくことで、受け取り側は
+  // 「トークンを知っている」だけでmatchHistoryドキュメント本体(host本人にしか
+  // 読み取り権限が無い)を経由せずに内容を確認できる(claimTokens/{token}の
+  // allow get: if isSignedIn(); というシンプルなルールで完結させるための設計。
+  // トークン自体が推測困難な乱数文字列であることが実質的なアクセス制御になる)。
+  async createClaimToken(matchId, playerSlot){
+    if (!this.isAvailable()) return { ok: false };
+    if (!(await this.ensureSignedIn())) return { ok: false };
+    const m = logState.matchHistory.find(x => x.id === matchId);
+    if (!m) return { ok: false };
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      if (!Firestore) return { ok: false };
+      const token = generateClaimToken();
+      const now = Date.now();
+      await Firestore.setDocument({
+        reference: `claimTokens/${token}`,
+        data: {
+          matchId, playerSlot, token,
+          hostUid: logState.account.uid,
+          createdAt: now,
+          expiresAt: now + CLAIM_TOKEN_TTL_MS,
+          used: false,
+          usedBy: null,
+          matchData: {
+            id: m.id,
+            startedAt: m.startedAt,
+            endedAt: m.endedAt,
+            title: m.title || '',
+            settingsSnapshot: m.settingsSnapshot,
+            hanchans: m.hanchans,
+            chips: m.chips,
+            participantUids: m.participantUids || [],
+          },
+        },
+      });
+      return { ok: true, token };
+    } catch (e) {
+      showDebugError('結果受け取りリンクの作成 (createClaimToken)', e);
+      return { ok: false };
+    }
+  },
+  // 受け取り確認画面を開く時に、トークンの中身(有効期限・使用済みかどうか含む)を
+  // 取得する。有効期限切れ・使用済みの判定はここでクライアント側でも行うが、
+  // 実際にclaimする書き込み時にはfirestore.rules側でも同じ条件を再検証する
+  // (クライアント側の判定はあくまでUI表示用で、最終的な可否はルール側が決める)。
+  async fetchClaimToken(token){
+    if (!this.isAvailable()) return { ok: false, error: 'unavailable' };
+    if (!(await this.ensureSignedIn())) return { ok: false, error: 'unavailable' };
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      if (!Firestore) return { ok: false, error: 'unavailable' };
+      const doc = await Firestore.getDocument({ reference: `claimTokens/${token}` });
+      const data = doc && doc.snapshot && doc.snapshot.data;
+      if (!data) return { ok: false, error: 'notfound' };
+      if (data.used) return { ok: false, error: 'used' };
+      if (data.expiresAt && Date.now() > data.expiresAt) return { ok: false, error: 'expired' };
+      return { ok: true, data };
+    } catch (e) {
+      showDebugError('結果受け取りリンクの確認 (fetchClaimToken)', e);
+      return { ok: false, error: 'network' };
+    }
+  },
+  // 「受け取る」を確定する。自分のmatchHistoryへ複製を保存し、トークンを
+  // 使用済みにする(この2つの書き込みはトランザクションではないため、間に
+  // 通信断が挟まると理論上どちらか片方だけ成功する可能性があるが、その場合も
+  // 実害は「もう一度リンクを開けば良いだけ」に留まる設計にしてある:
+  // matchHistory側は既に自分の記録として存在するので何も起きず、トークン側は
+  // used化されていなければ再度この関数が最初からやり直せる)。
+  async claimMatchToken(token, tokenData){
+    if (!this.isAvailable() || !logState.account.uid) return { ok: false };
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      if (!Firestore) return { ok: false };
+      const myUid = logState.account.uid;
+      const md = tokenData.matchData;
+      const entry = {
+        ...md,
+        participantUids: Array.from(new Set([...(md.participantUids || []), myUid])),
+        recordedBy: tokenData.hostUid,
+        claimToken: token, // firestore.rules側でこのトークンの有効性を検証するために必要
+      };
+      await Firestore.setDocument({ reference: `users/${myUid}/matchHistory/${md.id}`, data: entry });
+      await Firestore.updateDocument({ reference: `claimTokens/${token}`, data: { used: true, usedBy: myUid } });
+      delete entry.claimToken; // ローカル保存・表示用のコピーには不要
+      return { ok: true, entry };
+    } catch (e) {
+      showDebugError('結果の受け取り (claimMatchToken)', e);
+      return { ok: false };
+    }
   },
 
   // 起動時にクラウド側のmatchHistoryを取り込み、ローカルにまだ無いもの(=自分が
@@ -3171,7 +3590,9 @@ const CloudSync = {
   // サブコレクションの一括削除APIが無いため、1件ずつ列挙して削除する
   // (firestore.rulesでusers/{uid}の本人によるdeleteを別途許可済み)。
   // 戻り値: { ok: true } | { ok: false, error, dataDeleted? }
-  //   error: 'unavailable'(非ネイティブ・未サインイン) | 'network'(Firestore削除に失敗) |
+  //   error: 'unavailable'(非ネイティブ・未サインイン) | 'reauth'(ローカルに保持している
+  //          uidとFirebase Authentication側の現在のユーザーが一致しない。再ログインが必要) |
+  //          'network'(Firestore削除に失敗) |
   //          'auth'(Firestoreは削除できたがAuthユーザーの削除に失敗。多くはFirebaseの
   //          「最近のログインが必要」制約によるもので、再ログイン後の再試行を促す想定)
   async deleteAccount(){
@@ -3182,29 +3603,70 @@ const CloudSync = {
     const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
     if (!Firestore || !Auth) return { ok: false, error: 'unavailable' };
     try {
+      // 削除処理の直前に必ずIDトークンを強制リフレッシュしておく。古い(失効・
+      // キャッシュされた)トークンのままFirestoreへリクエストすると、実際には
+      // 有効なサインイン状態でも"Missing or insufficient permissions"になり
+      // うるため、これが原因かどうかを切り分ける。ついでに、Firebase
+      // Authentication側が今どのuidを「現在のユーザー」として認識しているかを
+      // ローカルのlogState.account.uidと突き合わせる。以前linkGoogle/linkApple
+      // がsignInWithX()(新規サインイン)を誤って呼んでおり、匿名時代の古いuidの
+      // ままusernames/friends/matchHistoryドキュメントが残っていた場合、
+      // ここで不一致を検出できる(firestore.rulesのisSelf(uid)はrequest.auth.uidを
+      // 見るため、ローカルのuidが古いとどの操作も一律でpermission-deniedになる)。
+      if (Auth.getIdToken) {
+        await Auth.getIdToken({ forceRefresh: true }).catch(e => {
+          showDebugError('アカウント削除 (IDトークンの強制リフレッシュ)', e);
+        });
+      }
+      if (Auth.getCurrentUser) {
+        const current = await Auth.getCurrentUser().catch(() => null);
+        const currentUid = current && current.user && current.user.uid;
+        if (currentUid && currentUid !== uid) {
+          showDebugError('アカウント削除 (UID不一致)', `ローカルに保持しているuid(${uid})と、Firebase Authenticationの現在のユーザーuid(${currentUid})が一致していません。`);
+          return { ok: false, error: 'reauth' };
+        }
+      }
       // 自分がホストの卓が残っていたら、同卓者を巻き込まないよう先に終了させる。
       if (logState.room && logState.room.roomId && logState.room.isHost) {
         await this.updateRoom(logState.room.roomId, { status: 'ended' }).catch(() => {});
       }
-      // ここから下は「本当に削除できたか」を呼び出し側が信頼できるよう、意図的に
-      // .catch()で握りつぶさない(個々の失敗もそのまま外側のcatchでnetworkエラーに
-      // している)。ホストの卓を閉じる処理だけは付随的な後片付けなのでベストエフォート
-      // で構わないが、それ以外を握りつぶすと「実際は消えていないのに削除成功」と
-      // 誤報告しかねないため。
-      const [friendsRes, historyRes] = await Promise.all([
-        Firestore.getCollection({ reference: `users/${uid}/friends` }),
-        Firestore.getCollection({ reference: `users/${uid}/matchHistory` }),
-      ]);
-      const friendDocs = (friendsRes && friendsRes.snapshots) || [];
-      const historyDocs = (historyRes && historyRes.snapshots) || [];
-      await Promise.all([
-        ...friendDocs.map(d => Firestore.deleteDocument({ reference: `users/${uid}/friends/${d.id}` })),
-        ...historyDocs.map(d => Firestore.deleteDocument({ reference: `users/${uid}/matchHistory/${d.id}` })),
-      ]);
-      if (logState.account.username) {
-        await Firestore.deleteDocument({ reference: `usernames/${normalizeUsername(logState.account.username)}` });
+      // 削除対象のドキュメントパスを先に列挙し、Promise.allSettledで全件試行する。
+      // 「本当に削除できたか」を呼び出し側が信頼できるよう、1つでも失敗すれば
+      // networkエラーとして扱うが、その際にどのパスがどんなエラーで拒否されたかを
+      // 個別に特定してデバッグ表示に出す(Xcode接続できない環境での唯一の手がかり)。
+      // users/{uid}自体は他のドキュメントより後に削除する(先に消すと、もし途中で
+      // 失敗した場合に再試行時のgetCollection等の見通しが悪くなるため)。
+      let friendDocs = [], historyDocs = [];
+      try {
+        const [friendsRes, historyRes] = await Promise.all([
+          Firestore.getCollection({ reference: `users/${uid}/friends` }),
+          Firestore.getCollection({ reference: `users/${uid}/matchHistory` }),
+        ]);
+        friendDocs = (friendsRes && friendsRes.snapshots) || [];
+        historyDocs = (historyRes && historyRes.snapshots) || [];
+      } catch (e) {
+        showDebugError('アカウント削除 (Firestore一覧取得)', e);
+        return { ok: false, error: 'network' };
       }
-      await Firestore.deleteDocument({ reference: `users/${uid}` });
+      const deleteRefs = [
+        ...friendDocs.map(d => `users/${uid}/friends/${d.id}`),
+        ...historyDocs.map(d => `users/${uid}/matchHistory/${d.id}`),
+      ];
+      if (logState.account.username) {
+        deleteRefs.push(`usernames/${normalizeUsername(logState.account.username)}`);
+      }
+      deleteRefs.push(`users/${uid}`);
+      const results = await Promise.allSettled(deleteRefs.map(ref => Firestore.deleteDocument({ reference: ref })));
+      const failures = results
+        .map((r, i) => ({ r, ref: deleteRefs[i] }))
+        .filter(x => x.r.status === 'rejected');
+      if (failures.length) {
+        const detail = failures
+          .map(f => `${f.ref}: ${(f.r.reason && (f.r.reason.code || f.r.reason.message)) || f.r.reason}`)
+          .join('\n');
+        showDebugError('アカウント削除 (Firestoreデータ削除)', `以下のドキュメントの削除が拒否されました:\n${detail}`);
+        return { ok: false, error: 'network' };
+      }
     } catch (e) {
       showDebugError('アカウント削除 (Firestoreデータ削除)', e);
       return { ok: false, error: 'network' };
@@ -3248,14 +3710,18 @@ function defaultLogState(){
       presentationMode: false, // 演出モード: 終局ボタンを押すまで順位・収支を隠す
       isPremium: false, // 広告削除+記録し放題(買い切り課金)が有効か。ストアアプリのみ意味を持つ
       participantLinks: {}, // { プレイヤー名: {uid, username} } 同卓者としてアカウント紐付けされている場合のみ存在
+      benchEnabled: false, // 控えメンバー機能のON/OFF
+      benchNames: [],       // 控えメンバーの名前一覧(③)
     },
-    hanchans: [], // 進行中の対局のみ。{ id, scores:{name:val}, busterOf:{bustedName:busterName} }
+    hanchans: [], // 進行中の対局のみ。{ id, scores:{name:val}, busterOf:{bustedName:busterName}, rulesSnapshot }
     chips: {},    // 進行中の対局のみ。name -> 最終枚数
     hanchanSeq: 1,
     currentMatchStartedAt: null, // 進行中の対局の最初の半荘を記録した時刻(ISO文字列)
     matchAdShown: false, // この対局(進行中のhanchansの一区切り)で既に「終局」インタースティシャルを表示したか
     matchHistory: [], // 「対局を終了する」で確定・保存された過去の対局一覧(新しい順)
     // { id, startedAt, endedAt, title, settingsSnapshot, hanchans, chips, participantUids?, recordedBy? }
+    rulePresets: [],   // ②: お気に入りルールプリセット。[{ id, name, rules:{...RULE_SNAPSHOT_FIELDSのうちplayerCountを除いたもの}, createdAt }]
+    memberPresets: [], // ④: メンバー構成プリセット。[{ id, name, members:{playerNames, participantLinks}, createdAt }]
     account: {
       uid: null,
       isAnonymous: true,
@@ -3263,7 +3729,7 @@ function defaultLogState(){
       linkedProviders: { google: false, apple: false },
       notifyOnAutoRecord: true,     // 自分以外の操作で記録が追加された時に通知するか(初期値ON)
       pushPermissionRequested: false, // 通知許可を一度リクエスト済みか(タイミング制御用)
-      largeText: false,             // 文字サイズ:大(旧称ジジイモード)。ONでアプリ全体を1.25倍表示
+      textSize: 'large',             // 文字サイズ: 'normal'(100%) | 'large'(125%、旧ジジイモード) | 'xlarge'(150%)。アプリの初期状態は'large'。
     },
     friends: [], // [{ uid, username }] ローカルキャッシュ(正はusers/{uid}/friends)
     room: null,  // 進行中の卓。null=単独モード。
@@ -3274,6 +3740,8 @@ function defaultLogState(){
       startAdvancedOpen: false,
       editingHanchanId: null,
       formScores: {},
+      formScoreSign: {},  // プレイヤー名 -> '+' | '-'(素点入力欄の符号トグル。数字専用キーボードにマイナスが無いための対応)
+      formScoreAuto: {},  // プレイヤー名 -> true の間は、他の入力に追随して自動逆算され続ける仮の値(手入力で上書きするとfalseに戻る)
       formBuster: {},
       revealActive: false, // 演出モードで「終局」ボタンを押したか
       revealStep: 0,       // 発表済みの順位グループ数
@@ -3324,11 +3792,42 @@ function defaultLogState(){
       addFriendSearchError: null,
       addFriendSearchChecking: false,
       historyFriendFilter: null,   // { uid, username } — フレンド一覧から「この人との戦歴」を見ている間だけ設定される絞り込み
+      historyLinkShareOpen: false,  // 対局履歴詳細: ゲストへの結果受け取りリンクを送るモーダル
+      historyLinkShareMatchId: null,
+      historyLinkSharePlayerSlot: null,
+      historyLinkShareBusy: false,
+      historyLinkShareError: null,
+      claimOpen: false,             // 受け取ったリンク(?token=)の確認モーダル
+      claimToken: null,
+      claimData: null,              // claimTokensドキュメントの中身(matchData含む)
+      claimBusy: false,
+      claimError: null,
+      claimDone: false,
+      activeRulePresetId: null,    // ②: 現在適用中のルールプリセット(手動変更で即座にnullへ)
+      activeMemberPresetId: null,  // ④: 現在適用中のメンバー構成プリセット(手動変更で即座にnullへ)
+      presetMenuOpen: null,        // { kind:'rule'|'member', id } — ⋮メニューの開閉
+      confirmDeletePreset: null,   // { kind, id } — 削除確認ポップアップ
+      renamingPreset: null,        // { kind, id } — id=nullなら新規保存モード。名前入力モーダルの開閉を兼ねる
+      substituteOpen: false,       // ③: 控えメンバーとの交代モーダル
+      substituteBenchIndex: null,  // 交代しようとしている控えメンバーのbenchNames内インデックス
     },
   };
 }
 
 // 保存されているデータ(v2、無ければ旧v1)をパースしてdefaultLogState()にマージする、
+// 旧: largeText(boolean、2段階)から新: textSize('normal'|'large'|'xlarge'、
+// 3段階)への移行。textSizeを既に保存済みならそのまま使う。旧largeTextしか
+// 無い場合は、既存ユーザーが明示的に選んでいたON/OFFの状態を尊重して
+// 変換する(アプリの新しい初期値'large'を、既存ユーザーに黙って
+// 上書きしないため)。account自体が無い(非常に古いデータ)場合だけ、
+// 新しい初期値をそのまま使う。
+function migrateTextSize(parsedAccount, defaultTextSize){
+  if (!parsedAccount) return defaultTextSize;
+  if (parsedAccount.textSize) return parsedAccount.textSize;
+  if (parsedAccount.largeText === false) return 'normal';
+  if (parsedAccount.largeText === true) return 'large';
+  return defaultTextSize;
+}
 // v1/v2共通の下地処理。matchHistoryはv1データに存在しないため自然に[]で補完される。
 function mergeParsedLogState(parsed){
   const base = defaultLogState();
@@ -3337,10 +3836,13 @@ function mergeParsedLogState(parsed){
     ...parsed,
     settings: { ...base.settings, ...(parsed.settings || {}) },
     matchHistory: Array.isArray(parsed.matchHistory) ? parsed.matchHistory : [],
+    rulePresets: Array.isArray(parsed.rulePresets) ? parsed.rulePresets : [],
+    memberPresets: Array.isArray(parsed.memberPresets) ? parsed.memberPresets : [],
     account: {
       ...base.account,
       ...(parsed.account || {}),
       linkedProviders: { ...base.account.linkedProviders, ...((parsed.account || {}).linkedProviders || {}) },
+      textSize: migrateTextSize(parsed.account, base.account.textSize),
     },
     friends: Array.isArray(parsed.friends) ? parsed.friends : [],
     room: parsed.room || null,
@@ -3363,21 +3865,21 @@ function loadLogState(){
 
 function saveLogState(){
   try {
-    const { settings, hanchans, chips, hanchanSeq, currentMatchStartedAt, matchAdShown, matchHistory, account, friends, room } = logState;
-    localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify({ settings, hanchans, chips, hanchanSeq, currentMatchStartedAt, matchAdShown, matchHistory, account, friends, room }));
+    const { settings, hanchans, chips, hanchanSeq, currentMatchStartedAt, matchAdShown, matchHistory, account, friends, room, rulePresets, memberPresets } = logState;
+    localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify({ settings, hanchans, chips, hanchanSeq, currentMatchStartedAt, matchAdShown, matchHistory, account, friends, room, rulePresets, memberPresets }));
   } catch (e) { /* 保存できない環境ではメモリ上のみで継続 */ }
 }
 
 const logState = loadLogState();
 if (logState.hanchans.length > 0) logState.ui.settingsOpen = false;
 saveLogState(); // v1からの移行時などに、v2キーへ即座に書き直しておく
-applyLargeTextClass(); // 保存済みの文字サイズ設定を起動直後から反映する
+applyTextSizeClass(); // 保存済みの文字サイズ設定を起動直後から反映する
 
 // 起動時に必ずPlay Billingへ購入履歴を問い合わせて上書きする。ローカル保存の
 // isPremiumだけに頼ると、端末変更・再インストール時に無料枠へ戻ってしまうため。
 // (非ネイティブ環境ではrestorePurchases()がnullを返し、何も上書きしない。)
 Native.initAds();
-(async () => {
+const _restorePurchasesOnBoot = (async () => {
   const restored = await Native.restorePurchases();
   if (restored !== null && restored !== logState.settings.isPremium) {
     logState.settings.isPremium = restored;
@@ -3387,7 +3889,35 @@ Native.initAds();
 })();
 // マルチプレイヤー(フレンド・卓)機能の起動処理。匿名認証を確立し、フレンド
 // 一覧を最新化し、前回終了時に進行中の卓があれば再購読する。
-CloudSync.init().then(() => scheduleRenderApp());
+CloudSync.init().then(async () => {
+  scheduleRenderApp();
+  // 起動時の購入復元(上記)の結果が出揃うのを待ってから、自分のisPremiumを
+  // users/{uid}へ同期する(サインイン完了=account.uid確定を待つ必要があるため
+  // CloudSync.init()の完了後に行う。フレンドの表示名を金色にする機能・
+  // firestore.rulesの無料枠判定が参照する)。
+  await _restorePurchasesOnBoot;
+  CloudSync.syncPremiumStatus();
+});
+
+// ---- ゲストプレイヤーへの結果受け取りリンク(Universal Links) ----
+// Universal Links経由でアプリが直接起動された場合、iOS側(AppDelegate.swift の
+// application(_:continue:restorationHandler:))からCapacitorの@capacitor/appプラグイン
+// 経由でappUrlOpenイベントとして中継される(ネイティブ側の追加実装は不要。
+// ios-snippets/associated-domains-notes.md参照)。
+try {
+  const AppPlugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+  if (AppPlugin && AppPlugin.addListener) {
+    AppPlugin.addListener('appUrlOpen', (data) => {
+      if (data && data.url) handleIncomingUrl(data.url);
+    });
+  }
+} catch (e) { /* @capacitor/appが無い/未対応環境では何もしない */ }
+// このWebページ自体を直接 ?token=... 付きで開いた場合(GitHub Pages上での動作確認、
+// Universal Linksが未設定の環境でのフォールバック確認など)にも同じ経路で拾う。
+try {
+  const bootToken = new URLSearchParams(location.search).get('token');
+  if (bootToken) handleIncomingUrl(location.href);
+} catch (e) {}
 
 function activePlayers(){
   return logState.settings.playerNames.slice(0, logState.settings.playerCount);
@@ -3445,8 +3975,14 @@ function syncRoomState(){
 
 function resetFormScores(){
   logState.ui.formScores = {};
+  logState.ui.formScoreSign = {};
+  logState.ui.formScoreAuto = {};
   logState.ui.formBuster = {};
-  activePlayers().forEach(p => { logState.ui.formScores[p] = ''; });
+  activePlayers().forEach(p => {
+    logState.ui.formScores[p] = '';
+    logState.ui.formScoreSign[p] = '+'; // デフォルトは「+」から開始
+    logState.ui.formScoreAuto[p] = false;
+  });
 }
 resetFormScores();
 
@@ -3545,6 +4081,17 @@ function formatPt(n){
   const sign = n > 0 ? '+' : n < 0 ? '-' : '';
   return `${sign}${Math.abs(n).toFixed(1)}`;
 }
+// 金額表示を2段組みにする共通ヘルパー(結果発表画面・対局履歴の詳細画面で
+// 同じ見た目にするため1箇所にまとめる)。上段は合計金額(チップ込み、
+// 表示内容は従来通り)。下段はチップ分の内訳(🪙+符号付き金額)のみを、
+// 上段より一回り小さく・控えめな色で添える。チップを使っていない
+// (chipMoneyが0の)対局では下段を出さず、従来通り1段のままにする。
+function moneyStackInnerHtml(amount, chipMoney, mainClass){
+  const chipLine = chipMoney
+    ? `<div class="money-chip-sub ${chipMoney>=0?'plus':'minus'}">🪙 ${formatMoney(chipMoney)}</div>`
+    : '';
+  return `<div class="${mainClass}">${formatMoney(amount)}</div>${chipLine}`;
+}
 
 /* ---- tab switching ---- */
 function setActiveTab(tab){ logState._activeTab = tab; scheduleRenderApp(); }
@@ -3555,6 +4102,7 @@ function setPlayerCount(n){
   if (n === 3 && logState.settings.uma.length !== 1) logState.settings.uma = [15];
   if (n === 4 && logState.settings.uma.length !== 2) logState.settings.uma = [10, 30];
   resetFormScores();
+  logState.ui.activeMemberPresetId = null; // ④: 人数が変わったのでメンバー構成プリセットの適用状態は外す
   saveLogState(); scheduleRenderApp();
 }
 function renamePlayerEverywhere(oldName, newName){
@@ -3594,30 +4142,37 @@ function setPlayerName(i, value){
   const newName = (value || '').trim() || `P${i+1}`;
   logState.settings.playerNames[i] = newName;
   renamePlayerEverywhere(oldName, newName);
+  logState.ui.activeMemberPresetId = null; // ④: メンバー名を手動変更したので適用状態を外す
   saveLogState(); scheduleRenderApp();
 }
+// ②: ルールプリセットは「対局ルール設定パネル内のいずれかの項目が手動で
+// 変更された」瞬間に、直ちにどのプリセットも選択されていない状態へ戻す。
+// 各設定変更ハンドラの先頭でこれを呼ぶ。
+function clearActiveRulePreset(){ logState.ui.activeRulePresetId = null; }
 function setStartPointsPreset(v){
   // オカのあり/なし（返し点との差が+5,000点かどうか）はそのまま保って、
   // 持ち点だけを切り替える。
+  clearActiveRulePreset();
   const okaOn = logState.settings.returnPoints > logState.settings.startPoints;
   logState.settings.startPoints = v;
   logState.settings.returnPoints = v + (okaOn ? 5000 : 0);
   saveLogState(); scheduleRenderApp();
 }
 function setOkaEnabled(v){
+  clearActiveRulePreset();
   logState.settings.returnPoints = logState.settings.startPoints + (v ? 5000 : 0);
   saveLogState(); scheduleRenderApp();
 }
-function setStartPoints(v){ logState.settings.startPoints = v; saveLogState(); scheduleRenderApp(); }
-function setReturnPoints(v){ logState.settings.returnPoints = v; saveLogState(); scheduleRenderApp(); }
-function setUmaEnabled(v){ logState.settings.umaEnabled = v; saveLogState(); scheduleRenderApp(); }
-function setUmaPreset(...vals){ logState.settings.uma = vals; saveLogState(); scheduleRenderApp(); }
-function setTobiEnabled(v){ logState.settings.tobiEnabled = v; saveLogState(); scheduleRenderApp(); }
-function setTobiPoints(v){ logState.settings.tobiPoints = v; saveLogState(); scheduleRenderApp(); }
-function setTobiRecipient(v){ logState.settings.tobiRecipient = v; saveLogState(); scheduleRenderApp(); }
-function setRate(v){ logState.settings.rate = v; saveLogState(); scheduleRenderApp(); }
-function setRoundingMode(v){ logState.settings.roundingMode = v; saveLogState(); scheduleRenderApp(); }
-function setChipUnitYen(v){ logState.settings.chipUnitYen = v; saveLogState(); scheduleRenderApp(); }
+function setStartPoints(v){ clearActiveRulePreset(); logState.settings.startPoints = v; saveLogState(); scheduleRenderApp(); }
+function setReturnPoints(v){ clearActiveRulePreset(); logState.settings.returnPoints = v; saveLogState(); scheduleRenderApp(); }
+function setUmaEnabled(v){ clearActiveRulePreset(); logState.settings.umaEnabled = v; saveLogState(); scheduleRenderApp(); }
+function setUmaPreset(...vals){ clearActiveRulePreset(); logState.settings.uma = vals; saveLogState(); scheduleRenderApp(); }
+function setTobiEnabled(v){ clearActiveRulePreset(); logState.settings.tobiEnabled = v; saveLogState(); scheduleRenderApp(); }
+function setTobiPoints(v){ clearActiveRulePreset(); logState.settings.tobiPoints = v; saveLogState(); scheduleRenderApp(); }
+function setTobiRecipient(v){ clearActiveRulePreset(); logState.settings.tobiRecipient = v; saveLogState(); scheduleRenderApp(); }
+function setRate(v){ clearActiveRulePreset(); logState.settings.rate = v; saveLogState(); scheduleRenderApp(); }
+function setRoundingMode(v){ clearActiveRulePreset(); logState.settings.roundingMode = v; saveLogState(); scheduleRenderApp(); }
+function setChipUnitYen(v){ clearActiveRulePreset(); logState.settings.chipUnitYen = v; saveLogState(); scheduleRenderApp(); }
 function toggleAccordion(key){ logState.ui[key] = !logState.ui[key]; scheduleRenderApp(); }
 
 /* ---- 演出モード（終局まで順位・収支を隠す） ----
@@ -3767,9 +4322,9 @@ async function purchaseFromPaywall(){
   logState.ui.paywallPurchasing = true;
   logState.ui.paywallErrorMsg = null;
   scheduleRenderApp();
-  const success = await Native.purchasePremium();
+  const result = await Native.purchasePremium();
   logState.ui.paywallPurchasing = false;
-  if (success) {
+  if (result.success) {
     logState.settings.isPremium = true;
     logState.ui.paywallOpen = false;
     saveLogState();
@@ -3782,6 +4337,13 @@ async function purchaseFromPaywall(){
       logState.ui.paywallSource = null;
       scheduleRenderApp();
     }
+  } else if (result.reason === 'timeout') {
+    // 実機では、ストア側の購入自体は成立しているのにapproved/verifiedイベントの
+    // 受信だけが60秒以上遅れるケースを確認している。「失敗しました」と断定すると
+    // 誤解を招くため、時間を置いてからの「購入を復元」を案内する文言にする
+    // (イベントが遅れて届けばNative側で自動的にプレミアム状態へ反映される)。
+    logState.ui.paywallErrorMsg = '反映に時間がかかっています。少し時間をおいてから、メニューの「購入を復元」をお試しください。決済自体は完了している場合があります。';
+    scheduleRenderApp();
   } else {
     logState.ui.paywallErrorMsg = '購入を完了できませんでした。通信環境をご確認のうえ、もう一度お試しください。';
     scheduleRenderApp();
@@ -3810,6 +4372,7 @@ async function restorePurchasesFromMenu(){
     logState.settings.isPremium = true;
     saveLogState();
     Native.hideBanner();
+    CloudSync.syncPremiumStatus(); // フレンドの表示名を金色にする機能・無料枠判定用
     logState.ui.billingMsg = '購入情報を復元しました。広告が削除され、記録し放題になりました。';
   } else if (restored === false) {
     logState.ui.billingMsg = '有効な購入が見つかりませんでした。';
@@ -3825,8 +4388,55 @@ function cancelEditHanchan_noRender(){
 }
 
 /* ---- hanchan form handlers ---- */
-function setFormScore(name, value){ logState.ui.formScores[name] = value; scheduleRenderApp(); }
+// 素点入力欄は常に絶対値の数字だけを保持し、符号はformScoreSignで別管理する
+// (数字専用キーボード(inputmode="numeric")にはマイナス記号が無く、
+// 符号込みの値を直接入力できないため、符号だけ別のトグルボタンで
+// 切り替える設計にした)。デスクトップの number input 等で "-123" のような
+// 符号付きの値がそのまま渡ってきた場合は、ここで符号を抜き出して
+// formScoreSign側に反映し、符号が二重にならないようにする。
+function setFormScore(name, value){
+  const str = String(value);
+  if (str.startsWith('-')) {
+    logState.ui.formScoreSign[name] = '-';
+    logState.ui.formScores[name] = str.slice(1);
+  } else {
+    logState.ui.formScores[name] = value;
+  }
+  logState.ui.formScoreAuto[name] = false; // 手入力なので自動逆算の仮値ではなくなる
+  autoFillLastPlayerScore();
+  scheduleRenderApp();
+}
+function toggleFormScoreSign(name){
+  const cur = logState.ui.formScoreSign[name] || '+';
+  logState.ui.formScoreSign[name] = cur === '+' ? '-' : '+';
+  logState.ui.formScoreAuto[name] = false; // 符号を直接触った時点で手入力扱いにする
+  autoFillLastPlayerScore();
+  scheduleRenderApp();
+}
 function setFormBuster(bustedName, busterName){ logState.ui.formBuster[bustedName] = busterName; scheduleRenderApp(); }
+
+// N人打ちのうちN-1人分の素点が確定していれば、残り1人分を
+// 合計素点(持ち点×人数)から逆算し、暫定値として自動入力する。
+// 「確定」とは、空欄でなく、かつformScoreAutoがfalse(=自動逆算の仮値では
+// ない)状態を指す。まだ仮値のままの欄は「未確定」として扱われるため、
+// 他の欄を編集するたびに再計算され続ける(ユーザーがその欄自体を手入力で
+// 上書きした瞬間にformScoreAuto=falseになり、以後は再計算されなくなる)。
+// 入力される順番は問わない(setFormScore/toggleFormScoreSignの両方から
+// 毎回呼ばれるため、どの欄が最後に埋まってもその時点で発動する)。
+function autoFillLastPlayerScore(){
+  const players = activePlayers();
+  const unfixed = players.filter(p => logState.ui.formScores[p] === '' || logState.ui.formScoreAuto[p]);
+  if (unfixed.length !== 1) return; // ちょうど1人だけ未確定の時だけ発動
+  const target = unfixed[0];
+  const others = players.filter(p => p !== target);
+  if (others.some(p => isNaN(formScoreActual(p)))) return; // 他の欄がまだ不正な間は逆算しない
+  const expectedTotal = logState.settings.startPoints * logState.settings.playerCount;
+  const filledSum = others.reduce((sum, p) => sum + formScoreActual(p), 0);
+  const remainder = expectedTotal - filledSum;
+  logState.ui.formScoreSign[target] = remainder < 0 ? '-' : '+';
+  logState.ui.formScores[target] = String(Math.abs(remainder) / SCORE_INPUT_SCALE);
+  logState.ui.formScoreAuto[target] = true;
+}
 
 // 素点は必ず100点単位（下2桁は常に00）なので、入力フォームでは下2桁を省略した
 // 「100点単位の値」を打ってもらい、実際の素点にする時だけ100倍する。
@@ -3834,7 +4444,9 @@ function setFormBuster(bustedName, busterName){ logState.ui.formBuster[bustedNam
 const SCORE_INPUT_SCALE = 100;
 function formScoreActual(p){
   const raw = parseFloat(logState.ui.formScores[p]);
-  return isNaN(raw) ? NaN : Math.round(raw * SCORE_INPUT_SCALE);
+  if (isNaN(raw)) return NaN;
+  const sign = logState.ui.formScoreSign[p] === '-' ? -1 : 1;
+  return Math.round(sign * raw * SCORE_INPUT_SCALE);
 }
 function formTotal(){
   return activePlayers().reduce((sum, p) => {
@@ -3912,7 +4524,11 @@ function finalizeRecordHanchan(scores, busterOf, tiebreakDealer){
     if (logState.hanchans.length === 0 && !logState.currentMatchStartedAt) {
       logState.currentMatchStartedAt = new Date().toISOString();
     }
-    logState.hanchans.unshift({ id: logState.hanchanSeq++, scores, busterOf, tiebreakDealer });
+    // ①: 記録するタイミングの対局ルール設定をこの半荘専用のスナップショットとして
+    // 固定する。以後ルール設定パネルの値を変えても、この半荘の計算結果は
+    // 変わらない(calcHanchanResult参照)。次の半荘は、このスナップショットの
+    // 元になったlogState.settingsをそのまま(何もリセットせず)引き継いで開始する。
+    logState.hanchans.unshift({ id: logState.hanchanSeq++, scores, busterOf, tiebreakDealer, rulesSnapshot: captureRulesSnapshot(logState.settings) });
   }
   logState.ui.confirmEndMatch = false;
   resetFormScores();
@@ -3934,10 +4550,22 @@ function editHanchan(id){
   if (!h) return;
   logState.ui.editingHanchanId = id;
   logState.ui.formScores = {};
+  logState.ui.formScoreSign = {};
+  logState.ui.formScoreAuto = {};
   logState.ui.formBuster = {};
   activePlayers().forEach(p => {
-    // 保存されている実際の素点(例:35,000)を、入力欄用の100点単位の表記(例:350)に戻す。
-    logState.ui.formScores[p] = h.scores[p] === undefined ? '' : String(h.scores[p] / SCORE_INPUT_SCALE);
+    // 保存されている実際の素点(例:35,000 / -5,000)を、入力欄用の100点単位の
+    // 絶対値表記(例:350 / 50)と符号トグル(formScoreSign)に分けて戻す。
+    const actual = h.scores[p];
+    if (actual === undefined) {
+      logState.ui.formScores[p] = '';
+      logState.ui.formScoreSign[p] = '+';
+    } else {
+      const scaled = actual / SCORE_INPUT_SCALE;
+      logState.ui.formScoreSign[p] = scaled < 0 ? '-' : '+';
+      logState.ui.formScores[p] = String(Math.abs(scaled));
+    }
+    logState.ui.formScoreAuto[p] = false; // 保存済みの実データなので仮値扱いにはしない
     if (h.busterOf && h.busterOf[p]) logState.ui.formBuster[p] = h.busterOf[p];
   });
   scheduleRenderApp(() => {
@@ -4008,6 +4636,8 @@ function openLoginPrompt(reason, afterAction){
   logState.ui.friendPickerOpen = false;
   logState.ui.friendsListOpen = false;
   logState.ui.addFriendOpen = false;
+  logState.ui.historyLinkShareOpen = false;
+  logState.ui.claimOpen = false;
   logState.ui.loginPromptOpen = true;
   logState.ui.loginPromptReason = reason;
   logState.ui._loginPromptAfterAction = afterAction; // ログイン後 or スキップ後に続ける処理
@@ -4142,7 +4772,17 @@ async function linkParticipant(uid, username){
   const slot = logState.ui.friendPickerSlot;
   if (!slot) return;
   logState.settings.participantLinks[slot] = { uid, username };
-  saveLogState();
+  // 指定した瞬間、同じ行のプレイヤー名入力欄にもそのユーザーネームを自動入力する。
+  // setPlayerName()はrenamePlayerEverywhere()経由でparticipantLinksのキーも
+  // 追従して書き換えるため、直前に設定した上のリンクもslot→usernameへ正しく
+  // 引き継がれる(以後プレイヤー名を手動で書き換えても、renamePlayerEverywhere()が
+  // 都度リンクのキーを追従させるので紐付け自体は解除されない)。
+  const idx = logState.settings.playerNames.indexOf(slot);
+  if (idx !== -1) {
+    setPlayerName(idx, username);
+  } else {
+    saveLogState();
+  }
   closeFriendPicker();
   await CloudSync.addFriend(uid, username);
   scheduleRenderApp();
@@ -4151,8 +4791,337 @@ function unlinkParticipant(){
   const slot = logState.ui.friendPickerSlot;
   if (!slot) return;
   delete logState.settings.participantLinks[slot];
+  logState.ui.activeMemberPresetId = null; // ④: フレンド指定の変更もメンバー構成の変更として扱う
   saveLogState();
   closeFriendPicker();
+}
+
+/* ---- ③ 控えメンバー・メンバー入れ替え ---- */
+function toggleBenchEnabled(){
+  logState.settings.benchEnabled = !logState.settings.benchEnabled;
+  saveLogState(); scheduleRenderApp();
+}
+function addBenchMember(){
+  const n = logState.settings.benchNames.length + 1;
+  logState.settings.benchNames.push(`控え${n}`);
+  saveLogState(); scheduleRenderApp();
+}
+function setBenchName(i, value){
+  const trimmed = (value || '').trim();
+  logState.settings.benchNames[i] = trimmed || `控え${i + 1}`;
+  saveLogState(); scheduleRenderApp();
+}
+function removeBenchMember(i){
+  logState.settings.benchNames.splice(i, 1);
+  saveLogState(); scheduleRenderApp();
+}
+// 交代アイコンは控えメンバーの行にある。タップした控えメンバーを、次に
+// 選ぶアクティブメンバーと入れ替える(誰と交代するかは後のポップアップで選ぶ)。
+function openSubstituteModal(benchIndex){
+  logState.ui.substituteOpen = true;
+  logState.ui.substituteBenchIndex = benchIndex;
+  scheduleRenderApp();
+}
+function closeSubstituteModal(){
+  logState.ui.substituteOpen = false;
+  logState.ui.substituteBenchIndex = null;
+  scheduleRenderApp();
+}
+// slotIndexで指定したアクティブな枠(playerNames[slotIndex])を、控えメンバー
+// (benchNames[benchIndex])と入れ替える。「進行中かどうか」は問わず、まだ
+// 記録していない半荘の入力欄であればいつでも呼べる(呼び出し元のUI側で
+// 常時表示することでこれを満たす)。
+//
+// ⚠️ ここではrenamePlayerEverywhere()を意図的に呼ばない。通常のプレイヤー名
+// 変更(setPlayerName)は「同じ人の表示名を変える」操作なので過去の半荘記録
+// にも遡って反映するが、交代は「別の人に入れ替わる」操作なので、既に
+// 「半荘を記録する」が押された過去の半荘のscoresキー(=退いた人の名前の
+// ままでよい、その人自身の記録として正しい)を書き換えてはならない。
+// 今後(まだ記録していない)入力欄からのみ、新しい名前(控えメンバーの名前)
+// が使われるようにする。
+function confirmSubstitute(slotIndex){
+  const benchIndex = logState.ui.substituteBenchIndex;
+  if (benchIndex == null) return;
+  const benchNames = logState.settings.benchNames;
+  const incoming = benchNames[benchIndex];
+  const outgoing = logState.settings.playerNames[slotIndex];
+  if (incoming == null || outgoing == null) return;
+  logState.settings.playerNames[slotIndex] = incoming;
+  benchNames.splice(benchIndex, 1, outgoing); // 退いた人がそのまま控えメンバー欄に入る(入れ替え)
+  // まだ記録していない入力欄に、退いた人の分として未確定の点数が入力途中
+  // だった場合、別人の点数を新しい人が引き継いでしまわないようクリアする。
+  delete logState.ui.formScores[outgoing];
+  delete logState.ui.formScoreSign[outgoing];
+  delete logState.ui.formScoreAuto[outgoing];
+  logState.ui.formScores[incoming] = '';
+  logState.ui.formScoreSign[incoming] = '+';
+  logState.ui.formScoreAuto[incoming] = false;
+  logState.ui.activeMemberPresetId = null; // ④: メンバー構成が変わったので適用状態を外す
+  closeSubstituteModal();
+  saveLogState();
+  scheduleRenderApp();
+}
+
+/* ---- ②④共通: プリセット(ルール/メンバー構成)の汎用管理 ----
+   kindは'rule'|'member'。「1タップで適用・⋮メニューから名前変更/上書き・
+   削除確認・件数上限なし・+新規保存」というUI/挙動パターンを②③どちらの
+   プリセット種別でも共有するための共通実装。 */
+function getPresetList(kind){
+  return kind === 'rule' ? logState.rulePresets : logState.memberPresets;
+}
+function getActivePresetId(kind){
+  return kind === 'rule' ? logState.ui.activeRulePresetId : logState.ui.activeMemberPresetId;
+}
+function setActivePresetId(kind, id){
+  if (kind === 'rule') logState.ui.activeRulePresetId = id;
+  else logState.ui.activeMemberPresetId = id;
+}
+function captureMemberPreset(){
+  const names = activePlayers();
+  const participantLinks = {};
+  names.forEach(p => { if (logState.settings.participantLinks[p]) participantLinks[p] = logState.settings.participantLinks[p]; });
+  return { playerNames: [...names], participantLinks };
+}
+function applyRulePreset(id){
+  const preset = logState.rulePresets.find(p => p.id === id);
+  if (!preset) return;
+  Object.assign(logState.settings, preset.rules);
+  logState.ui.activeRulePresetId = id;
+  saveLogState();
+  scheduleRenderApp();
+}
+function applyMemberPreset(id){
+  const preset = logState.memberPresets.find(p => p.id === id);
+  if (!preset) return;
+  const names = preset.members.playerNames;
+  logState.settings.playerCount = names.length;
+  logState.settings.playerNames = [...names];
+  names.forEach(p => {
+    if (preset.members.participantLinks[p]) logState.settings.participantLinks[p] = preset.members.participantLinks[p];
+  });
+  resetFormScores();
+  logState.ui.activeMemberPresetId = id;
+  saveLogState();
+  scheduleRenderApp();
+}
+function applyPreset(kind, id){
+  if (kind === 'rule') applyRulePreset(id);
+  else applyMemberPreset(id);
+}
+function openPresetMenu(kind, id){
+  logState.ui.presetMenuOpen = { kind, id };
+  scheduleRenderApp();
+}
+function closePresetMenu(){
+  logState.ui.presetMenuOpen = null;
+  scheduleRenderApp();
+}
+// id=nullなら「+ 新規保存」(新規作成モード)、idがあれば既存プリセットの名前変更モード。
+function _focusPresetNameInput(){
+  scheduleRenderApp(() => {
+    const el = document.getElementById('presetNameInput');
+    if (el) { el.focus(); el.select(); }
+  });
+}
+function startRenamePreset(kind, id){
+  logState.ui.presetMenuOpen = null;
+  logState.ui.renamingPreset = { kind, id };
+  _focusPresetNameInput();
+}
+function startNewPreset(kind){
+  logState.ui.renamingPreset = { kind, id: null };
+  _focusPresetNameInput();
+}
+function cancelRenamePreset(){
+  logState.ui.renamingPreset = null;
+  scheduleRenderApp();
+}
+function saveRenamePreset(name){
+  const target = logState.ui.renamingPreset;
+  if (!target) return;
+  const trimmed = (name || '').trim();
+  if (!trimmed) { cancelRenamePreset(); return; }
+  const { kind, id } = target;
+  if (id) {
+    const preset = getPresetList(kind).find(p => p.id === id);
+    if (preset) preset.name = trimmed;
+  } else {
+    const preset = {
+      id: 'preset_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      name: trimmed,
+      createdAt: Date.now(),
+    };
+    if (kind === 'rule') {
+      preset.rules = captureRulePreset(logState.settings);
+      logState.rulePresets.push(preset);
+    } else {
+      preset.members = captureMemberPreset();
+      logState.memberPresets.push(preset);
+    }
+    setActivePresetId(kind, preset.id);
+  }
+  logState.ui.renamingPreset = null;
+  saveLogState();
+  scheduleRenderApp();
+}
+function overwritePreset(kind, id){
+  const preset = getPresetList(kind).find(p => p.id === id);
+  if (!preset) return;
+  if (kind === 'rule') preset.rules = captureRulePreset(logState.settings);
+  else preset.members = captureMemberPreset();
+  logState.ui.presetMenuOpen = null;
+  setActivePresetId(kind, id);
+  saveLogState();
+  scheduleRenderApp();
+}
+function requestDeletePreset(kind, id){
+  logState.ui.presetMenuOpen = null;
+  logState.ui.confirmDeletePreset = { kind, id };
+  scheduleRenderApp();
+}
+function cancelDeletePreset(){
+  logState.ui.confirmDeletePreset = null;
+  scheduleRenderApp();
+}
+function confirmDeletePresetAction(){
+  const target = logState.ui.confirmDeletePreset;
+  if (!target) return;
+  const { kind, id } = target;
+  if (kind === 'rule') {
+    logState.rulePresets = logState.rulePresets.filter(p => p.id !== id);
+    if (logState.ui.activeRulePresetId === id) logState.ui.activeRulePresetId = null;
+  } else {
+    logState.memberPresets = logState.memberPresets.filter(p => p.id !== id);
+    if (logState.ui.activeMemberPresetId === id) logState.ui.activeMemberPresetId = null;
+  }
+  logState.ui.confirmDeletePreset = null;
+  saveLogState();
+  scheduleRenderApp();
+}
+
+/* ---- 対局履歴: ゲストプレイヤーへの結果受け取りリンクを送る ----
+   「既存の指定ボタンの選択肢に追加する」という要望に対応するため、専用の新しい
+   ボタンを画面に増やすのではなく、対局履歴詳細のプレイヤーカード(既存の
+   .total-card、totalCardsHtml参照)自体をタップ対象にし、renderFriendPickerModal
+   と同じ見た目(.history-modal-overlay/.history-modal)を流用したモーダルを開く。
+   対局履歴は確定後は書き換えられない(firestore.rulesのmatchHistory.update=false)
+   ため、既存の「ユーザーネーム検索/フレンドから選ぶ」即時リンクの仕組みはここでは
+   使わず、「リンクを送る」(トークン発行+共有)だけを提供する。 */
+function openHistoryLinkShare(matchId, playerSlot){
+  const doOpen = () => {
+    logState.ui.historyLinkShareOpen = true;
+    logState.ui.historyLinkShareMatchId = matchId;
+    logState.ui.historyLinkSharePlayerSlot = playerSlot;
+    logState.ui.historyLinkShareBusy = false;
+    logState.ui.historyLinkShareError = null;
+    scheduleRenderApp();
+  };
+  if (needsLoginPromptFirst()) {
+    openLoginPrompt('history_link_share', doOpen);
+  } else {
+    doOpen();
+  }
+}
+function closeHistoryLinkShare(){
+  logState.ui.historyLinkShareOpen = false;
+  logState.ui.historyLinkShareMatchId = null;
+  logState.ui.historyLinkSharePlayerSlot = null;
+  logState.ui.historyLinkShareError = null;
+  scheduleRenderApp();
+}
+async function generateAndShareClaimLink(){
+  const matchId = logState.ui.historyLinkShareMatchId;
+  const slot = logState.ui.historyLinkSharePlayerSlot;
+  if (!matchId || !slot) return;
+  logState.ui.historyLinkShareBusy = true;
+  logState.ui.historyLinkShareError = null;
+  scheduleRenderApp();
+  const result = await CloudSync.createClaimToken(matchId, slot);
+  logState.ui.historyLinkShareBusy = false;
+  if (!result.ok) {
+    logState.ui.historyLinkShareError = 'リンクの作成に失敗しました。通信環境をご確認のうえ、もう一度お試しください。';
+    scheduleRenderApp();
+    return;
+  }
+  const url = `${CLAIM_LINK_BASE_URL}?token=${encodeURIComponent(result.token)}`;
+  closeHistoryLinkShare();
+  const text = `${slot}さんへ、麻雀対局の結果をお送りします。\nリンクをタップして受け取ってください(有効期限: 3日間)\n${url}`;
+  await shareText(text, '対局結果を送る');
+}
+
+/* ---- 受け取ったリンク(?token=)の確認 ---- */
+// Universal Links経由(App.addListener('appUrlOpen')、下部の起動処理参照)、または
+// このWebページ自体を直接 ?token=... 付きで開いた場合の両方から呼ばれる。
+function handleIncomingUrl(urlString){
+  try {
+    const url = new URL(urlString, location.href);
+    const token = url.searchParams.get('token');
+    if (token) openClaimFlow(token);
+  } catch (e) { /* 不正なURLは無視 */ }
+}
+async function openClaimFlow(token){
+  logState.ui.claimOpen = true;
+  logState.ui.claimToken = token;
+  logState.ui.claimData = null;
+  logState.ui.claimError = null;
+  logState.ui.claimDone = false;
+  logState.ui.claimBusy = true;
+  scheduleRenderApp();
+  const result = await CloudSync.fetchClaimToken(token);
+  logState.ui.claimBusy = false;
+  if (!result.ok) {
+    logState.ui.claimError = result.error === 'expired' ? 'このリンクの有効期限(3日間)が切れています。'
+      : result.error === 'used' ? 'このリンクは既に使用されています。'
+      : result.error === 'notfound' ? 'このリンクは見つかりませんでした。'
+      : 'リンクを確認できませんでした。通信環境をご確認のうえ、もう一度お試しください。';
+    scheduleRenderApp();
+    return;
+  }
+  logState.ui.claimData = result.data;
+  scheduleRenderApp();
+}
+function closeClaimFlow(){
+  logState.ui.claimOpen = false;
+  logState.ui.claimToken = null;
+  logState.ui.claimData = null;
+  logState.ui.claimError = null;
+  logState.ui.claimDone = false;
+  scheduleRenderApp();
+}
+// 「受け取る」ボタン。匿名のままだと後で機種変更時にデータを失うため、
+// openFriendPicker/openHistoryLinkShareと同じくログインを先に促す
+// (スキップして匿名のまま続けることも可能)。
+function requestClaimMatch(){
+  const doClaim = () => {
+    logState.ui.claimOpen = true;
+    scheduleRenderApp();
+    confirmClaimLink();
+  };
+  if (needsLoginPromptFirst()) {
+    openLoginPrompt('claim_link', doClaim);
+  } else {
+    doClaim();
+  }
+}
+async function confirmClaimLink(){
+  if (!logState.ui.claimData || !logState.ui.claimToken) return;
+  logState.ui.claimBusy = true;
+  logState.ui.claimError = null;
+  scheduleRenderApp();
+  const result = await CloudSync.claimMatchToken(logState.ui.claimToken, logState.ui.claimData);
+  logState.ui.claimBusy = false;
+  if (!result.ok) {
+    logState.ui.claimError = '受け取りに失敗しました。通信環境をご確認のうえ、もう一度お試しください。';
+    scheduleRenderApp();
+    return;
+  }
+  if (!logState.matchHistory.some(m => m.id === result.entry.id)) {
+    logState.matchHistory.push(result.entry);
+    logState.matchHistory.sort((a, b) => new Date(b.endedAt || b.startedAt || 0) - new Date(a.endedAt || a.startedAt || 0));
+    saveLogState();
+  }
+  logState.ui.claimDone = true;
+  scheduleRenderApp();
 }
 
 /* ---- 単独のフレンド追加(同卓者指定を介さずに、ユーザーネーム検索だけで追加する) ---- */
@@ -4248,15 +5217,18 @@ function toggleNotifyOnAutoRecord(v){
   scheduleRenderApp();
   CloudSync.setNotifyOnAutoRecord(v);
 }
-// 文字サイズ:大(旧称ジジイモード)。端末ローカルの表示設定なのでCloudSync
-// には同期しない(notifyOnAutoRecordと違い、Firestore側で参照する必要が無い)。
-function applyLargeTextClass(){
-  document.documentElement.classList.toggle('large-text', !!logState.account.largeText);
+// 文字サイズ(標準/大/特大の3段階、旧称ジジイモード)。端末ローカルの
+// 表示設定なのでCloudSyncには同期しない(notifyOnAutoRecordと違い、
+// Firestore側で参照する必要が無い)。
+function applyTextSizeClass(){
+  const size = logState.account.textSize || 'large';
+  document.documentElement.classList.toggle('text-size-large', size === 'large');
+  document.documentElement.classList.toggle('text-size-xlarge', size === 'xlarge');
 }
-function toggleLargeText(v){
-  logState.account.largeText = v;
+function setTextSize(size){
+  logState.account.textSize = size;
   saveLogState();
-  applyLargeTextClass();
+  applyTextSizeClass();
   scheduleRenderApp();
 }
 function dismissNotifyBanner(){
@@ -4265,6 +5237,69 @@ function dismissNotifyBanner(){
 }
 
 /* ---- rendering ---- */
+// ③: 人数・プレイヤー名入力欄・控えメンバーは「対局ルール設定」パネルの外に
+// 出し、常時表示にする(アコーディオンの開閉に関係なく、いつでも見える)。
+function renderPlayerRosterPanel(){
+  const s = logState.settings;
+  const benchNames = s.benchNames || [];
+  return `
+    <section class="player-roster-panel">
+      <div class="settings-row">
+        <div class="lbl">人数</div>
+        <div class="preset-row">
+          <button class="preset-btn ${s.playerCount===4?'active':''}" onclick="setPlayerCount(4)">4人打ち</button>
+          <button class="preset-btn ${s.playerCount===3?'active':''}" onclick="setPlayerCount(3)">3人打ち</button>
+        </div>
+      </div>
+
+      <div class="settings-row">
+        <div class="lbl">メンバー構成プリセット</div>
+        ${renderPresetChipRow('member')}
+      </div>
+
+      <div class="settings-row">
+        <div class="lbl">プレイヤー名<span class="hint">自分から見て右隣の順番(反時計回り)で入力してください</span></div>
+        <div class="name-edit-row">
+          ${activePlayers().map((p,i)=>{
+            const link = logState.settings.participantLinks[p];
+            const linkBtnHtml = CloudSync.isAvailable() ? (
+              link
+                ? `<button class="link-badge linked" onclick="openFriendPicker('${escKey(p)}')" title="同卓者: ${escapeHtml(link.username)}">🔗 ${escapeHtml(link.username)}</button>`
+                : `<button class="link-badge" onclick="openFriendPicker('${escKey(p)}')" title="同卓者を指定">🔗 指定</button>`
+            ) : '';
+            return `
+            <div class="name-edit-item">
+              <span class="num">${i+1}</span>
+              <input class="text-input" value="${escapeHtml(p)}" onchange="setPlayerName(${i}, this.value)">
+              ${linkBtnHtml}
+            </div>`;
+          }).join('')}
+        </div>
+        ${CloudSync.isAvailable() ? `<div class="preview-line" style="margin-top:2px;">🔗でユーザーネーム・フレンドを指定すると、対局終了時にその人の端末にも自動で結果が届きます</div>` : ''}
+      </div>
+
+      <div class="settings-row">
+        <div class="lbl" style="display:flex;justify-content:space-between;align-items:center;">
+          <span>控えメンバー</span>
+          <span class="switch ${s.benchEnabled?'on':''}" onclick="toggleBenchEnabled()"></span>
+        </div>
+        ${s.benchEnabled ? `
+          <div class="name-edit-row" style="margin-top:8px;">
+            ${benchNames.map((name,i)=>`
+              <div class="name-edit-item">
+                <span class="num">控</span>
+                <input class="text-input" value="${escapeHtml(name)}" onchange="setBenchName(${i}, this.value)">
+                <button class="link-badge swap-badge" onclick="openSubstituteModal(${i})" title="出場させる(交代)">🔄</button>
+                <button class="link-badge danger-text" onclick="removeBenchMember(${i})" title="控えメンバーから削除">×</button>
+              </div>`).join('')}
+          </div>
+          <button class="mentsu-add" style="margin-top:8px;" onclick="addBenchMember()">＋ 控えメンバーを追加</button>
+          <div class="history-reminder">💡 控えメンバーの🔄で、次の半荘(まだ記録していない半荘)からアクティブメンバーの誰かと交代できます。それより前に記録済みの半荘には影響しません。</div>
+        ` : ''}
+      </div>
+    </section>`;
+}
+
 function renderSettingsAccordion(){
   const s = logState.settings;
   const open = logState.ui.settingsOpen;
@@ -4284,32 +5319,8 @@ function renderSettingsAccordion(){
       ${open ? `
       <div class="accordion-body">
         <div class="settings-row">
-          <div class="lbl">人数</div>
-          <div class="preset-row">
-            <button class="preset-btn ${s.playerCount===4?'active':''}" onclick="setPlayerCount(4)">4人打ち</button>
-            <button class="preset-btn ${s.playerCount===3?'active':''}" onclick="setPlayerCount(3)">3人打ち</button>
-          </div>
-        </div>
-
-        <div class="settings-row">
-          <div class="lbl">プレイヤー名<span class="hint">時計回りの座順(1→2→3→4→1の順に隣)で入力してください</span></div>
-          <div class="name-edit-row">
-            ${activePlayers().map((p,i)=>{
-              const link = logState.settings.participantLinks[p];
-              const linkBtnHtml = CloudSync.isAvailable() ? (
-                link
-                  ? `<button class="link-badge linked" onclick="openFriendPicker('${escKey(p)}')" title="同卓者: ${escapeHtml(link.username)}">🔗 ${escapeHtml(link.username)}</button>`
-                  : `<button class="link-badge" onclick="openFriendPicker('${escKey(p)}')" title="同卓者を指定">🔗 指定</button>`
-              ) : '';
-              return `
-              <div class="name-edit-item">
-                <span class="num">${i+1}</span>
-                <input class="text-input" value="${escapeHtml(p)}" onchange="setPlayerName(${i}, this.value)">
-                ${linkBtnHtml}
-              </div>`;
-            }).join('')}
-          </div>
-          ${CloudSync.isAvailable() ? `<div class="preview-line" style="margin-top:2px;">🔗でユーザーネーム・フレンドを指定すると、対局終了時にその人の端末にも自動で結果が届きます</div>` : ''}
+          <div class="lbl">お気に入りルールプリセット</div>
+          ${renderPresetChipRow('rule')}
         </div>
 
         <div class="settings-row">
@@ -4454,7 +5465,8 @@ function renderHanchanForm(){
           return `
           <div class="score-input-row">
             <span class="pname">${escapeHtml(p)}</span>
-            <input class="num-input" type="number" step="1" inputmode="numeric" placeholder="例:250"
+            <button type="button" class="sign-toggle-btn ${logState.ui.formScoreSign[p]==='-'?'minus':'plus'}" onclick="toggleFormScoreSign('${escKey(p)}')">${logState.ui.formScoreSign[p]==='-'?'−':'+'}</button>
+            <input class="num-input ${logState.ui.formScoreAuto[p]?'auto-filled':''}" type="number" step="1" inputmode="numeric" placeholder="例:250"
               value="${logState.ui.formScores[p]}" onchange="setFormScore('${escKey(p)}', this.value)">
             ${busted && needsBuster ? `
               <select class="text-input buster-select" onchange="setFormBuster('${escKey(p)}', this.value)">
@@ -4489,7 +5501,7 @@ function renderHanchanLog(hanchansList, s, opts){
     const rows = [...ranked].sort((a,b)=>a.loRank-b.loRank).map(r=>`
       <div class="hc-row ${r.loRank===1?'rank1':''}">
         <span class="hc-rank">${r.loRank===r.hiRank ? r.loRank : `${r.loRank}-${r.hiRank}`}</span>
-        <span class="hc-name">${escapeHtml(r.name)}</span>
+        <span class="hc-name${premiumNameClass(r.name, s.participantLinks)}">${escapeHtml(r.name)}</span>
         <span class="hc-score">${r.score.toLocaleString()}</span>
         <span class="hc-pt ${pt[r.name]>=0?'plus':'minus'}">${formatPt(pt[r.name])}</span>
       </div>`).join('');
@@ -4508,15 +5520,22 @@ function renderHanchanLog(hanchansList, s, opts){
   return `<section><div class="sec-title">対局ログ<span class="hint">${hanchansList.length}半荘</span></div><div style="display:flex;flex-direction:column;gap:8px;">${cards}</div></section>`;
 }
 
-function totalCardsHtml(order, totals, topMoney){
+// shareMatchId: 対局履歴の詳細画面(renderHistoryDetail)からだけ渡される。指定時、
+// まだアカウント紐付けの無い(=ゲストの)プレイヤーのカードをタップ可能にし、
+// そのプレイヤー枠専用の結果受け取りリンクを送れるようにする(openHistoryLinkShare
+// 参照)。ライブ対局中の表示(renderStickyHeader)では渡さないため、既存の見た目・
+// 挙動は変わらない。新しいボタン要素は増やさず、既存のカード自体をタップ対象にする。
+function totalCardsHtml(order, totals, topMoney, participantLinks, shareMatchId){
   return `
     <div class="total-cards">
       ${order.map(p=>{
         const isTop = totals.money[p]===topMoney && topMoney > 0;
+        const isGuest = !(participantLinks && participantLinks[p]);
+        const shareable = !!shareMatchId && isGuest;
         return `
-        <div class="total-card ${isTop?'top':''}">
-          <div class="pname">${isTop?'<span class="crown">👑</span>':''}${escapeHtml(p)}</div>
-          <div class="pmoney">${formatMoney(totals.money[p])}</div>
+        <div class="total-card ${isTop?'top':''} ${shareable?'shareable':''}" ${shareable?`onclick="openHistoryLinkShare('${escKey(shareMatchId)}','${escKey(p)}')"`:''}>
+          <div class="pname${premiumNameClass(p, participantLinks)}">${isTop?'<span class="crown">👑</span>':''}${escapeHtml(p)}${shareable?' <span class="share-hint">🔗</span>':''}</div>
+          ${moneyStackInnerHtml(totals.money[p], totals.chipMoney[p], 'pmoney')}
           <div class="ppt">${formatPt(totals.pt[p])}pt</div>
         </div>`;
       }).join('')}
@@ -4550,8 +5569,8 @@ function revealGroupInnerHtml(group, totals){
       <div class="reveal-rank">${isTop?'👑 ':''}${revealRankLabel(group)}</div>
       ${group.members.map(m => `
         <div class="reveal-member">
-          <span class="reveal-name">${escapeHtml(m.name)}</span>
-          <span class="reveal-money">${formatMoney(totals.money[m.name])}</span>
+          <span class="reveal-name${premiumNameClass(m.name)}">${escapeHtml(m.name)}</span>
+          <div class="reveal-money-stack">${moneyStackInnerHtml(totals.money[m.name], totals.chipMoney[m.name], 'reveal-money')}</div>
           <span class="reveal-pt">${formatPt(totals.pt[m.name])}pt</span>
         </div>`).join('')}`;
 }
@@ -4604,7 +5623,12 @@ function renderEndMatchControls(isPresentationDone){
       </div>`;
   }
   const label = isPresentationDone ? '🏁 対局を終了して履歴に保存' : '対局を終了する';
-  return `<button class="end-match-btn" onclick="requestEndMatch()">${label}</button>`;
+  // ④: 終局(結果発表)のタイミングで、今のメンバー構成をプリセットとして
+  // 保存できる導線。保存自体のロジックはプレイヤー名入力欄まわりの
+  // 「+ 新規保存」(renderPresetChipRow('member'))と同じstartNewPreset()を使う。
+  return `
+    <button class="mentsu-add" style="margin-bottom:8px;" onclick="startNewPreset('member')">📋 このメンバーをプリセットとして保存</button>
+    <button class="end-match-btn" onclick="requestEndMatch()">${label}</button>`;
 }
 
 function renderRoomStatusHtml(){
@@ -4632,7 +5656,7 @@ function renderStickyHeader(s, totals){
   if (!presentation) {
     const order = [...players].sort((a,b)=> totals.money[b]-totals.money[a]);
     const topMoney = order.length ? totals.money[order[0]] : 0;
-    return `<div class="sticky-header">${roomStatusHtml}${modeSwitchHtml}${totalCardsHtml(order, totals, topMoney)}${renderEndMatchControls(false)}</div>`;
+    return `<div class="sticky-header">${roomStatusHtml}${modeSwitchHtml}${totalCardsHtml(order, totals, topMoney, s.participantLinks)}${renderEndMatchControls(false)}</div>`;
   }
 
   if (!logState.ui.revealActive) {
@@ -4682,7 +5706,7 @@ function renderLog(){
   const headerHtml = renderStickyHeader(s, totals);
 
   document.getElementById('logTab').innerHTML =
-    headerHtml + renderSettingsAccordion() + renderChipsAccordion() + renderHanchanForm()
+    headerHtml + renderPlayerRosterPanel() + renderSettingsAccordion() + renderChipsAccordion() + renderHanchanForm()
     + renderHanchanLog(logState.hanchans, s, { readOnly: isRoomViewerOnly() });
 }
 
@@ -4819,8 +5843,9 @@ function renderHistoryDetail(id){
   return `
     <div class="history-detail">
       <div class="history-detail-title-row">${titleHtml}</div>
-      <div class="history-detail-meta">${formatMatchDate(m.startedAt, m.endedAt)}・${escapeHtml(players.join('・'))}</div>
-      ${totalCardsHtml(order, totals, topMoney)}
+      <div class="history-detail-meta">${formatMatchDate(m.startedAt, m.endedAt)}・${players.map(p=>`<span class="${premiumNameClass(p, s.participantLinks).trim()}">${escapeHtml(p)}</span>`).join('・')}</div>
+      ${totalCardsHtml(order, totals, topMoney, s.participantLinks, CloudSync.isAvailable() ? id : null)}
+      ${CloudSync.isAvailable() && order.some(p => !s.participantLinks[p]) ? `<div class="history-reminder">💡 ゲストのプレイヤー名をタップすると、結果受け取りリンクを送れます</div>` : ''}
       ${chipSum !== 0 ? `<div class="check-banner bad" style="margin-top:8px;">⚠ チップ合計 ${chipSum>0?'+':''}${chipSum}枚（ゼロサムになっていません）</div>` : ''}
       ${renderHanchanLog(m.hanchans, settingsForCalc, { readOnly: true })}
       <div class="history-detail-actions">
@@ -4868,10 +5893,12 @@ function confirmDeleteArchive(id){
 // matchHistory中、playerNameが参加していた全対局の全半荘を対象に集計する。
 // 「試合数」は半荘数（1半荘あたりの平均収支などと単位を揃えるため）。
 function calcCareerStats(matchHistory, playerName){
-  const relevant = matchHistory.filter(m => {
-    const s = m.settingsSnapshot;
-    return s && s.playerNames.slice(0, s.playerCount).includes(playerName);
-  });
+  // ③: 控え交代で試合途中から/までしか出場していない場合、最終ロースター
+  // (settingsSnapshot.playerNames)には名前が残らないことがあるため、
+  // 「いずれかの半荘に一度でも登場したか」で対象の対局を絞り込む
+  // (実際のカウントは下のhanchansループがhanchanごとに個別判定する)。
+  const relevant = matchHistory.filter(m =>
+    (m.hanchans || []).some(h => playerName in h.scores));
   if (relevant.length === 0) return null;
 
   let games = 0, rankSum = 0, top1 = 0, top2 = 0, last = 0, tobiCount = 0, moneySum = 0, maxScore = -Infinity;
@@ -4882,17 +5909,25 @@ function calcCareerStats(matchHistory, playerName){
     m.hanchans.forEach(h => {
       if (!(playerName in h.scores)) return;
       games++;
-      const entries = players.map(p => ({ name: p, score: h.scores[p] }));
+      // ③: この半荘に実際に参加した人だけを対象にする(現在の/最終的な
+      // ロースターではなく、hanchan.scoresのキー=その半荘の実参加者)。
+      const hanchanPlayers = Object.keys(h.scores);
+      const entries = hanchanPlayers.map(p => ({ name: p, score: h.scores[p] }));
       const ranked = rankPlayers(entries);
       const me = ranked.find(r => r.name === playerName);
       rankSum += (me.loRank + me.hiRank) / 2; // 同着は帯の平均順位として数える
       if (me.loRank === 1) top1++;
       if (me.hiRank <= 2) top2++;
-      if (me.hiRank === s.playerCount) last++;
+      if (me.hiRank === hanchanPlayers.length) last++;
       if (h.scores[playerName] < 0) tobiCount++;
       if (h.scores[playerName] > maxScore) maxScore = h.scores[playerName];
+      // ①: 半荘ごとのルールスナップショットがあればそちらのレートを使う
+      // (calcHanchanResult自身もhanchan.rulesSnapshotを優先するため、
+      // ここで渡すsettingsForCalcのルール値は「スナップショットが無い
+      // 古いデータ」の時だけ実際に使われるフォールバックになる)。
       const { pt } = calcHanchanResult(h, settingsForCalc);
-      moneySum += pt[playerName] * s.rate;
+      const rate = (h.rulesSnapshot && h.rulesSnapshot.rate != null) ? h.rulesSnapshot.rate : s.rate;
+      moneySum += pt[playerName] * rate;
     });
     moneySum += ((m.chips && m.chips[playerName]) || 0) * s.chipUnitYen;
   });
@@ -4925,7 +5960,7 @@ function renderCareerStatCard(name, st, playerCount){
   const moneyColor = v => v >= 0 ? '#9fe0bd' : 'var(--red-soft)';
   return `
     <div class="stat-card">
-      <div class="stat-name">${escapeHtml(name)}</div>
+      <div class="stat-name${premiumNameClass(name)}">${escapeHtml(name)}</div>
       <div class="stat-row">平均順位 <b>${st.avgRank.toFixed(2)}</b></div>
       <div class="stat-row">試合数 <b>${st.games}半荘</b></div>
       ${primaryLine}
@@ -4944,7 +5979,9 @@ function dominantPlayerCountFor(matchHistory, playerName){
   const counts = {};
   matchHistory.forEach(m => {
     const s = m.settingsSnapshot;
-    if (!s || !s.playerNames.slice(0, s.playerCount).includes(playerName)) return;
+    // ③: 控え交代で最終ロースターに残っていなくても、この対局のどこかの
+    // 半荘に実際に参加していれば数える(getAllPlayerNamesEverPlayed参照)。
+    if (!s || !(m.hanchans || []).some(h => playerName in h.scores)) return;
     counts[s.playerCount] = (counts[s.playerCount] || 0) + 1;
   });
   const keys = Object.keys(counts);
@@ -4963,11 +6000,11 @@ function dominantPlayerCountFor(matchHistory, playerName){
 function getAllPlayerNamesEverPlayed(matchHistory){
   const counts = {};
   matchHistory.forEach(m => {
-    const s = m.settingsSnapshot;
-    if (!s) return;
-    const players = s.playerNames.slice(0, s.playerCount);
-    m.hanchans.forEach(h => {
-      players.forEach(p => { if (p in h.scores) counts[p] = (counts[p] || 0) + 1; });
+    // ③: 各半荘の実際の参加者(hanchan.scoresのキー)を直接数える。控え交代で
+    // 対局終盤に控えに回り、最終ロースター(settingsSnapshot.playerNames)には
+    // 残っていない人も、実際に出場した半荘の分はここに含める。
+    (m.hanchans || []).forEach(h => {
+      Object.keys(h.scores).forEach(p => { counts[p] = (counts[p] || 0) + 1; });
     });
   });
   return Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b));
@@ -5521,7 +6558,9 @@ async function confirmDeleteAccountFromMenu(){
   logState.ui.deletingAccount = false;
 
   if (!result.ok && !result.dataDeleted) {
-    logState.ui.deleteAccountErrorMsg = '削除に失敗しました。通信環境をご確認のうえ、もう一度お試しください。';
+    logState.ui.deleteAccountErrorMsg = result.error === 'reauth'
+      ? 'サインイン情報が古くなっている可能性があります。一度ログアウトのうえ再度ログインしてから、もう一度お試しください。'
+      : '削除に失敗しました。通信環境をご確認のうえ、もう一度お試しください。';
     scheduleRenderApp();
     return;
   }
@@ -5612,9 +6651,13 @@ function renderOtherModal(){
         </div>
         <div class="history-modal-body">
           <div class="other-menu-list">
-            <div class="other-menu-item" onclick="toggleLargeText(!logState.account.largeText)">
-              <span>文字サイズ: 大</span>
-              <span class="switch ${logState.account.largeText?'on':''}"></span>
+            <div class="other-menu-item" style="flex-direction:column;align-items:stretch;gap:8px;cursor:default;">
+              <span>文字サイズ</span>
+              <div class="preset-row">
+                <button class="preset-btn ${logState.account.textSize==='normal'?'active':''}" onclick="setTextSize('normal')">標準</button>
+                <button class="preset-btn ${logState.account.textSize==='large'?'active':''}" onclick="setTextSize('large')">大</button>
+                <button class="preset-btn ${logState.account.textSize==='xlarge'?'active':''}" onclick="setTextSize('xlarge')">特大</button>
+              </div>
             </div>
             <a class="other-menu-item" href="${LEGAL_CONFIG.supportUrl}" target="_blank" rel="noopener">
               <span>よくある質問・サポート</span><span class="arrow">›</span>
@@ -5731,6 +6774,189 @@ function renderFriendPickerModal(){
               </div>
             </div>` : ''}
           <div class="history-reminder">💡 ゲスト(アプリを使っていない人)はそのまま名前を入力するだけで、自動配信の対象にはなりません</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ---- 対局履歴: ゲストプレイヤーへの結果受け取りリンクモーダル(renderFriendPickerModalと同じ見た目を流用) ---- */
+function renderHistoryLinkShareModal(){
+  const root = document.getElementById('historyLinkShareModalRoot');
+  if (!root) return;
+  if (!logState.ui.historyLinkShareOpen) { root.innerHTML = ''; return; }
+  const slot = logState.ui.historyLinkSharePlayerSlot;
+  const busy = logState.ui.historyLinkShareBusy;
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">${escapeHtml(slot)}さんへリンクを送る</span>
+          <button class="history-close" onclick="closeHistoryLinkShare()">×</button>
+        </div>
+        <div class="history-modal-body">
+          <p class="paywall-copy">${escapeHtml(slot)}さん専用の受け取りリンクを発行し、LINEなどで送れます。リンクを開くとこの対局結果が${escapeHtml(slot)}さんの成績・対局履歴にも反映されます。</p>
+          ${logState.ui.historyLinkShareError ? `<div class="check-banner bad" style="margin-bottom:10px;">${escapeHtml(logState.ui.historyLinkShareError)}</div>` : ''}
+          <button class="record-btn" style="width:100%;" ${busy?'disabled':''} onclick="generateAndShareClaimLink()">${busy?'作成中…':'🔗 リンクを送る'}</button>
+          <div class="history-reminder">💡 このリンクの有効期限は3日間です。何度でも送り直せます。</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ---- 受け取ったリンク(?token=)の確認モーダル(同じく.history-modalを流用) ---- */
+function renderClaimModal(){
+  const root = document.getElementById('claimModalRoot');
+  if (!root) return;
+  if (!logState.ui.claimOpen) { root.innerHTML = ''; return; }
+  const busy = logState.ui.claimBusy;
+  const data = logState.ui.claimData;
+  const err = logState.ui.claimError;
+  const done = logState.ui.claimDone;
+
+  let bodyHtml;
+  if (done) {
+    bodyHtml = `
+      <div class="check-banner ok" style="margin-bottom:10px;">✓ 受け取りました</div>
+      <p class="paywall-copy">この対局結果を、あなたの成績・対局履歴に反映しました。</p>
+      <button class="record-btn" style="width:100%;" onclick="closeClaimFlow()">閉じる</button>`;
+  } else if (err) {
+    bodyHtml = `
+      <div class="check-banner bad" style="margin-bottom:10px;">${escapeHtml(err)}</div>
+      <button class="mentsu-add" onclick="closeClaimFlow()">閉じる</button>`;
+  } else if (busy || !data) {
+    bodyHtml = `<p class="paywall-copy">確認しています…</p>`;
+  } else {
+    const md = data.matchData;
+    const dateLabel = md ? formatMatchDate(md.startedAt, md.endedAt) : '';
+    bodyHtml = `
+      <p class="paywall-copy">この対局結果はあなた(${escapeHtml(data.playerSlot)}さん)のものです。受け取りますか？</p>
+      ${dateLabel ? `<div class="history-detail-meta">${dateLabel}</div>` : ''}
+      <div class="end-match-confirm-btns" style="margin-top:12px;">
+        <button class="preset-btn" onclick="closeClaimFlow()" ${busy?'disabled':''}>キャンセル</button>
+        <button class="preset-btn" onclick="requestClaimMatch()" ${busy?'disabled':''}>${busy?'受け取り中…':'受け取る'}</button>
+      </div>`;
+  }
+
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">対局結果の受け取り</span>
+          <button class="history-close" onclick="closeClaimFlow()">×</button>
+        </div>
+        <div class="history-modal-body">${bodyHtml}</div>
+      </div>
+    </div>`;
+}
+
+/* ---- ②④共通: プリセット(ルール/メンバー構成)のチップ行・⋮メニュー・
+   名前入力・削除確認の描画 ---- */
+// kind: 'rule'|'member'。横並びのチップ一覧+「＋新規保存」。renderSettingsAccordion
+// (②)とrenderPlayerRosterPanel(④)の両方から呼ばれる共通コンポーネント。
+function renderPresetChipRow(kind){
+  const list = getPresetList(kind);
+  const activeId = getActivePresetId(kind);
+  return `
+    <div class="preset-chip-row">
+      ${list.map(p => `
+        <div class="preset-chip ${activeId === p.id ? 'active' : ''}">
+          <button class="preset-chip-main" onclick="applyPreset('${kind}','${escKey(p.id)}')">${escapeHtml(p.name)}</button>
+          <button class="preset-chip-menu" onclick="openPresetMenu('${kind}','${escKey(p.id)}')" title="メニュー">⋮</button>
+        </div>`).join('')}
+      <button class="preset-chip preset-chip-new" onclick="startNewPreset('${kind}')">＋ 新規保存</button>
+    </div>`;
+}
+function renderPresetMenuModal(){
+  const root = document.getElementById('presetMenuModalRoot');
+  if (!root) return;
+  const target = logState.ui.presetMenuOpen;
+  const preset = target && getPresetList(target.kind).find(p => p.id === target.id);
+  if (!target || !preset) { root.innerHTML = ''; return; }
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">${escapeHtml(preset.name)}</span>
+          <button class="history-close" onclick="closePresetMenu()">×</button>
+        </div>
+        <div class="history-modal-body">
+          <button class="mentsu-add" onclick="startRenamePreset('${target.kind}','${escKey(target.id)}')">✏️ 名前を変更</button>
+          <button class="mentsu-add" style="margin-top:8px;" onclick="overwritePreset('${target.kind}','${escKey(target.id)}')">💾 現在の設定で上書き</button>
+          <button class="mentsu-add danger-text" style="margin-top:8px;" onclick="requestDeletePreset('${target.kind}','${escKey(target.id)}')">🗑 削除</button>
+        </div>
+      </div>
+    </div>`;
+}
+function renderPresetNameModal(){
+  const root = document.getElementById('presetNameModalRoot');
+  if (!root) return;
+  const target = logState.ui.renamingPreset;
+  if (!target) { root.innerHTML = ''; return; }
+  const isNew = !target.id;
+  const existing = isNew ? null : getPresetList(target.kind).find(p => p.id === target.id);
+  const initialValue = existing ? existing.name : '';
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">${isNew ? '名前をつけて保存' : '名前を変更'}</span>
+          <button class="history-close" onclick="cancelRenamePreset()">×</button>
+        </div>
+        <div class="history-modal-body">
+          <input class="text-input" id="presetNameInput" value="${escapeHtml(initialValue)}" placeholder="プリセット名">
+          <button class="record-btn" style="width:100%;margin-top:12px;" onclick="saveRenamePreset(document.getElementById('presetNameInput').value)">保存</button>
+        </div>
+      </div>
+    </div>`;
+}
+function renderDeletePresetConfirmModal(){
+  const root = document.getElementById('deletePresetConfirmModalRoot');
+  if (!root) return;
+  const target = logState.ui.confirmDeletePreset;
+  const preset = target && getPresetList(target.kind).find(p => p.id === target.id);
+  if (!target || !preset) { root.innerHTML = ''; return; }
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">プリセットを削除</span>
+          <button class="history-close" onclick="cancelDeletePreset()">×</button>
+        </div>
+        <div class="history-modal-body">
+          <p class="paywall-copy">「${escapeHtml(preset.name)}」を削除しますか？</p>
+          <div class="end-match-confirm-btns">
+            <button class="preset-btn" onclick="cancelDeletePreset()">キャンセル</button>
+            <button class="preset-btn danger" onclick="confirmDeletePresetAction()">削除</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ---- ③ 控えメンバーとの交代モーダル ---- */
+function renderSubstituteModal(){
+  const root = document.getElementById('substituteModalRoot');
+  if (!root) return;
+  if (!logState.ui.substituteOpen) { root.innerHTML = ''; return; }
+  const benchIndex = logState.ui.substituteBenchIndex;
+  const incoming = (logState.settings.benchNames || [])[benchIndex];
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">誰と交代しますか？</span>
+          <button class="history-close" onclick="closeSubstituteModal()">×</button>
+        </div>
+        <div class="history-modal-body">
+          <p class="paywall-copy">${escapeHtml(incoming || '')}さんを、次の半荘からどのプレイヤーの代わりに出場させますか？(それより前に記録済みの半荘には影響しません)</p>
+          <div class="history-list">
+            ${activePlayers().map((p, i) => `
+              <div class="history-card" onclick="confirmSubstitute(${i})">
+                <div class="history-title">${escapeHtml(p)}</div>
+                <div class="history-winner">${escapeHtml(p)}さんと交代 →</div>
+              </div>`).join('')}
+          </div>
+          <button class="mentsu-add" style="margin-top:10px;" onclick="closeSubstituteModal()">キャンセル</button>
         </div>
       </div>
     </div>`;
@@ -5932,6 +7158,12 @@ function renderAppInner(){
   safeRender(renderAddFriendModal, 'renderAddFriendModal');
   safeRender(renderHelpModal, 'renderHelpModal');
   safeRender(renderOtherModal, 'renderOtherModal');
+  safeRender(renderHistoryLinkShareModal, 'renderHistoryLinkShareModal');
+  safeRender(renderClaimModal, 'renderClaimModal');
+  safeRender(renderPresetMenuModal, 'renderPresetMenuModal');
+  safeRender(renderPresetNameModal, 'renderPresetNameModal');
+  safeRender(renderDeletePresetConfirmModal, 'renderDeletePresetConfirmModal');
+  safeRender(renderSubstituteModal, 'renderSubstituteModal');
   safeRender(renderNotifyBanner, 'renderNotifyBanner');
   safeRender(renderDebugError, 'renderDebugError');
   safeRender(() => updateBannerState(onLog), 'updateBannerState');

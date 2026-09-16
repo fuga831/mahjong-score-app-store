@@ -1,0 +1,12 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["KVFKX9Y3WL.io.github.fuga831.mahjongscore"],
+        "components": [
+          { "/": "/mahjong-score-app-store/claim", "?": { "token": "*" } }
+        ]
+      }
+    ]
+  }
+}
