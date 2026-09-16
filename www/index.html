@@ -4842,6 +4842,16 @@ function setFriendSearchInput(v){
   logState.ui.friendSearchResult = null;
   logState.ui.friendSearchError = null;
 }
+// ⑤: 同じユーザー(uid)が、この対局のプレイヤー枠(アクティブ・控え問わず)に
+// 既に重複して指定されていないかを調べる。excludeSlot(今まさに指定しようと
+// している枠自身)は対象外(同じ枠に同じ人を選び直すことは重複とみなさない)。
+// 控え交代(confirmSubstitute)は participantLinks を意図的に書き換えないため、
+// 交代で退いた人のリンクは控えに回った名前のキーのまま残り続ける
+// (=退いた人と同じユーザーを別の枠へ指定しようとした場合もここで検出できる)。
+function findDuplicateLinkSlot(uid, excludeSlot){
+  const links = logState.settings.participantLinks;
+  return Object.keys(links).find(name => name !== excludeSlot && links[name] && links[name].uid === uid) || null;
+}
 async function searchFriendByUsername(){
   const name = (logState.ui.friendSearchInput || '').trim();
   if (!isValidUsernameFormat(name)) {
@@ -4854,10 +4864,13 @@ async function searchFriendByUsername(){
   scheduleRenderApp();
   const result = await CloudSync.searchUsername(name);
   logState.ui.friendSearchChecking = false;
+  const dupSlot = result ? findDuplicateLinkSlot(result.uid, logState.ui.friendPickerSlot) : null;
   if (!result) {
     logState.ui.friendSearchError = '見つかりませんでした';
   } else if (result.isSelf) {
     logState.ui.friendSearchError = '自分自身は指定できません';
+  } else if (dupSlot) {
+    logState.ui.friendSearchError = `このユーザーは既に${dupSlot}さんとして指定されています`;
   } else {
     logState.ui.friendSearchResult = result;
   }
@@ -4867,6 +4880,14 @@ async function searchFriendByUsername(){
 async function linkParticipant(uid, username){
   const slot = logState.ui.friendPickerSlot;
   if (!slot) return;
+  // ⑤: フレンド一覧からの選択はUI側で既にフィルタ済みだが、念のため実際に
+  // 紐付ける直前にも二重チェックする(防御的プログラミング)。
+  const dupSlot = findDuplicateLinkSlot(uid, slot);
+  if (dupSlot) {
+    logState.ui.friendSearchError = `このユーザーは既に${dupSlot}さんとして指定されています`;
+    scheduleRenderApp();
+    return;
+  }
   logState.settings.participantLinks[slot] = { uid, username };
   // 指定した瞬間、同じ行のプレイヤー名入力欄にもそのユーザーネームを自動入力する。
   // setPlayerName()はrenamePlayerEverywhere()経由でparticipantLinksのキーも
@@ -6879,6 +6900,9 @@ function renderFriendPickerModal(){
   const currentLink = logState.settings.participantLinks[slot];
   const result = logState.ui.friendSearchResult;
   const checking = logState.ui.friendSearchChecking;
+  // ⑤: 既に他の枠(アクティブ・控え問わず)へ指定済みのフレンドは、選択肢として
+  // 表示しない(この枠自身に既に指定されている本人は、選び直せるよう引き続き表示する)。
+  const availableFriends = logState.friends.filter(f => !findDuplicateLinkSlot(f.uid, slot));
   root.innerHTML = `
     <div class="history-modal-overlay">
       <div class="history-modal">
@@ -6905,11 +6929,11 @@ function renderFriendPickerModal(){
                 <div class="history-winner">この人を${escapeHtml(slot)}さんとして指定 →</div>
               </div>` : ''}
           </div>
-          ${logState.friends.length > 0 ? `
+          ${availableFriends.length > 0 ? `
             <div class="settings-row" style="margin-top:14px;">
               <div class="lbl">フレンドから選ぶ</div>
               <div class="history-list">
-                ${logState.friends.map(f => `
+                ${availableFriends.map(f => `
                   <div class="history-card" onclick="linkParticipant('${escKey(f.uid)}','${escKey(f.username)}')">
                     <div class="history-title">${escapeHtml(f.username)}</div>
                   </div>`).join('')}
