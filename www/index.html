@@ -1610,6 +1610,68 @@
     cursor:pointer;
   }
   .link-badge.linked{background:var(--gold);color:var(--ink);border-color:var(--gold-strong);}
+  .link-badge.swap-badge{max-width:none;padding:6px 8px;}
+
+  /* ---- ②④共通: プリセット(ルール/メンバー構成)のチップ行 ---- */
+  .preset-chip-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+    margin-top:4px;
+  }
+  .preset-chip{
+    display:flex;
+    align-items:stretch;
+    border:1.5px solid var(--line);
+    border-radius:999px;
+    background:var(--felt-2);
+    overflow:hidden;
+  }
+  .preset-chip.active{border-color:var(--gold-strong);}
+  .preset-chip-main{
+    font-family:"Noto Sans JP",sans-serif;
+    font-size:.72rem;
+    font-weight:700;
+    color:var(--ink-soft);
+    background:transparent;
+    border:0;
+    padding:6px 4px 6px 10px;
+    cursor:pointer;
+    max-width:9em;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .preset-chip.active .preset-chip-main{color:var(--gold-strong);}
+  .preset-chip-menu{
+    font-size:.72rem;
+    color:var(--ink-soft);
+    background:transparent;
+    border:0;
+    border-left:1px solid var(--line);
+    padding:6px 9px;
+    cursor:pointer;
+  }
+  .preset-chip.active .preset-chip-menu{color:var(--gold-strong);border-left-color:var(--gold-strong);}
+  .preset-chip-new{
+    font-family:"Noto Sans JP",sans-serif;
+    font-size:.72rem;
+    font-weight:700;
+    color:var(--ink-soft);
+    background:var(--felt-1);
+    border:1.5px dashed var(--line);
+    border-radius:999px;
+    padding:6px 12px;
+    cursor:pointer;
+  }
+
+  /* ---- ③ 人数・プレイヤー名・控えメンバー(常時表示パネル) ---- */
+  .player-roster-panel{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+    margin-bottom:10px;
+  }
 
   /* ---- hanchan input form ---- */
   .score-scale-hint{
@@ -1823,6 +1885,10 @@
 <div id="otherModalRoot"></div>
 <div id="historyLinkShareModalRoot"></div>
 <div id="claimModalRoot"></div>
+<div id="presetMenuModalRoot"></div>
+<div id="presetNameModalRoot"></div>
+<div id="deletePresetConfirmModalRoot"></div>
+<div id="substituteModalRoot"></div>
 <div id="notifyBannerRoot"></div>
 <div id="termTipRoot"></div>
 <div id="debugErrorRoot"></div>
@@ -2138,11 +2204,40 @@ function umaForTieGroup(loRank, hiRank, uma, playerCount) {
   return sum / count;
 }
 
-// calcHanchanResult(hanchan, settings) -> { pt: {name: ptDelta}, ranked }
-// pt is this hanchan's own contribution only (not a running total).
+// 半荘ごとのルールスナップショット(①)に含めるフィールド。人数(playerCount)は
+// 「対局ルール設定」パネルの外に移動した項目だが、ウマの段組み判定・オカの
+// 頭数計算にルール計算そのものが必要とするため、集計の正確さのために
+// スナップショットには含める(プリセット保存の対象からは②の仕様どおり除く)。
+const RULE_SNAPSHOT_FIELDS = ['startPoints', 'returnPoints', 'playerCount', 'umaEnabled', 'uma',
+  'tobiEnabled', 'tobiPoints', 'tobiRecipient', 'rate', 'roundingMode', 'chipUnitYen'];
+function captureRulesSnapshot(settings){
+  const snap = {};
+  RULE_SNAPSHOT_FIELDS.forEach(k => { snap[k] = Array.isArray(settings[k]) ? [...settings[k]] : settings[k]; });
+  return snap;
+}
+// ②: お気に入りルールプリセットの保存対象は「人数を除く」全項目。
+const RULE_PRESET_FIELDS = RULE_SNAPSHOT_FIELDS.filter(k => k !== 'playerCount');
+function captureRulePreset(settings){
+  const snap = {};
+  RULE_PRESET_FIELDS.forEach(k => { snap[k] = Array.isArray(settings[k]) ? [...settings[k]] : settings[k]; });
+  return snap;
+}
+
+// calcHanchanResult(hanchan, settings) -> { pt: {name: ptDelta}, ranked, players }
+// pt is this hanchan's own contribution only (not a running total)。
+// ① 半荘ごとのルールスナップショット: hanchan.rulesSnapshotがあればそちらを
+// 優先して使う(半荘記録後にルール設定パネルの値を変えても、既に記録済みの
+// 半荘の計算結果は変わらない)。無ければ従来通り現在のsettingsを使う
+// (スナップショット導入前に記録された古いデータとの後方互換)。
+// ③ 控えメンバーとの交代により、半荘ごとに実際の参加者が異なりうるため、
+// 参加者はsettings.players(現在のアクティブ一覧)ではなく、この半荘が実際に
+// 記録した hanchan.scores のキーから決める(scoresが空の場合だけ、これから
+// 記録する半荘のプレビュー用にsettings.playersへフォールバックする)。
 function calcHanchanResult(hanchan, settings) {
-  const { players, startPoints, returnPoints, playerCount, umaEnabled, uma,
-          tobiEnabled, tobiPoints, tobiRecipient } = settings;
+  const rules = hanchan.rulesSnapshot || settings;
+  const { startPoints, returnPoints, playerCount, umaEnabled, uma,
+          tobiEnabled, tobiPoints, tobiRecipient } = rules;
+  const players = Object.keys(hanchan.scores).length ? Object.keys(hanchan.scores) : settings.players;
   // hanchan.scores[p]がundefined/nullになり得るケース(プレイヤー名の変更・
   // 人数変更後に古い半荘記録を読む等でキーが一致しない場合)への防御。
   // 実際にこれが原因でrenderLog()が`undefined.toLocaleString()`で例外を
@@ -2157,7 +2252,7 @@ function calcHanchanResult(hanchan, settings) {
   players.forEach(p => { pt[p] = 0; });
 
   ranked.forEach(r => {
-    pt[r.name] += applyRounding(r.score - returnPoints, settings.roundingMode);
+    pt[r.name] += applyRounding(r.score - returnPoints, rules.roundingMode);
     if (umaEnabled) pt[r.name] += umaForTieGroup(r.loRank, r.hiRank, uma, playerCount);
     if (r.loRank === 1) pt[r.name] += oka / topGroup.length;
   });
@@ -2175,16 +2270,22 @@ function calcHanchanResult(hanchan, settings) {
     });
   }
 
-  return { pt, ranked };
+  return { pt, ranked, players };
 }
 
 // calcTotals(hanchans, chips, settings) -> per-player running pt/yen totals.
+// ③: 各半荘の実際の参加者(calcHanchanResultが返すplayers、控え交代で現在の
+// settings.playersと食い違うことがある)ごとにptを積み上げる。控えに回って
+// 不在だった半荘は、その人のptに一切加算しない(0点として数えることもしない)。
 function calcTotals(hanchans, chips, settings) {
   const totals = {};
   settings.players.forEach(p => { totals[p] = 0; });
   hanchans.forEach(h => {
-    const { pt } = calcHanchanResult(h, settings);
-    settings.players.forEach(p => { totals[p] += pt[p]; });
+    const { pt, players } = calcHanchanResult(h, settings);
+    players.forEach(p => {
+      if (!(p in totals)) totals[p] = 0;
+      totals[p] += pt[p];
+    });
   });
   const chipSum = settings.players.reduce((s, p) => s + (chips[p] || 0), 0);
   const money = {};
@@ -3609,14 +3710,18 @@ function defaultLogState(){
       presentationMode: false, // 演出モード: 終局ボタンを押すまで順位・収支を隠す
       isPremium: false, // 広告削除+記録し放題(買い切り課金)が有効か。ストアアプリのみ意味を持つ
       participantLinks: {}, // { プレイヤー名: {uid, username} } 同卓者としてアカウント紐付けされている場合のみ存在
+      benchEnabled: false, // 控えメンバー機能のON/OFF
+      benchNames: [],       // 控えメンバーの名前一覧(③)
     },
-    hanchans: [], // 進行中の対局のみ。{ id, scores:{name:val}, busterOf:{bustedName:busterName} }
+    hanchans: [], // 進行中の対局のみ。{ id, scores:{name:val}, busterOf:{bustedName:busterName}, rulesSnapshot }
     chips: {},    // 進行中の対局のみ。name -> 最終枚数
     hanchanSeq: 1,
     currentMatchStartedAt: null, // 進行中の対局の最初の半荘を記録した時刻(ISO文字列)
     matchAdShown: false, // この対局(進行中のhanchansの一区切り)で既に「終局」インタースティシャルを表示したか
     matchHistory: [], // 「対局を終了する」で確定・保存された過去の対局一覧(新しい順)
     // { id, startedAt, endedAt, title, settingsSnapshot, hanchans, chips, participantUids?, recordedBy? }
+    rulePresets: [],   // ②: お気に入りルールプリセット。[{ id, name, rules:{...RULE_SNAPSHOT_FIELDSのうちplayerCountを除いたもの}, createdAt }]
+    memberPresets: [], // ④: メンバー構成プリセット。[{ id, name, members:{playerNames, participantLinks}, createdAt }]
     account: {
       uid: null,
       isAnonymous: true,
@@ -3698,6 +3803,13 @@ function defaultLogState(){
       claimBusy: false,
       claimError: null,
       claimDone: false,
+      activeRulePresetId: null,    // ②: 現在適用中のルールプリセット(手動変更で即座にnullへ)
+      activeMemberPresetId: null,  // ④: 現在適用中のメンバー構成プリセット(手動変更で即座にnullへ)
+      presetMenuOpen: null,        // { kind:'rule'|'member', id } — ⋮メニューの開閉
+      confirmDeletePreset: null,   // { kind, id } — 削除確認ポップアップ
+      renamingPreset: null,        // { kind, id } — id=nullなら新規保存モード。名前入力モーダルの開閉を兼ねる
+      substituteOpen: false,       // ③: 控えメンバーとの交代モーダル
+      substituteBenchIndex: null,  // 交代しようとしている控えメンバーのbenchNames内インデックス
     },
   };
 }
@@ -3724,6 +3836,8 @@ function mergeParsedLogState(parsed){
     ...parsed,
     settings: { ...base.settings, ...(parsed.settings || {}) },
     matchHistory: Array.isArray(parsed.matchHistory) ? parsed.matchHistory : [],
+    rulePresets: Array.isArray(parsed.rulePresets) ? parsed.rulePresets : [],
+    memberPresets: Array.isArray(parsed.memberPresets) ? parsed.memberPresets : [],
     account: {
       ...base.account,
       ...(parsed.account || {}),
@@ -3751,8 +3865,8 @@ function loadLogState(){
 
 function saveLogState(){
   try {
-    const { settings, hanchans, chips, hanchanSeq, currentMatchStartedAt, matchAdShown, matchHistory, account, friends, room } = logState;
-    localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify({ settings, hanchans, chips, hanchanSeq, currentMatchStartedAt, matchAdShown, matchHistory, account, friends, room }));
+    const { settings, hanchans, chips, hanchanSeq, currentMatchStartedAt, matchAdShown, matchHistory, account, friends, room, rulePresets, memberPresets } = logState;
+    localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify({ settings, hanchans, chips, hanchanSeq, currentMatchStartedAt, matchAdShown, matchHistory, account, friends, room, rulePresets, memberPresets }));
   } catch (e) { /* 保存できない環境ではメモリ上のみで継続 */ }
 }
 
@@ -3988,6 +4102,7 @@ function setPlayerCount(n){
   if (n === 3 && logState.settings.uma.length !== 1) logState.settings.uma = [15];
   if (n === 4 && logState.settings.uma.length !== 2) logState.settings.uma = [10, 30];
   resetFormScores();
+  logState.ui.activeMemberPresetId = null; // ④: 人数が変わったのでメンバー構成プリセットの適用状態は外す
   saveLogState(); scheduleRenderApp();
 }
 function renamePlayerEverywhere(oldName, newName){
@@ -4027,30 +4142,37 @@ function setPlayerName(i, value){
   const newName = (value || '').trim() || `P${i+1}`;
   logState.settings.playerNames[i] = newName;
   renamePlayerEverywhere(oldName, newName);
+  logState.ui.activeMemberPresetId = null; // ④: メンバー名を手動変更したので適用状態を外す
   saveLogState(); scheduleRenderApp();
 }
+// ②: ルールプリセットは「対局ルール設定パネル内のいずれかの項目が手動で
+// 変更された」瞬間に、直ちにどのプリセットも選択されていない状態へ戻す。
+// 各設定変更ハンドラの先頭でこれを呼ぶ。
+function clearActiveRulePreset(){ logState.ui.activeRulePresetId = null; }
 function setStartPointsPreset(v){
   // オカのあり/なし（返し点との差が+5,000点かどうか）はそのまま保って、
   // 持ち点だけを切り替える。
+  clearActiveRulePreset();
   const okaOn = logState.settings.returnPoints > logState.settings.startPoints;
   logState.settings.startPoints = v;
   logState.settings.returnPoints = v + (okaOn ? 5000 : 0);
   saveLogState(); scheduleRenderApp();
 }
 function setOkaEnabled(v){
+  clearActiveRulePreset();
   logState.settings.returnPoints = logState.settings.startPoints + (v ? 5000 : 0);
   saveLogState(); scheduleRenderApp();
 }
-function setStartPoints(v){ logState.settings.startPoints = v; saveLogState(); scheduleRenderApp(); }
-function setReturnPoints(v){ logState.settings.returnPoints = v; saveLogState(); scheduleRenderApp(); }
-function setUmaEnabled(v){ logState.settings.umaEnabled = v; saveLogState(); scheduleRenderApp(); }
-function setUmaPreset(...vals){ logState.settings.uma = vals; saveLogState(); scheduleRenderApp(); }
-function setTobiEnabled(v){ logState.settings.tobiEnabled = v; saveLogState(); scheduleRenderApp(); }
-function setTobiPoints(v){ logState.settings.tobiPoints = v; saveLogState(); scheduleRenderApp(); }
-function setTobiRecipient(v){ logState.settings.tobiRecipient = v; saveLogState(); scheduleRenderApp(); }
-function setRate(v){ logState.settings.rate = v; saveLogState(); scheduleRenderApp(); }
-function setRoundingMode(v){ logState.settings.roundingMode = v; saveLogState(); scheduleRenderApp(); }
-function setChipUnitYen(v){ logState.settings.chipUnitYen = v; saveLogState(); scheduleRenderApp(); }
+function setStartPoints(v){ clearActiveRulePreset(); logState.settings.startPoints = v; saveLogState(); scheduleRenderApp(); }
+function setReturnPoints(v){ clearActiveRulePreset(); logState.settings.returnPoints = v; saveLogState(); scheduleRenderApp(); }
+function setUmaEnabled(v){ clearActiveRulePreset(); logState.settings.umaEnabled = v; saveLogState(); scheduleRenderApp(); }
+function setUmaPreset(...vals){ clearActiveRulePreset(); logState.settings.uma = vals; saveLogState(); scheduleRenderApp(); }
+function setTobiEnabled(v){ clearActiveRulePreset(); logState.settings.tobiEnabled = v; saveLogState(); scheduleRenderApp(); }
+function setTobiPoints(v){ clearActiveRulePreset(); logState.settings.tobiPoints = v; saveLogState(); scheduleRenderApp(); }
+function setTobiRecipient(v){ clearActiveRulePreset(); logState.settings.tobiRecipient = v; saveLogState(); scheduleRenderApp(); }
+function setRate(v){ clearActiveRulePreset(); logState.settings.rate = v; saveLogState(); scheduleRenderApp(); }
+function setRoundingMode(v){ clearActiveRulePreset(); logState.settings.roundingMode = v; saveLogState(); scheduleRenderApp(); }
+function setChipUnitYen(v){ clearActiveRulePreset(); logState.settings.chipUnitYen = v; saveLogState(); scheduleRenderApp(); }
 function toggleAccordion(key){ logState.ui[key] = !logState.ui[key]; scheduleRenderApp(); }
 
 /* ---- 演出モード（終局まで順位・収支を隠す） ----
@@ -4402,7 +4524,11 @@ function finalizeRecordHanchan(scores, busterOf, tiebreakDealer){
     if (logState.hanchans.length === 0 && !logState.currentMatchStartedAt) {
       logState.currentMatchStartedAt = new Date().toISOString();
     }
-    logState.hanchans.unshift({ id: logState.hanchanSeq++, scores, busterOf, tiebreakDealer });
+    // ①: 記録するタイミングの対局ルール設定をこの半荘専用のスナップショットとして
+    // 固定する。以後ルール設定パネルの値を変えても、この半荘の計算結果は
+    // 変わらない(calcHanchanResult参照)。次の半荘は、このスナップショットの
+    // 元になったlogState.settingsをそのまま(何もリセットせず)引き継いで開始する。
+    logState.hanchans.unshift({ id: logState.hanchanSeq++, scores, busterOf, tiebreakDealer, rulesSnapshot: captureRulesSnapshot(logState.settings) });
   }
   logState.ui.confirmEndMatch = false;
   resetFormScores();
@@ -4665,8 +4791,212 @@ function unlinkParticipant(){
   const slot = logState.ui.friendPickerSlot;
   if (!slot) return;
   delete logState.settings.participantLinks[slot];
+  logState.ui.activeMemberPresetId = null; // ④: フレンド指定の変更もメンバー構成の変更として扱う
   saveLogState();
   closeFriendPicker();
+}
+
+/* ---- ③ 控えメンバー・メンバー入れ替え ---- */
+function toggleBenchEnabled(){
+  logState.settings.benchEnabled = !logState.settings.benchEnabled;
+  saveLogState(); scheduleRenderApp();
+}
+function addBenchMember(){
+  const n = logState.settings.benchNames.length + 1;
+  logState.settings.benchNames.push(`控え${n}`);
+  saveLogState(); scheduleRenderApp();
+}
+function setBenchName(i, value){
+  const trimmed = (value || '').trim();
+  logState.settings.benchNames[i] = trimmed || `控え${i + 1}`;
+  saveLogState(); scheduleRenderApp();
+}
+function removeBenchMember(i){
+  logState.settings.benchNames.splice(i, 1);
+  saveLogState(); scheduleRenderApp();
+}
+// 交代アイコンは控えメンバーの行にある。タップした控えメンバーを、次に
+// 選ぶアクティブメンバーと入れ替える(誰と交代するかは後のポップアップで選ぶ)。
+function openSubstituteModal(benchIndex){
+  logState.ui.substituteOpen = true;
+  logState.ui.substituteBenchIndex = benchIndex;
+  scheduleRenderApp();
+}
+function closeSubstituteModal(){
+  logState.ui.substituteOpen = false;
+  logState.ui.substituteBenchIndex = null;
+  scheduleRenderApp();
+}
+// slotIndexで指定したアクティブな枠(playerNames[slotIndex])を、控えメンバー
+// (benchNames[benchIndex])と入れ替える。「進行中かどうか」は問わず、まだ
+// 記録していない半荘の入力欄であればいつでも呼べる(呼び出し元のUI側で
+// 常時表示することでこれを満たす)。
+//
+// ⚠️ ここではrenamePlayerEverywhere()を意図的に呼ばない。通常のプレイヤー名
+// 変更(setPlayerName)は「同じ人の表示名を変える」操作なので過去の半荘記録
+// にも遡って反映するが、交代は「別の人に入れ替わる」操作なので、既に
+// 「半荘を記録する」が押された過去の半荘のscoresキー(=退いた人の名前の
+// ままでよい、その人自身の記録として正しい)を書き換えてはならない。
+// 今後(まだ記録していない)入力欄からのみ、新しい名前(控えメンバーの名前)
+// が使われるようにする。
+function confirmSubstitute(slotIndex){
+  const benchIndex = logState.ui.substituteBenchIndex;
+  if (benchIndex == null) return;
+  const benchNames = logState.settings.benchNames;
+  const incoming = benchNames[benchIndex];
+  const outgoing = logState.settings.playerNames[slotIndex];
+  if (incoming == null || outgoing == null) return;
+  logState.settings.playerNames[slotIndex] = incoming;
+  benchNames.splice(benchIndex, 1, outgoing); // 退いた人がそのまま控えメンバー欄に入る(入れ替え)
+  // まだ記録していない入力欄に、退いた人の分として未確定の点数が入力途中
+  // だった場合、別人の点数を新しい人が引き継いでしまわないようクリアする。
+  delete logState.ui.formScores[outgoing];
+  delete logState.ui.formScoreSign[outgoing];
+  delete logState.ui.formScoreAuto[outgoing];
+  logState.ui.formScores[incoming] = '';
+  logState.ui.formScoreSign[incoming] = '+';
+  logState.ui.formScoreAuto[incoming] = false;
+  logState.ui.activeMemberPresetId = null; // ④: メンバー構成が変わったので適用状態を外す
+  closeSubstituteModal();
+  saveLogState();
+  scheduleRenderApp();
+}
+
+/* ---- ②④共通: プリセット(ルール/メンバー構成)の汎用管理 ----
+   kindは'rule'|'member'。「1タップで適用・⋮メニューから名前変更/上書き・
+   削除確認・件数上限なし・+新規保存」というUI/挙動パターンを②③どちらの
+   プリセット種別でも共有するための共通実装。 */
+function getPresetList(kind){
+  return kind === 'rule' ? logState.rulePresets : logState.memberPresets;
+}
+function getActivePresetId(kind){
+  return kind === 'rule' ? logState.ui.activeRulePresetId : logState.ui.activeMemberPresetId;
+}
+function setActivePresetId(kind, id){
+  if (kind === 'rule') logState.ui.activeRulePresetId = id;
+  else logState.ui.activeMemberPresetId = id;
+}
+function captureMemberPreset(){
+  const names = activePlayers();
+  const participantLinks = {};
+  names.forEach(p => { if (logState.settings.participantLinks[p]) participantLinks[p] = logState.settings.participantLinks[p]; });
+  return { playerNames: [...names], participantLinks };
+}
+function applyRulePreset(id){
+  const preset = logState.rulePresets.find(p => p.id === id);
+  if (!preset) return;
+  Object.assign(logState.settings, preset.rules);
+  logState.ui.activeRulePresetId = id;
+  saveLogState();
+  scheduleRenderApp();
+}
+function applyMemberPreset(id){
+  const preset = logState.memberPresets.find(p => p.id === id);
+  if (!preset) return;
+  const names = preset.members.playerNames;
+  logState.settings.playerCount = names.length;
+  logState.settings.playerNames = [...names];
+  names.forEach(p => {
+    if (preset.members.participantLinks[p]) logState.settings.participantLinks[p] = preset.members.participantLinks[p];
+  });
+  resetFormScores();
+  logState.ui.activeMemberPresetId = id;
+  saveLogState();
+  scheduleRenderApp();
+}
+function applyPreset(kind, id){
+  if (kind === 'rule') applyRulePreset(id);
+  else applyMemberPreset(id);
+}
+function openPresetMenu(kind, id){
+  logState.ui.presetMenuOpen = { kind, id };
+  scheduleRenderApp();
+}
+function closePresetMenu(){
+  logState.ui.presetMenuOpen = null;
+  scheduleRenderApp();
+}
+// id=nullなら「+ 新規保存」(新規作成モード)、idがあれば既存プリセットの名前変更モード。
+function _focusPresetNameInput(){
+  scheduleRenderApp(() => {
+    const el = document.getElementById('presetNameInput');
+    if (el) { el.focus(); el.select(); }
+  });
+}
+function startRenamePreset(kind, id){
+  logState.ui.presetMenuOpen = null;
+  logState.ui.renamingPreset = { kind, id };
+  _focusPresetNameInput();
+}
+function startNewPreset(kind){
+  logState.ui.renamingPreset = { kind, id: null };
+  _focusPresetNameInput();
+}
+function cancelRenamePreset(){
+  logState.ui.renamingPreset = null;
+  scheduleRenderApp();
+}
+function saveRenamePreset(name){
+  const target = logState.ui.renamingPreset;
+  if (!target) return;
+  const trimmed = (name || '').trim();
+  if (!trimmed) { cancelRenamePreset(); return; }
+  const { kind, id } = target;
+  if (id) {
+    const preset = getPresetList(kind).find(p => p.id === id);
+    if (preset) preset.name = trimmed;
+  } else {
+    const preset = {
+      id: 'preset_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      name: trimmed,
+      createdAt: Date.now(),
+    };
+    if (kind === 'rule') {
+      preset.rules = captureRulePreset(logState.settings);
+      logState.rulePresets.push(preset);
+    } else {
+      preset.members = captureMemberPreset();
+      logState.memberPresets.push(preset);
+    }
+    setActivePresetId(kind, preset.id);
+  }
+  logState.ui.renamingPreset = null;
+  saveLogState();
+  scheduleRenderApp();
+}
+function overwritePreset(kind, id){
+  const preset = getPresetList(kind).find(p => p.id === id);
+  if (!preset) return;
+  if (kind === 'rule') preset.rules = captureRulePreset(logState.settings);
+  else preset.members = captureMemberPreset();
+  logState.ui.presetMenuOpen = null;
+  setActivePresetId(kind, id);
+  saveLogState();
+  scheduleRenderApp();
+}
+function requestDeletePreset(kind, id){
+  logState.ui.presetMenuOpen = null;
+  logState.ui.confirmDeletePreset = { kind, id };
+  scheduleRenderApp();
+}
+function cancelDeletePreset(){
+  logState.ui.confirmDeletePreset = null;
+  scheduleRenderApp();
+}
+function confirmDeletePresetAction(){
+  const target = logState.ui.confirmDeletePreset;
+  if (!target) return;
+  const { kind, id } = target;
+  if (kind === 'rule') {
+    logState.rulePresets = logState.rulePresets.filter(p => p.id !== id);
+    if (logState.ui.activeRulePresetId === id) logState.ui.activeRulePresetId = null;
+  } else {
+    logState.memberPresets = logState.memberPresets.filter(p => p.id !== id);
+    if (logState.ui.activeMemberPresetId === id) logState.ui.activeMemberPresetId = null;
+  }
+  logState.ui.confirmDeletePreset = null;
+  saveLogState();
+  scheduleRenderApp();
 }
 
 /* ---- 対局履歴: ゲストプレイヤーへの結果受け取りリンクを送る ----
@@ -4907,6 +5237,69 @@ function dismissNotifyBanner(){
 }
 
 /* ---- rendering ---- */
+// ③: 人数・プレイヤー名入力欄・控えメンバーは「対局ルール設定」パネルの外に
+// 出し、常時表示にする(アコーディオンの開閉に関係なく、いつでも見える)。
+function renderPlayerRosterPanel(){
+  const s = logState.settings;
+  const benchNames = s.benchNames || [];
+  return `
+    <section class="player-roster-panel">
+      <div class="settings-row">
+        <div class="lbl">人数</div>
+        <div class="preset-row">
+          <button class="preset-btn ${s.playerCount===4?'active':''}" onclick="setPlayerCount(4)">4人打ち</button>
+          <button class="preset-btn ${s.playerCount===3?'active':''}" onclick="setPlayerCount(3)">3人打ち</button>
+        </div>
+      </div>
+
+      <div class="settings-row">
+        <div class="lbl">メンバー構成プリセット</div>
+        ${renderPresetChipRow('member')}
+      </div>
+
+      <div class="settings-row">
+        <div class="lbl">プレイヤー名<span class="hint">自分から見て右隣の順番(反時計回り)で入力してください</span></div>
+        <div class="name-edit-row">
+          ${activePlayers().map((p,i)=>{
+            const link = logState.settings.participantLinks[p];
+            const linkBtnHtml = CloudSync.isAvailable() ? (
+              link
+                ? `<button class="link-badge linked" onclick="openFriendPicker('${escKey(p)}')" title="同卓者: ${escapeHtml(link.username)}">🔗 ${escapeHtml(link.username)}</button>`
+                : `<button class="link-badge" onclick="openFriendPicker('${escKey(p)}')" title="同卓者を指定">🔗 指定</button>`
+            ) : '';
+            return `
+            <div class="name-edit-item">
+              <span class="num">${i+1}</span>
+              <input class="text-input" value="${escapeHtml(p)}" onchange="setPlayerName(${i}, this.value)">
+              ${linkBtnHtml}
+            </div>`;
+          }).join('')}
+        </div>
+        ${CloudSync.isAvailable() ? `<div class="preview-line" style="margin-top:2px;">🔗でユーザーネーム・フレンドを指定すると、対局終了時にその人の端末にも自動で結果が届きます</div>` : ''}
+      </div>
+
+      <div class="settings-row">
+        <div class="lbl" style="display:flex;justify-content:space-between;align-items:center;">
+          <span>控えメンバー</span>
+          <span class="switch ${s.benchEnabled?'on':''}" onclick="toggleBenchEnabled()"></span>
+        </div>
+        ${s.benchEnabled ? `
+          <div class="name-edit-row" style="margin-top:8px;">
+            ${benchNames.map((name,i)=>`
+              <div class="name-edit-item">
+                <span class="num">控</span>
+                <input class="text-input" value="${escapeHtml(name)}" onchange="setBenchName(${i}, this.value)">
+                <button class="link-badge swap-badge" onclick="openSubstituteModal(${i})" title="出場させる(交代)">🔄</button>
+                <button class="link-badge danger-text" onclick="removeBenchMember(${i})" title="控えメンバーから削除">×</button>
+              </div>`).join('')}
+          </div>
+          <button class="mentsu-add" style="margin-top:8px;" onclick="addBenchMember()">＋ 控えメンバーを追加</button>
+          <div class="history-reminder">💡 控えメンバーの🔄で、次の半荘(まだ記録していない半荘)からアクティブメンバーの誰かと交代できます。それより前に記録済みの半荘には影響しません。</div>
+        ` : ''}
+      </div>
+    </section>`;
+}
+
 function renderSettingsAccordion(){
   const s = logState.settings;
   const open = logState.ui.settingsOpen;
@@ -4926,32 +5319,8 @@ function renderSettingsAccordion(){
       ${open ? `
       <div class="accordion-body">
         <div class="settings-row">
-          <div class="lbl">人数</div>
-          <div class="preset-row">
-            <button class="preset-btn ${s.playerCount===4?'active':''}" onclick="setPlayerCount(4)">4人打ち</button>
-            <button class="preset-btn ${s.playerCount===3?'active':''}" onclick="setPlayerCount(3)">3人打ち</button>
-          </div>
-        </div>
-
-        <div class="settings-row">
-          <div class="lbl">プレイヤー名<span class="hint">自分から見て右隣の順番(反時計回り)で入力してください</span></div>
-          <div class="name-edit-row">
-            ${activePlayers().map((p,i)=>{
-              const link = logState.settings.participantLinks[p];
-              const linkBtnHtml = CloudSync.isAvailable() ? (
-                link
-                  ? `<button class="link-badge linked" onclick="openFriendPicker('${escKey(p)}')" title="同卓者: ${escapeHtml(link.username)}">🔗 ${escapeHtml(link.username)}</button>`
-                  : `<button class="link-badge" onclick="openFriendPicker('${escKey(p)}')" title="同卓者を指定">🔗 指定</button>`
-              ) : '';
-              return `
-              <div class="name-edit-item">
-                <span class="num">${i+1}</span>
-                <input class="text-input" value="${escapeHtml(p)}" onchange="setPlayerName(${i}, this.value)">
-                ${linkBtnHtml}
-              </div>`;
-            }).join('')}
-          </div>
-          ${CloudSync.isAvailable() ? `<div class="preview-line" style="margin-top:2px;">🔗でユーザーネーム・フレンドを指定すると、対局終了時にその人の端末にも自動で結果が届きます</div>` : ''}
+          <div class="lbl">お気に入りルールプリセット</div>
+          ${renderPresetChipRow('rule')}
         </div>
 
         <div class="settings-row">
@@ -5254,7 +5623,12 @@ function renderEndMatchControls(isPresentationDone){
       </div>`;
   }
   const label = isPresentationDone ? '🏁 対局を終了して履歴に保存' : '対局を終了する';
-  return `<button class="end-match-btn" onclick="requestEndMatch()">${label}</button>`;
+  // ④: 終局(結果発表)のタイミングで、今のメンバー構成をプリセットとして
+  // 保存できる導線。保存自体のロジックはプレイヤー名入力欄まわりの
+  // 「+ 新規保存」(renderPresetChipRow('member'))と同じstartNewPreset()を使う。
+  return `
+    <button class="mentsu-add" style="margin-bottom:8px;" onclick="startNewPreset('member')">📋 このメンバーをプリセットとして保存</button>
+    <button class="end-match-btn" onclick="requestEndMatch()">${label}</button>`;
 }
 
 function renderRoomStatusHtml(){
@@ -5332,7 +5706,7 @@ function renderLog(){
   const headerHtml = renderStickyHeader(s, totals);
 
   document.getElementById('logTab').innerHTML =
-    headerHtml + renderSettingsAccordion() + renderChipsAccordion() + renderHanchanForm()
+    headerHtml + renderPlayerRosterPanel() + renderSettingsAccordion() + renderChipsAccordion() + renderHanchanForm()
     + renderHanchanLog(logState.hanchans, s, { readOnly: isRoomViewerOnly() });
 }
 
@@ -5519,10 +5893,12 @@ function confirmDeleteArchive(id){
 // matchHistory中、playerNameが参加していた全対局の全半荘を対象に集計する。
 // 「試合数」は半荘数（1半荘あたりの平均収支などと単位を揃えるため）。
 function calcCareerStats(matchHistory, playerName){
-  const relevant = matchHistory.filter(m => {
-    const s = m.settingsSnapshot;
-    return s && s.playerNames.slice(0, s.playerCount).includes(playerName);
-  });
+  // ③: 控え交代で試合途中から/までしか出場していない場合、最終ロースター
+  // (settingsSnapshot.playerNames)には名前が残らないことがあるため、
+  // 「いずれかの半荘に一度でも登場したか」で対象の対局を絞り込む
+  // (実際のカウントは下のhanchansループがhanchanごとに個別判定する)。
+  const relevant = matchHistory.filter(m =>
+    (m.hanchans || []).some(h => playerName in h.scores));
   if (relevant.length === 0) return null;
 
   let games = 0, rankSum = 0, top1 = 0, top2 = 0, last = 0, tobiCount = 0, moneySum = 0, maxScore = -Infinity;
@@ -5533,17 +5909,25 @@ function calcCareerStats(matchHistory, playerName){
     m.hanchans.forEach(h => {
       if (!(playerName in h.scores)) return;
       games++;
-      const entries = players.map(p => ({ name: p, score: h.scores[p] }));
+      // ③: この半荘に実際に参加した人だけを対象にする(現在の/最終的な
+      // ロースターではなく、hanchan.scoresのキー=その半荘の実参加者)。
+      const hanchanPlayers = Object.keys(h.scores);
+      const entries = hanchanPlayers.map(p => ({ name: p, score: h.scores[p] }));
       const ranked = rankPlayers(entries);
       const me = ranked.find(r => r.name === playerName);
       rankSum += (me.loRank + me.hiRank) / 2; // 同着は帯の平均順位として数える
       if (me.loRank === 1) top1++;
       if (me.hiRank <= 2) top2++;
-      if (me.hiRank === s.playerCount) last++;
+      if (me.hiRank === hanchanPlayers.length) last++;
       if (h.scores[playerName] < 0) tobiCount++;
       if (h.scores[playerName] > maxScore) maxScore = h.scores[playerName];
+      // ①: 半荘ごとのルールスナップショットがあればそちらのレートを使う
+      // (calcHanchanResult自身もhanchan.rulesSnapshotを優先するため、
+      // ここで渡すsettingsForCalcのルール値は「スナップショットが無い
+      // 古いデータ」の時だけ実際に使われるフォールバックになる)。
       const { pt } = calcHanchanResult(h, settingsForCalc);
-      moneySum += pt[playerName] * s.rate;
+      const rate = (h.rulesSnapshot && h.rulesSnapshot.rate != null) ? h.rulesSnapshot.rate : s.rate;
+      moneySum += pt[playerName] * rate;
     });
     moneySum += ((m.chips && m.chips[playerName]) || 0) * s.chipUnitYen;
   });
@@ -5595,7 +5979,9 @@ function dominantPlayerCountFor(matchHistory, playerName){
   const counts = {};
   matchHistory.forEach(m => {
     const s = m.settingsSnapshot;
-    if (!s || !s.playerNames.slice(0, s.playerCount).includes(playerName)) return;
+    // ③: 控え交代で最終ロースターに残っていなくても、この対局のどこかの
+    // 半荘に実際に参加していれば数える(getAllPlayerNamesEverPlayed参照)。
+    if (!s || !(m.hanchans || []).some(h => playerName in h.scores)) return;
     counts[s.playerCount] = (counts[s.playerCount] || 0) + 1;
   });
   const keys = Object.keys(counts);
@@ -5614,11 +6000,11 @@ function dominantPlayerCountFor(matchHistory, playerName){
 function getAllPlayerNamesEverPlayed(matchHistory){
   const counts = {};
   matchHistory.forEach(m => {
-    const s = m.settingsSnapshot;
-    if (!s) return;
-    const players = s.playerNames.slice(0, s.playerCount);
-    m.hanchans.forEach(h => {
-      players.forEach(p => { if (p in h.scores) counts[p] = (counts[p] || 0) + 1; });
+    // ③: 各半荘の実際の参加者(hanchan.scoresのキー)を直接数える。控え交代で
+    // 対局終盤に控えに回り、最終ロースター(settingsSnapshot.playerNames)には
+    // 残っていない人も、実際に出場した半荘の分はここに含める。
+    (m.hanchans || []).forEach(h => {
+      Object.keys(h.scores).forEach(p => { counts[p] = (counts[p] || 0) + 1; });
     });
   });
   return Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b));
@@ -6463,6 +6849,119 @@ function renderClaimModal(){
     </div>`;
 }
 
+/* ---- ②④共通: プリセット(ルール/メンバー構成)のチップ行・⋮メニュー・
+   名前入力・削除確認の描画 ---- */
+// kind: 'rule'|'member'。横並びのチップ一覧+「＋新規保存」。renderSettingsAccordion
+// (②)とrenderPlayerRosterPanel(④)の両方から呼ばれる共通コンポーネント。
+function renderPresetChipRow(kind){
+  const list = getPresetList(kind);
+  const activeId = getActivePresetId(kind);
+  return `
+    <div class="preset-chip-row">
+      ${list.map(p => `
+        <div class="preset-chip ${activeId === p.id ? 'active' : ''}">
+          <button class="preset-chip-main" onclick="applyPreset('${kind}','${escKey(p.id)}')">${escapeHtml(p.name)}</button>
+          <button class="preset-chip-menu" onclick="openPresetMenu('${kind}','${escKey(p.id)}')" title="メニュー">⋮</button>
+        </div>`).join('')}
+      <button class="preset-chip preset-chip-new" onclick="startNewPreset('${kind}')">＋ 新規保存</button>
+    </div>`;
+}
+function renderPresetMenuModal(){
+  const root = document.getElementById('presetMenuModalRoot');
+  if (!root) return;
+  const target = logState.ui.presetMenuOpen;
+  const preset = target && getPresetList(target.kind).find(p => p.id === target.id);
+  if (!target || !preset) { root.innerHTML = ''; return; }
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">${escapeHtml(preset.name)}</span>
+          <button class="history-close" onclick="closePresetMenu()">×</button>
+        </div>
+        <div class="history-modal-body">
+          <button class="mentsu-add" onclick="startRenamePreset('${target.kind}','${escKey(target.id)}')">✏️ 名前を変更</button>
+          <button class="mentsu-add" style="margin-top:8px;" onclick="overwritePreset('${target.kind}','${escKey(target.id)}')">💾 現在の設定で上書き</button>
+          <button class="mentsu-add danger-text" style="margin-top:8px;" onclick="requestDeletePreset('${target.kind}','${escKey(target.id)}')">🗑 削除</button>
+        </div>
+      </div>
+    </div>`;
+}
+function renderPresetNameModal(){
+  const root = document.getElementById('presetNameModalRoot');
+  if (!root) return;
+  const target = logState.ui.renamingPreset;
+  if (!target) { root.innerHTML = ''; return; }
+  const isNew = !target.id;
+  const existing = isNew ? null : getPresetList(target.kind).find(p => p.id === target.id);
+  const initialValue = existing ? existing.name : '';
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">${isNew ? '名前をつけて保存' : '名前を変更'}</span>
+          <button class="history-close" onclick="cancelRenamePreset()">×</button>
+        </div>
+        <div class="history-modal-body">
+          <input class="text-input" id="presetNameInput" value="${escapeHtml(initialValue)}" placeholder="プリセット名">
+          <button class="record-btn" style="width:100%;margin-top:12px;" onclick="saveRenamePreset(document.getElementById('presetNameInput').value)">保存</button>
+        </div>
+      </div>
+    </div>`;
+}
+function renderDeletePresetConfirmModal(){
+  const root = document.getElementById('deletePresetConfirmModalRoot');
+  if (!root) return;
+  const target = logState.ui.confirmDeletePreset;
+  const preset = target && getPresetList(target.kind).find(p => p.id === target.id);
+  if (!target || !preset) { root.innerHTML = ''; return; }
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">プリセットを削除</span>
+          <button class="history-close" onclick="cancelDeletePreset()">×</button>
+        </div>
+        <div class="history-modal-body">
+          <p class="paywall-copy">「${escapeHtml(preset.name)}」を削除しますか？</p>
+          <div class="end-match-confirm-btns">
+            <button class="preset-btn" onclick="cancelDeletePreset()">キャンセル</button>
+            <button class="preset-btn danger" onclick="confirmDeletePresetAction()">削除</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ---- ③ 控えメンバーとの交代モーダル ---- */
+function renderSubstituteModal(){
+  const root = document.getElementById('substituteModalRoot');
+  if (!root) return;
+  if (!logState.ui.substituteOpen) { root.innerHTML = ''; return; }
+  const benchIndex = logState.ui.substituteBenchIndex;
+  const incoming = (logState.settings.benchNames || [])[benchIndex];
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">誰と交代しますか？</span>
+          <button class="history-close" onclick="closeSubstituteModal()">×</button>
+        </div>
+        <div class="history-modal-body">
+          <p class="paywall-copy">${escapeHtml(incoming || '')}さんを、次の半荘からどのプレイヤーの代わりに出場させますか？(それより前に記録済みの半荘には影響しません)</p>
+          <div class="history-list">
+            ${activePlayers().map((p, i) => `
+              <div class="history-card" onclick="confirmSubstitute(${i})">
+                <div class="history-title">${escapeHtml(p)}</div>
+                <div class="history-winner">${escapeHtml(p)}さんと交代 →</div>
+              </div>`).join('')}
+          </div>
+          <button class="mentsu-add" style="margin-top:10px;" onclick="closeSubstituteModal()">キャンセル</button>
+        </div>
+      </div>
+    </div>`;
+}
+
 /* ---- マルチプレイヤー: ログイン誘導モーダル ---- */
 function renderLoginPromptModal(){
   const root = document.getElementById('loginPromptModalRoot');
@@ -6661,6 +7160,10 @@ function renderAppInner(){
   safeRender(renderOtherModal, 'renderOtherModal');
   safeRender(renderHistoryLinkShareModal, 'renderHistoryLinkShareModal');
   safeRender(renderClaimModal, 'renderClaimModal');
+  safeRender(renderPresetMenuModal, 'renderPresetMenuModal');
+  safeRender(renderPresetNameModal, 'renderPresetNameModal');
+  safeRender(renderDeletePresetConfirmModal, 'renderDeletePresetConfirmModal');
+  safeRender(renderSubstituteModal, 'renderSubstituteModal');
   safeRender(renderNotifyBanner, 'renderNotifyBanner');
   safeRender(renderDebugError, 'renderDebugError');
   safeRender(() => updateBannerState(onLog), 'updateBannerState');
