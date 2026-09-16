@@ -3072,6 +3072,31 @@ const CloudSync = {
     }
     return !!logState.account.uid;
   },
+  // ①(再調査): 「Missing or insufficient permissions」が、実はfirestore.rules
+  // 側の問題ではなく、クライアント側が古い(失効・キャッシュされた)IDトークンの
+  // ままFirestoreへ書き込もうとしていることが原因のケースがある
+  // (@capacitor-firebase/firestoreとFirebaseAuthenticationプラグインの間で、
+  // 認証状態の更新がFirestore側の内部トークンキャッシュへ即座に伝播しない、
+  // という既知の類の不具合。Firebase公式SDKでも同種の報告が複数ある)。
+  // これまでdeleteAccount()だけがgetIdToken({forceRefresh:true})を呼んでいたが、
+  // (a) 失敗しても握りつぶして処理を続行していたため、後続のFirestore呼び出しが
+  // 同じ理由で失敗した時に「どちらが本当の原因か」が画面上のデバッグ表示
+  // (showDebugErrorは直前の1件しか保持しない)から分からなくなっていた、
+  // (b) createClaimToken()には同じ対策が入っていなかった、という2つの穴が
+  // あったため、この共通ヘルパーに切り出して両方から確実に呼ぶようにする。
+  // 失敗した場合は「本当にrulesの問題かどうか」を切り分けられるよう、後続の
+  // Firestore呼び出しを行わずここで打ち切る(呼び出し元がエラーとして扱う)。
+  async _forceRefreshIdToken(context){
+    const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
+    if (!Auth || !Auth.getIdToken) return { ok: true }; // プラグイン未対応環境では何もせず続行させる
+    try {
+      await Auth.getIdToken({ forceRefresh: true });
+      return { ok: true };
+    } catch (e) {
+      showDebugError(`${context} (IDトークンの強制リフレッシュ)`, formatErrorForDisplay(e) + '\n\n💡 この後に続けてFirestoreの操作が「Missing or insufficient permissions」で失敗する場合、firestore.rulesの内容そのものではなく、サインインセッションが古くなっている(トークンの更新に失敗している)ことが原因の可能性があります。一度サインアウトしてから、同じアカウントで再度ログインし直すことをお試しください。');
+      return { ok: false, error: 'reauth' };
+    }
+  },
   init(){
     if (!this.isAvailable()) return Promise.resolve();
     this._initPromise = this._doInit();
@@ -3332,6 +3357,11 @@ const CloudSync = {
     if (!(await this.ensureSignedIn())) return { ok: false };
     const m = logState.matchHistory.find(x => x.id === matchId);
     if (!m) return { ok: false };
+    // ①(再調査): deleteAccount()にはあった「IDトークンの強制リフレッシュ」が
+    // ここには無く、古いトークンのままの書き込みで"Missing or insufficient
+    // permissions"になりうる穴だったため、同じ対策をここにも入れる。
+    const refreshResult = await this._forceRefreshIdToken('結果受け取りリンクの作成');
+    if (!refreshResult.ok) return { ok: false };
     try {
       const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
       if (!Firestore) return { ok: false };
@@ -3637,18 +3667,21 @@ const CloudSync = {
       // 削除処理の直前に必ずIDトークンを強制リフレッシュしておく。古い(失効・
       // キャッシュされた)トークンのままFirestoreへリクエストすると、実際には
       // 有効なサインイン状態でも"Missing or insufficient permissions"になり
-      // うるため、これが原因かどうかを切り分ける。ついでに、Firebase
-      // Authentication側が今どのuidを「現在のユーザー」として認識しているかを
-      // ローカルのlogState.account.uidと突き合わせる。以前linkGoogle/linkApple
-      // がsignInWithX()(新規サインイン)を誤って呼んでおり、匿名時代の古いuidの
-      // ままusernames/friends/matchHistoryドキュメントが残っていた場合、
-      // ここで不一致を検出できる(firestore.rulesのisSelf(uid)はrequest.auth.uidを
-      // 見るため、ローカルのuidが古いとどの操作も一律でpermission-deniedになる)。
-      if (Auth.getIdToken) {
-        await Auth.getIdToken({ forceRefresh: true }).catch(e => {
-          showDebugError('アカウント削除 (IDトークンの強制リフレッシュ)', e);
-        });
-      }
+      // うるため、これが原因かどうかを切り分ける。①(再調査): 以前はこの
+      // リフレッシュが失敗してもエラー表示だけして処理を続行していたため、
+      // 後続のFirestore削除が同じ理由で失敗した時に、showDebugError(直前の
+      // 1件しか保持しない)がその新しいエラーで上書きされ、本当の原因
+      // (トークン更新の失敗)が画面から見えなくなっていた。ここで打ち切る
+      // ことで、真の原因を隠さないようにする。
+      const refreshResult = await this._forceRefreshIdToken('アカウント削除');
+      if (!refreshResult.ok) return refreshResult;
+      // ついでに、Firebase Authentication側が今どのuidを「現在のユーザー」
+      // として認識しているかをローカルのlogState.account.uidと突き合わせる。
+      // 以前linkGoogle/linkAppleがsignInWithX()(新規サインイン)を誤って
+      // 呼んでおり、匿名時代の古いuidのままusernames/friends/matchHistory
+      // ドキュメントが残っていた場合、ここで不一致を検出できる
+      // (firestore.rulesのisSelf(uid)はrequest.auth.uidを見るため、
+      // ローカルのuidが古いとどの操作も一律でpermission-deniedになる)。
       if (Auth.getCurrentUser) {
         const current = await Auth.getCurrentUser().catch(() => null);
         const currentUid = current && current.user && current.user.uid;
@@ -4073,16 +4106,19 @@ function formatErrorForDisplay(err){
   }
   return parts.join('\n');
 }
-// Firestoreの"Missing or insufficient permissions"系のエラーは、コード側の
-// バグよりも「firebase/firestore.rulesを編集したのに、実際のFirebase
-// プロジェクトへ firebase deploy --only firestore:rules (またはFirebase
-// Consoleでの手動publish)をまだ実行していない」ケースが非常に多い
-// (このリポジトリにはFirebase CLIでデプロイできる環境が無いため、ルールを
-// 変更するたびに毎回手動でのデプロイが必要)。該当しそうなエラー文言の時だけ、
-// デバッグ表示にこの可能性を明示するヒントを添える。
+// Firestoreの"Missing or insufficient permissions"系のエラーについて、
+// 当てはまりそうな原因を上から順に確認してもらうためのヒントを添える。
+// ①(再調査): 「firestore.rulesが未デプロイ」という当初の仮説だけを案内して
+// いたが、実際にはAppleサインイン等の後IDトークンをforceRefreshしても
+// deleteAccount()以外の呼び出しでは反映されていなかった(createClaimToken()
+// には同種の対策が無かった)ことを確認し、修正済み(CloudSync._forceRefreshIdToken
+// 参照)。それでも解決しない場合に備え、原因の切り分け手順を案内する。
 function _appendPermissionDeniedHint(text){
   if (!/permission|insufficient/i.test(text)) return text;
-  return `${text}\n\n💡 心当たりが無い場合、firebase/firestore.rulesを変更した後にFirebase側へデプロイ(firebase deploy --only firestore:rules、またはFirebase Console > Firestore Database > ルール での手動publish)がまだ済んでいない可能性があります。ファイルの内容と実際にデプロイされているルールが一致しているか確認してください。`;
+  return `${text}\n\n💡 このエラーの主な原因候補(上から順にご確認ください):\n`
+    + `1. サインインセッションが古い可能性: 一度サインアウトしてから、同じアカウントで再度ログインし直してください(IDトークンの更新に失敗している/反映されていないケースがあります)。\n`
+    + `2. firestore.rulesの未デプロイ: firebase/firestore.rulesを変更した後、実際にFirebase側へデプロイ(firebase deploy --only firestore:rules、またはFirebase Console > Firestore Database > ルール での手動publish)されているか確認してください。このアプリの開発環境にはFirebase CLIでデプロイできる権限が無いため、実際にデプロイされている内容との突き合わせはご自身の手元でお願いします(firebase firestore:rules get や Firebase Console のルールタブで確認できます)。\n`
+    + `3. 1・2のどちらでもない場合: 拒否されたドキュメントのパス(上記に表示)と、firestore.rules側の該当ルールの条件式(request.auth.uidの型・ドキュメントIDの形式など)を照らし合わせてご確認ください。`;
 }
 function showDebugError(context, err){
   logState.ui.debugError = { context, detail: formatErrorForDisplay(err) };
@@ -4907,7 +4943,22 @@ async function linkParticipant(uid, username){
 function unlinkParticipant(){
   const slot = logState.ui.friendPickerSlot;
   if (!slot) return;
+  const wasLinked = !!logState.settings.participantLinks[slot];
   delete logState.settings.participantLinks[slot];
+  // ③(不具合修正): 指定した瞬間、プレイヤー名欄にはそのユーザーネームが
+  // 自動入力される(linkParticipant参照)。指定解除してもこの名前はそのまま
+  // 残るため、後から別の枠へ同じユーザーを指定し直すと、その枠も同じ
+  // ユーザーネームにリネームされ、2つの枠が同じ名前の文字列になってしまう。
+  // participantLinks・プレイヤー名欄の🔗バッジはどちらも「名前」をキーに
+  // 参照するため、この状態では指定解除したはずのこの枠まで「紐付け済み」
+  // として表示され続け、重複防止チェック(findDuplicateLinkSlot)もこの枠を
+  // 依然として使用中と誤認してしまう。指定解除した瞬間に名前を中立な
+  // プレースホルダーへ戻し、この名前衝突を未然に防ぐ(「ゲストに戻す」の
+  // ボタン文言どおり、素のゲスト名に戻す)。
+  if (wasLinked) {
+    const idx = logState.settings.playerNames.indexOf(slot);
+    if (idx !== -1) setPlayerName(idx, `P${idx + 1}`);
+  }
   logState.ui.activeMemberPresetId = null; // ④: フレンド指定の変更もメンバー構成の変更として扱う
   saveLogState();
   closeFriendPicker();
@@ -4964,13 +5015,21 @@ function confirmSubstitute(slotIndex){
   const benchNames = logState.settings.benchNames;
   const benchIds = logState.settings.benchIds;
   const incoming = benchNames[benchIndex];
+  const incomingId = benchIds[benchIndex];
   const outgoing = logState.settings.playerNames[slotIndex];
   const outgoingId = logState.settings.playerIds[slotIndex];
   if (incoming == null || outgoing == null) return;
   logState.settings.playerNames[slotIndex] = incoming;
-  // ④: 交代でアクティブ枠に入る人には、名前が偶然同じでも必ず新しいIDを
-  // 振る(「別人が入った」ことを明示的に記録する。改名との違いはここだけ)。
-  logState.settings.playerIds[slotIndex] = genParticipantId();
+  // ②(不具合修正): 交代で入ってくる人のIDは、その人が控えメンバーとして
+  // 初めて追加された時(addBenchMember)、またはこれより前に控えへ退いた時
+  // (このconfirmSubstituteの数行下、outgoingIdをbenchIdsへ持ち越す処理)に
+  // 既に割り当て済みのものをそのまま引き継ぐ。ここで毎回新しいIDを発行して
+  // しまうと、同じ2人が🔄で何度も入れ替わるだけで「別人」カウントが際限なく
+  // 増え続けてしまう不具合があった(実際に確認された)。「別人が入った」ことの
+  // 記録は、控えメンバーとして新規追加された瞬間に既に新しいIDを発行済みの
+  // ため、ここで改めて発行する必要はない。incomingIdが無い(旧データ等の
+  // 想定外のケース)場合のみ保険的に新規発行する。
+  logState.settings.playerIds[slotIndex] = incomingId || genParticipantId();
   benchNames.splice(benchIndex, 1, outgoing); // 退いた人がそのまま控えメンバー欄に入る(入れ替え)
   benchIds.splice(benchIndex, 1, outgoingId); // 退いた人の(半荘記録済みの)IDをそのまま控え欄に持ち越す
   // まだ記録していない入力欄に、退いた人の分として未確定の点数が入力途中
