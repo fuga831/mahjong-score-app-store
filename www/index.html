@@ -706,6 +706,22 @@
     font-variant-numeric:tabular-nums;
   }
   .crown{font-size:.7rem;}
+  /* ---- 金額の2段組み表示(合計金額+チップ内訳)。総合結果・対局履歴の
+     詳細・演出モードの発表カードで共通して使う(moneyStackInnerHtml参照)。
+     上段(.pmoney/.reveal-money)は既存のまま、下段はひとまわり小さく・
+     控えめな色で、プラス/マイナスの配色だけ既存ルール(#9fe0bd/red-soft)
+     を踏襲しつつopacityを落として目立たせすぎないようにしている。 ---- */
+  .money-chip-sub{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-variant-numeric:tabular-nums;
+    font-size:.62rem;
+    opacity:.75;
+    white-space:nowrap;
+  }
+  .money-chip-sub.plus{color:#9fe0bd;}
+  .money-chip-sub.minus{color:var(--red-soft);}
+  .total-card .money-chip-sub{margin-top:1px;}
 
   /* ---- 演出モード切り替えスイッチ（画面右上） ---- */
   .mode-switch-row{
@@ -844,6 +860,12 @@
     font-variant-numeric:tabular-nums;
     font-size:1.15rem;
     color:var(--ivory);
+    flex-shrink:0;
+  }
+  .reveal-money-stack{
+    display:flex;
+    flex-direction:column;
+    align-items:flex-end;
     flex-shrink:0;
   }
   .reveal-pt{
@@ -2137,10 +2159,12 @@ function calcTotals(hanchans, chips, settings) {
   });
   const chipSum = settings.players.reduce((s, p) => s + (chips[p] || 0), 0);
   const money = {};
+  const chipMoney = {}; // 合計金額(money)のうち、チップ分だけの内訳(円)。表示の2段組みで使う。
   settings.players.forEach(p => {
-    money[p] = totals[p] * settings.rate + (chips[p] || 0) * settings.chipUnitYen;
+    chipMoney[p] = (chips[p] || 0) * settings.chipUnitYen;
+    money[p] = totals[p] * settings.rate + chipMoney[p];
   });
-  return { pt: totals, money, chipImbalance: chipSum !== 0, chipSum };
+  return { pt: totals, money, chipMoney, chipImbalance: chipSum !== 0, chipSum };
 }
 
 /* ========================================================================= */
@@ -3545,6 +3569,17 @@ function formatPt(n){
   const sign = n > 0 ? '+' : n < 0 ? '-' : '';
   return `${sign}${Math.abs(n).toFixed(1)}`;
 }
+// 金額表示を2段組みにする共通ヘルパー(結果発表画面・対局履歴の詳細画面で
+// 同じ見た目にするため1箇所にまとめる)。上段は合計金額(チップ込み、
+// 表示内容は従来通り)。下段はチップ分の内訳(🪙+符号付き金額)のみを、
+// 上段より一回り小さく・控えめな色で添える。チップを使っていない
+// (chipMoneyが0の)対局では下段を出さず、従来通り1段のままにする。
+function moneyStackInnerHtml(amount, chipMoney, mainClass){
+  const chipLine = chipMoney
+    ? `<div class="money-chip-sub ${chipMoney>=0?'plus':'minus'}">🪙 ${formatMoney(chipMoney)}</div>`
+    : '';
+  return `<div class="${mainClass}">${formatMoney(amount)}</div>${chipLine}`;
+}
 
 /* ---- tab switching ---- */
 function setActiveTab(tab){ logState._activeTab = tab; scheduleRenderApp(); }
@@ -4516,7 +4551,7 @@ function totalCardsHtml(order, totals, topMoney){
         return `
         <div class="total-card ${isTop?'top':''}">
           <div class="pname">${isTop?'<span class="crown">👑</span>':''}${escapeHtml(p)}</div>
-          <div class="pmoney">${formatMoney(totals.money[p])}</div>
+          ${moneyStackInnerHtml(totals.money[p], totals.chipMoney[p], 'pmoney')}
           <div class="ppt">${formatPt(totals.pt[p])}pt</div>
         </div>`;
       }).join('')}
@@ -4551,7 +4586,7 @@ function revealGroupInnerHtml(group, totals){
       ${group.members.map(m => `
         <div class="reveal-member">
           <span class="reveal-name">${escapeHtml(m.name)}</span>
-          <span class="reveal-money">${formatMoney(totals.money[m.name])}</span>
+          <div class="reveal-money-stack">${moneyStackInnerHtml(totals.money[m.name], totals.chipMoney[m.name], 'reveal-money')}</div>
           <span class="reveal-pt">${formatPt(totals.pt[m.name])}pt</span>
         </div>`).join('')}`;
 }
