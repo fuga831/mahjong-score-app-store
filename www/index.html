@@ -38,7 +38,8 @@
   /* 文字サイズ:大(旧称ジジイモード)。このアプリのほぼ全てのfont-sizeは
      rem単位(html要素のfont-sizeが基準)で書かれているため、ここを1箇所
      拡大するだけでアプリ全体の文字が連動して大きくなる。 */
-  html.large-text{ font-size:125%; }
+  html.text-size-large{ font-size:125%; }
+  html.text-size-xlarge{ font-size:150%; } /* 大(125%)のさらに1.2倍 */
   body{
     background:
       radial-gradient(circle at 20% 15%, rgba(255,255,255,0.035) 0, transparent 40%),
@@ -1529,6 +1530,27 @@
     width:100%;
   }
   .num-input:focus{outline:none;border-color:var(--gold);}
+  /* 素点入力の符号(+/-)トグルボタン。数字専用キーボードにマイナス記号が
+     無いための対応(toggleFormScoreSign参照)。 */
+  .sign-toggle-btn{
+    flex-shrink:0;
+    width:2.1em;
+    height:2.1em;
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:900;
+    font-size:1rem;
+    line-height:1;
+    color:var(--ivory);
+    background:var(--felt-2);
+    border:1.5px solid var(--line);
+    border-radius:9px;
+  }
+  .sign-toggle-btn.minus{color:var(--red-soft);border-color:var(--red-soft);}
+  .sign-toggle-btn.plus{color:#9fe0bd;}
+  .sign-toggle-btn:active{background:var(--felt-1);}
+  /* 残り1人分の素点を自動逆算した仮の値(autoFillLastPlayerScore参照)。
+     手入力で上書きするまでの間、破線で「まだ仮の値」だと分かるようにする。 */
+  .num-input.auto-filled{border-style:dashed;color:var(--ivory-dim);}
   /* タップミスで±100点などが加算される入力欄標準の増減ボタンを消す */
   .num-input::-webkit-outer-spin-button,
   .num-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
@@ -3287,7 +3309,7 @@ function defaultLogState(){
       linkedProviders: { google: false, apple: false },
       notifyOnAutoRecord: true,     // 自分以外の操作で記録が追加された時に通知するか(初期値ON)
       pushPermissionRequested: false, // 通知許可を一度リクエスト済みか(タイミング制御用)
-      largeText: false,             // 文字サイズ:大(旧称ジジイモード)。ONでアプリ全体を1.25倍表示
+      textSize: 'large',             // 文字サイズ: 'normal'(100%) | 'large'(125%、旧ジジイモード) | 'xlarge'(150%)。アプリの初期状態は'large'。
     },
     friends: [], // [{ uid, username }] ローカルキャッシュ(正はusers/{uid}/friends)
     room: null,  // 進行中の卓。null=単独モード。
@@ -3298,6 +3320,8 @@ function defaultLogState(){
       startAdvancedOpen: false,
       editingHanchanId: null,
       formScores: {},
+      formScoreSign: {},  // プレイヤー名 -> '+' | '-'(素点入力欄の符号トグル。数字専用キーボードにマイナスが無いための対応)
+      formScoreAuto: {},  // プレイヤー名 -> true の間は、他の入力に追随して自動逆算され続ける仮の値(手入力で上書きするとfalseに戻る)
       formBuster: {},
       revealActive: false, // 演出モードで「終局」ボタンを押したか
       revealStep: 0,       // 発表済みの順位グループ数
@@ -3353,6 +3377,19 @@ function defaultLogState(){
 }
 
 // 保存されているデータ(v2、無ければ旧v1)をパースしてdefaultLogState()にマージする、
+// 旧: largeText(boolean、2段階)から新: textSize('normal'|'large'|'xlarge'、
+// 3段階)への移行。textSizeを既に保存済みならそのまま使う。旧largeTextしか
+// 無い場合は、既存ユーザーが明示的に選んでいたON/OFFの状態を尊重して
+// 変換する(アプリの新しい初期値'large'を、既存ユーザーに黙って
+// 上書きしないため)。account自体が無い(非常に古いデータ)場合だけ、
+// 新しい初期値をそのまま使う。
+function migrateTextSize(parsedAccount, defaultTextSize){
+  if (!parsedAccount) return defaultTextSize;
+  if (parsedAccount.textSize) return parsedAccount.textSize;
+  if (parsedAccount.largeText === false) return 'normal';
+  if (parsedAccount.largeText === true) return 'large';
+  return defaultTextSize;
+}
 // v1/v2共通の下地処理。matchHistoryはv1データに存在しないため自然に[]で補完される。
 function mergeParsedLogState(parsed){
   const base = defaultLogState();
@@ -3365,6 +3402,7 @@ function mergeParsedLogState(parsed){
       ...base.account,
       ...(parsed.account || {}),
       linkedProviders: { ...base.account.linkedProviders, ...((parsed.account || {}).linkedProviders || {}) },
+      textSize: migrateTextSize(parsed.account, base.account.textSize),
     },
     friends: Array.isArray(parsed.friends) ? parsed.friends : [],
     room: parsed.room || null,
@@ -3395,7 +3433,7 @@ function saveLogState(){
 const logState = loadLogState();
 if (logState.hanchans.length > 0) logState.ui.settingsOpen = false;
 saveLogState(); // v1からの移行時などに、v2キーへ即座に書き直しておく
-applyLargeTextClass(); // 保存済みの文字サイズ設定を起動直後から反映する
+applyTextSizeClass(); // 保存済みの文字サイズ設定を起動直後から反映する
 
 // 起動時に必ずPlay Billingへ購入履歴を問い合わせて上書きする。ローカル保存の
 // isPremiumだけに頼ると、端末変更・再インストール時に無料枠へ戻ってしまうため。
@@ -3469,8 +3507,14 @@ function syncRoomState(){
 
 function resetFormScores(){
   logState.ui.formScores = {};
+  logState.ui.formScoreSign = {};
+  logState.ui.formScoreAuto = {};
   logState.ui.formBuster = {};
-  activePlayers().forEach(p => { logState.ui.formScores[p] = ''; });
+  activePlayers().forEach(p => {
+    logState.ui.formScores[p] = '';
+    logState.ui.formScoreSign[p] = '+'; // デフォルトは「+」から開始
+    logState.ui.formScoreAuto[p] = false;
+  });
 }
 resetFormScores();
 
@@ -3860,8 +3904,55 @@ function cancelEditHanchan_noRender(){
 }
 
 /* ---- hanchan form handlers ---- */
-function setFormScore(name, value){ logState.ui.formScores[name] = value; scheduleRenderApp(); }
+// 素点入力欄は常に絶対値の数字だけを保持し、符号はformScoreSignで別管理する
+// (数字専用キーボード(inputmode="numeric")にはマイナス記号が無く、
+// 符号込みの値を直接入力できないため、符号だけ別のトグルボタンで
+// 切り替える設計にした)。デスクトップの number input 等で "-123" のような
+// 符号付きの値がそのまま渡ってきた場合は、ここで符号を抜き出して
+// formScoreSign側に反映し、符号が二重にならないようにする。
+function setFormScore(name, value){
+  const str = String(value);
+  if (str.startsWith('-')) {
+    logState.ui.formScoreSign[name] = '-';
+    logState.ui.formScores[name] = str.slice(1);
+  } else {
+    logState.ui.formScores[name] = value;
+  }
+  logState.ui.formScoreAuto[name] = false; // 手入力なので自動逆算の仮値ではなくなる
+  autoFillLastPlayerScore();
+  scheduleRenderApp();
+}
+function toggleFormScoreSign(name){
+  const cur = logState.ui.formScoreSign[name] || '+';
+  logState.ui.formScoreSign[name] = cur === '+' ? '-' : '+';
+  logState.ui.formScoreAuto[name] = false; // 符号を直接触った時点で手入力扱いにする
+  autoFillLastPlayerScore();
+  scheduleRenderApp();
+}
 function setFormBuster(bustedName, busterName){ logState.ui.formBuster[bustedName] = busterName; scheduleRenderApp(); }
+
+// N人打ちのうちN-1人分の素点が確定していれば、残り1人分を
+// 合計素点(持ち点×人数)から逆算し、暫定値として自動入力する。
+// 「確定」とは、空欄でなく、かつformScoreAutoがfalse(=自動逆算の仮値では
+// ない)状態を指す。まだ仮値のままの欄は「未確定」として扱われるため、
+// 他の欄を編集するたびに再計算され続ける(ユーザーがその欄自体を手入力で
+// 上書きした瞬間にformScoreAuto=falseになり、以後は再計算されなくなる)。
+// 入力される順番は問わない(setFormScore/toggleFormScoreSignの両方から
+// 毎回呼ばれるため、どの欄が最後に埋まってもその時点で発動する)。
+function autoFillLastPlayerScore(){
+  const players = activePlayers();
+  const unfixed = players.filter(p => logState.ui.formScores[p] === '' || logState.ui.formScoreAuto[p]);
+  if (unfixed.length !== 1) return; // ちょうど1人だけ未確定の時だけ発動
+  const target = unfixed[0];
+  const others = players.filter(p => p !== target);
+  if (others.some(p => isNaN(formScoreActual(p)))) return; // 他の欄がまだ不正な間は逆算しない
+  const expectedTotal = logState.settings.startPoints * logState.settings.playerCount;
+  const filledSum = others.reduce((sum, p) => sum + formScoreActual(p), 0);
+  const remainder = expectedTotal - filledSum;
+  logState.ui.formScoreSign[target] = remainder < 0 ? '-' : '+';
+  logState.ui.formScores[target] = String(Math.abs(remainder) / SCORE_INPUT_SCALE);
+  logState.ui.formScoreAuto[target] = true;
+}
 
 // 素点は必ず100点単位（下2桁は常に00）なので、入力フォームでは下2桁を省略した
 // 「100点単位の値」を打ってもらい、実際の素点にする時だけ100倍する。
@@ -3869,7 +3960,9 @@ function setFormBuster(bustedName, busterName){ logState.ui.formBuster[bustedNam
 const SCORE_INPUT_SCALE = 100;
 function formScoreActual(p){
   const raw = parseFloat(logState.ui.formScores[p]);
-  return isNaN(raw) ? NaN : Math.round(raw * SCORE_INPUT_SCALE);
+  if (isNaN(raw)) return NaN;
+  const sign = logState.ui.formScoreSign[p] === '-' ? -1 : 1;
+  return Math.round(sign * raw * SCORE_INPUT_SCALE);
 }
 function formTotal(){
   return activePlayers().reduce((sum, p) => {
@@ -3969,10 +4062,22 @@ function editHanchan(id){
   if (!h) return;
   logState.ui.editingHanchanId = id;
   logState.ui.formScores = {};
+  logState.ui.formScoreSign = {};
+  logState.ui.formScoreAuto = {};
   logState.ui.formBuster = {};
   activePlayers().forEach(p => {
-    // 保存されている実際の素点(例:35,000)を、入力欄用の100点単位の表記(例:350)に戻す。
-    logState.ui.formScores[p] = h.scores[p] === undefined ? '' : String(h.scores[p] / SCORE_INPUT_SCALE);
+    // 保存されている実際の素点(例:35,000 / -5,000)を、入力欄用の100点単位の
+    // 絶対値表記(例:350 / 50)と符号トグル(formScoreSign)に分けて戻す。
+    const actual = h.scores[p];
+    if (actual === undefined) {
+      logState.ui.formScores[p] = '';
+      logState.ui.formScoreSign[p] = '+';
+    } else {
+      const scaled = actual / SCORE_INPUT_SCALE;
+      logState.ui.formScoreSign[p] = scaled < 0 ? '-' : '+';
+      logState.ui.formScores[p] = String(Math.abs(scaled));
+    }
+    logState.ui.formScoreAuto[p] = false; // 保存済みの実データなので仮値扱いにはしない
     if (h.busterOf && h.busterOf[p]) logState.ui.formBuster[p] = h.busterOf[p];
   });
   scheduleRenderApp(() => {
@@ -4283,15 +4388,18 @@ function toggleNotifyOnAutoRecord(v){
   scheduleRenderApp();
   CloudSync.setNotifyOnAutoRecord(v);
 }
-// 文字サイズ:大(旧称ジジイモード)。端末ローカルの表示設定なのでCloudSync
-// には同期しない(notifyOnAutoRecordと違い、Firestore側で参照する必要が無い)。
-function applyLargeTextClass(){
-  document.documentElement.classList.toggle('large-text', !!logState.account.largeText);
+// 文字サイズ(標準/大/特大の3段階、旧称ジジイモード)。端末ローカルの
+// 表示設定なのでCloudSyncには同期しない(notifyOnAutoRecordと違い、
+// Firestore側で参照する必要が無い)。
+function applyTextSizeClass(){
+  const size = logState.account.textSize || 'large';
+  document.documentElement.classList.toggle('text-size-large', size === 'large');
+  document.documentElement.classList.toggle('text-size-xlarge', size === 'xlarge');
 }
-function toggleLargeText(v){
-  logState.account.largeText = v;
+function setTextSize(size){
+  logState.account.textSize = size;
   saveLogState();
-  applyLargeTextClass();
+  applyTextSizeClass();
   scheduleRenderApp();
 }
 function dismissNotifyBanner(){
@@ -4489,7 +4597,8 @@ function renderHanchanForm(){
           return `
           <div class="score-input-row">
             <span class="pname">${escapeHtml(p)}</span>
-            <input class="num-input" type="number" step="1" inputmode="numeric" placeholder="例:250"
+            <button type="button" class="sign-toggle-btn ${logState.ui.formScoreSign[p]==='-'?'minus':'plus'}" onclick="toggleFormScoreSign('${escKey(p)}')">${logState.ui.formScoreSign[p]==='-'?'−':'+'}</button>
+            <input class="num-input ${logState.ui.formScoreAuto[p]?'auto-filled':''}" type="number" step="1" inputmode="numeric" placeholder="例:250"
               value="${logState.ui.formScores[p]}" onchange="setFormScore('${escKey(p)}', this.value)">
             ${busted && needsBuster ? `
               <select class="text-input buster-select" onchange="setFormBuster('${escKey(p)}', this.value)">
@@ -5647,9 +5756,13 @@ function renderOtherModal(){
         </div>
         <div class="history-modal-body">
           <div class="other-menu-list">
-            <div class="other-menu-item" onclick="toggleLargeText(!logState.account.largeText)">
-              <span>文字サイズ: 大</span>
-              <span class="switch ${logState.account.largeText?'on':''}"></span>
+            <div class="other-menu-item" style="flex-direction:column;align-items:stretch;gap:8px;cursor:default;">
+              <span>文字サイズ</span>
+              <div class="preset-row">
+                <button class="preset-btn ${logState.account.textSize==='normal'?'active':''}" onclick="setTextSize('normal')">標準</button>
+                <button class="preset-btn ${logState.account.textSize==='large'?'active':''}" onclick="setTextSize('large')">大</button>
+                <button class="preset-btn ${logState.account.textSize==='xlarge'?'active':''}" onclick="setTextSize('xlarge')">特大</button>
+              </div>
             </div>
             <a class="other-menu-item" href="${LEGAL_CONFIG.supportUrl}" target="_blank" rel="noopener">
               <span>よくある質問・サポート</span><span class="arrow">›</span>
