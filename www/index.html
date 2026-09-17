@@ -498,7 +498,7 @@
   }
   .mentsu-row{
     display:flex;
-    flex-wrap:wrap;
+    flex-wrap:nowrap;
     align-items:center;
     gap:6px;
     background:var(--felt-2);
@@ -546,6 +546,18 @@
     cursor:pointer;
   }
   .mentsu-row .mremove:active{background:var(--felt-0);}
+  /* 文字サイズ設定(html.text-size-large/xlarge、ルートのfont-sizeを125%/150%に
+     拡大)を上げても、刻子・槓の行(mentsu-row)は暗/明・刻子/槓・中張/1・9・字の
+     3つのセグメント+符+×ボタンと要素数が多く、そのままルートに追随して
+     拡大すると幅に収まらず×ボタンが折り返されてしまう。この行の中の
+     文字サイズだけは、ルートの拡大率で割り戻して常に等倍(文字サイズ標準時と
+     同じ実寸)に保つことで、flex-wrap:nowrapのまま1行に収まるようにする。 */
+  html.text-size-large .mentsu-row .mseg button{ font-size:calc(.68rem / 1.25); }
+  html.text-size-xlarge .mentsu-row .mseg button{ font-size:calc(.68rem / 1.5); }
+  html.text-size-large .mentsu-row .mfu{ font-size:calc(.85rem / 1.25); }
+  html.text-size-xlarge .mentsu-row .mfu{ font-size:calc(.85rem / 1.5); }
+  html.text-size-large .mentsu-row .mremove{ font-size:calc(.78rem / 1.25); }
+  html.text-size-xlarge .mentsu-row .mremove{ font-size:calc(.78rem / 1.5); }
   .mentsu-add{
     display:flex;
     align-items:center;
@@ -7157,9 +7169,9 @@ function renderOtherModal(){
             <div class="other-menu-item" style="flex-direction:column;align-items:stretch;gap:8px;cursor:default;">
               <span>文字サイズ</span>
               <div class="preset-row">
-                <button class="preset-btn ${logState.account.textSize==='normal'?'active':''}" onclick="setTextSize('normal')">標準</button>
-                <button class="preset-btn ${logState.account.textSize==='large'?'active':''}" onclick="setTextSize('large')">大</button>
-                <button class="preset-btn ${logState.account.textSize==='xlarge'?'active':''}" onclick="setTextSize('xlarge')">特大</button>
+                <button class="preset-btn ${logState.account.textSize==='normal'?'active':''}" onclick="setTextSize('normal')">小</button>
+                <button class="preset-btn ${logState.account.textSize==='large'?'active':''}" onclick="setTextSize('large')">標準</button>
+                <button class="preset-btn ${logState.account.textSize==='xlarge'?'active':''}" onclick="setTextSize('xlarge')">大</button>
               </div>
             </div>
             <a class="other-menu-item" href="${LEGAL_CONFIG.supportUrl}" target="_blank" rel="noopener">
