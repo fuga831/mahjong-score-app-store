@@ -3117,6 +3117,18 @@ function _isCredentialAlreadyInUseError(e){
   return code.includes('already-in-use') || code.includes('credential_already_in_use')
     || msg.includes('already-in-use') || msg.includes('already in use');
 }
+// ③(不具合修正・一元化): linkGoogle()/linkApple()はプロバイダごとに二重
+// タップを防ぐが、それとは別に「Googleでログイン」と「Sign in with Apple」を
+// ほぼ同時に(誤タップ等で)押した場合、異なるプロバイダの呼び出し同士が
+// 並行してネイティブの認証UIを要求してしまう可能性がある。課金フロー
+// (Native._withBillingLock)と同じ考え方で、実際にストアの認証UIを
+// 要求しうる呼び出し同士を直列化する共有ロック。
+let _authOpLock = Promise.resolve();
+function _withAuthLock(fn){
+  const run = _authOpLock.catch(() => {}).then(fn);
+  _authOpLock = run.catch(() => {});
+  return run;
+}
 
 /* ---- ゲストプレイヤーへの結果受け取りリンク(Universal Links + claimTokens) ---- */
 // GitHub Pagesのdocs/claim.html(アプリ未インストール時のフォールバック用ページ)と
@@ -3267,9 +3279,72 @@ const CloudSync = {
   // 省略する。初めてそのプロバイダを使う場合(knownLinkedProviders未設定)は、
   // 従来通りlinkWithX()を先に試す(匿名時代のデータをuid切り替えで
   // 失わないようにするため、これは変えない)。
-  async linkGoogle(){
-    if (!this.isAvailable()) { showDebugError('Googleログイン', 'Native.isAvailable()がfalse(ストアアプリ内ではない、またはCloudSync未初期化)'); return false; }
-    // ②(不具合修正): デバッグ:サインアウトやアカウント削除の直後に呼ばれる
+  // ③(不具合修正・一元化): 「Googleでログイン」「Sign in with Apple」の
+  // ボタンには処理中の連打を防ぐdisabled状態が無く、素早く2回タップすると
+  // linkGoogle()/linkApple()が並行して2回走り、ネイティブの認証UIが2回
+  // 連続で要求される不具合が(①②とはまた別の経路で)発生していた。
+  // ①(サインアウト→再サインイン、_initPromise待ちで対策済み)・②(課金
+  // フロー、_withBillingLockで対策済み)と同じ「2回連続認証」が3回目の
+  // 別の場所で再発したことを踏まえ、今後は個別の場当たり対応を重ねず、
+  // Google/Appleへの実際のログイン呼び出し自体をlinkGoogle()/linkApple()の
+  // 薄いラッパーに一元化する。呼び出しの最初(いかなるawaitより前)で、
+  // 同じプロバイダの呼び出しが既に進行中かどうかを同期的にチェックし、
+  // 進行中ならそれと同じPromiseをそのまま返す(=新たな認証UIを要求せず、
+  // 進行中の呼び出しの結果に相乗りする)。この同期チェックはawaitを
+  // 一切挟まないため、JSのシングルスレッド実行の性質上、native側の
+  // ブリッジ呼び出しのタイミングに関わらず確実に機能する。
+  _linkInFlight: { google: null, apple: null },
+  linkGoogle(){
+    if (this._linkInFlight.google) return this._linkInFlight.google;
+    const p = this._linkOrSignIn('google').finally(() => { this._linkInFlight.google = null; });
+    this._linkInFlight.google = p;
+    return p;
+  },
+  // App Store Review Guideline 4.8対応: Googleログインを提供する場合、
+  // Sign in with Appleも同格の選択肢として必ず用意する。
+  linkApple(){
+    if (this._linkInFlight.apple) return this._linkInFlight.apple;
+    const p = this._linkOrSignIn('apple').finally(() => { this._linkInFlight.apple = null; });
+    this._linkInFlight.apple = p;
+    return p;
+  },
+  // linkGoogle()/linkApple()共通の実装本体。
+  //
+  // ⚠️ ここでは必ずAuth.linkWithGoogle/linkWithApple(既存の匿名ユーザーに認証情報を
+  // 「連携」するAPI)を使うこと。以前はAuth.signInWithGoogle/signInWithApple
+  // (「新規サインイン」のAPI)を誤って呼んでおり、匿名時代とは別の新しいuidに
+  // 切り替わってしまっていた。その結果、匿名時代に既にusernames/{name}や
+  // friends/matchHistoryを保存していたユーザーが後からGoogle/Appleでログインすると、
+  // それらのドキュメントは古いuidの持ち物のまま取り残され、以降そのドキュメントへの
+  // 書き込み・削除がfirestore.rules側のisSelf(uid)チェックに落ちて
+  // 「Missing or insufficient permissions」になる実バグの原因だった
+  // (アカウント削除時にusernames/{name}のdeleteDocumentが失敗するケースを実機で確認)。
+  // linkWithX()は「その認証情報は既に別のFirebaseアカウントで使用済み」の場合にだけ
+  // 失敗する(auth/credential-already-in-use等)。機種変更・再インストール後に
+  // 元のアカウントへ戻りたいケースはこれに該当するため、その場合のみ
+  // signInWithX()にフォールバックし、既存アカウントへ切り替える。
+  //
+  // ②(不具合修正): このフォールバック自体は必要だが、linkWithX()の失敗を
+  // 検知するまでにGoogle/Apple側の認証UI(2段階認証含む)を最後まで1回
+  // 完走してしまい、その後signInWithX()で「もう一度」丸ごと認証UIを
+  // やり直すため、結果として2段階認証などが2回連続で求められていた
+  // (サインアウト→同じアカウントで再サインインする場合、credential-
+  // already-in-useに毎回必ず該当するため、この端末で一度でもそのプロバイダを
+  // リンクしたことがあれば、ほぼ確実にこの二度手間が発生する)。
+  // knownLinkedProviders(account.linkedProvidersと違い、サインアウトしても
+  // クリアしない「この端末でこのプロバイダをリンクした実績があるか」の記憶)を
+  // 見て、既に実績があるプロバイダは最初からsignInWithX()を直接呼び、
+  // 失敗が確定しているlinkWithX()の呼び出し(=1回目の認証UI)を丸ごと
+  // 省略する。初めてそのプロバイダを使う場合(knownLinkedProviders未設定)は、
+  // 従来通りlinkWithX()を先に試す(匿名時代のデータをuid切り替えで
+  // 失わないようにするため、これは変えない)。
+  async _linkOrSignIn(provider){
+    const label = provider === 'google' ? 'Googleログイン' : 'Appleログイン';
+    const providerLabel = provider === 'google' ? 'Googleアカウント' : 'Apple ID';
+    const linkMethod = provider === 'google' ? 'linkWithGoogle' : 'linkWithApple';
+    const signInMethod = provider === 'google' ? 'signInWithGoogle' : 'signInWithApple';
+    if (!this.isAvailable()) { showDebugError(label, 'Native.isAvailable()がfalse(ストアアプリ内ではない、またはCloudSync未初期化)'); return false; }
+    // ①(不具合修正): デバッグ:サインアウトやアカウント削除の直後に呼ばれる
     // CloudSync.init()(内部で新しい匿名UIDを確立する_doInit()が非同期に
     // 走る)は、呼び出し元でawaitされていない(fire-and-forget)。ここで
     // in-flightのinitを待たずにログインを開始すると、まだ処理中だった
@@ -3279,92 +3354,51 @@ const CloudSync = {
     // このレースコンディションだった可能性が高い。ensureSignedIn()と
     // 同じ待ち合わせパターンをここでも使う)。
     if (this._initPromise) { await this._initPromise.catch(() => {}); }
-    try {
-      const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
-      if (!Auth || !Auth.linkWithGoogle || !Auth.signInWithGoogle) {
-        const registered = Object.keys((window.Capacitor && window.Capacitor.Plugins) || {}).join(', ') || '(なし)';
-        showDebugError('Googleログイン', `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, linkWithGoogle=${!!(Auth&&Auth.linkWithGoogle)})。ネイティブ側でプラグインが正しく登録されていない可能性があります。登録済みプラグイン一覧: ${registered}`);
-        return false;
-      }
-      let result;
-      if (logState.account.knownLinkedProviders.google) {
-        result = await Auth.signInWithGoogle();
-      } else {
-        try {
-          result = await Auth.linkWithGoogle();
-        } catch (e) {
-          if (_isCredentialAlreadyInUseError(e)) {
-            result = await Auth.signInWithGoogle();
-            logState.ui.notifyBanner = 'このGoogleアカウントは既に登録済みのため、既存のアカウントにログインしました。';
-          } else {
-            throw e;
+    // ③: 実際にストアの認証UIを要求しうる区間を_withAuthLockで直列化し、
+    // Google/Appleへのログインが互いに重ならないようにする(コメントは
+    // _withAuthLock定義箇所参照)。
+    return _withAuthLock(async () => {
+      try {
+        const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
+        if (!Auth || !Auth[linkMethod] || !Auth[signInMethod]) {
+          const registered = Object.keys((window.Capacitor && window.Capacitor.Plugins) || {}).join(', ') || '(なし)';
+          showDebugError(label, `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, ${linkMethod}=${!!(Auth&&Auth[linkMethod])})。ネイティブ側でプラグインが正しく登録されていない可能性があります。登録済みプラグイン一覧: ${registered}`);
+          return false;
+        }
+        let result;
+        if (logState.account.knownLinkedProviders[provider]) {
+          result = await Auth[signInMethod]();
+        } else {
+          try {
+            result = await Auth[linkMethod]();
+          } catch (e) {
+            if (_isCredentialAlreadyInUseError(e)) {
+              result = await Auth[signInMethod]();
+              logState.ui.notifyBanner = `この${providerLabel}は既に登録済みのため、既存のアカウントにログインしました。`;
+            } else {
+              throw e;
+            }
           }
         }
-      }
-      if (result && result.user) {
-        logState.account.uid = result.user.uid;
-        logState.account.isAnonymous = false;
-        logState.account.linkedProviders.google = true;
-        logState.account.knownLinkedProviders.google = true;
-        saveLogState();
-        // ②: ログイン成功直後、保存済みユーザーネームの有無を確認する。
-        await this._syncUsernameAfterLogin();
-        return true;
-      }
-      showDebugError('Googleログイン', `linkWithGoogle()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
-      return false;
-    } catch (e) {
-      console.error('[CloudSync.linkGoogle] failed:', e);
-      showDebugError('Googleログイン (linkGoogle)', e);
-      return false;
-    }
-  },
-  // App Store Review Guideline 4.8対応: Googleログインを提供する場合、
-  // Sign in with Appleも同格の選択肢として必ず用意する。
-  async linkApple(){
-    if (!this.isAvailable()) { showDebugError('Appleログイン', 'Native.isAvailable()がfalse(ストアアプリ内ではない、またはCloudSync未初期化)'); return false; }
-    // ②(不具合修正): linkGoogle()と同じ理由でin-flightの初期化を待つ
-    // (コメントはlinkGoogle()参照)。
-    if (this._initPromise) { await this._initPromise.catch(() => {}); }
-    try {
-      const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
-      if (!Auth || !Auth.linkWithApple || !Auth.signInWithApple) {
-        const registered = Object.keys((window.Capacitor && window.Capacitor.Plugins) || {}).join(', ') || '(なし)';
-        showDebugError('Appleログイン', `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, linkWithApple=${!!(Auth&&Auth.linkWithApple)})。ネイティブ側でプラグインが正しく登録されていない可能性があります。登録済みプラグイン一覧: ${registered}`);
+        if (result && result.user) {
+          logState.account.uid = result.user.uid;
+          logState.account.isAnonymous = false;
+          logState.account.linkedProviders[provider] = true;
+          logState.account.knownLinkedProviders[provider] = true;
+          saveLogState();
+          // ②: ログイン成功直後、保存済みユーザーネームの有無を確認する。
+          await this._syncUsernameAfterLogin();
+          return true;
+        }
+        showDebugError(label, `${linkMethod}()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
+        return false;
+      } catch (e) {
+        const fnName = provider === 'google' ? 'linkGoogle' : 'linkApple';
+        console.error(`[CloudSync.${fnName}] failed:`, e);
+        showDebugError(`${label} (${fnName})`, e);
         return false;
       }
-      let result;
-      if (logState.account.knownLinkedProviders.apple) {
-        result = await Auth.signInWithApple();
-      } else {
-        try {
-          result = await Auth.linkWithApple();
-        } catch (e) {
-          if (_isCredentialAlreadyInUseError(e)) {
-            result = await Auth.signInWithApple();
-            logState.ui.notifyBanner = 'このApple IDは既に登録済みのため、既存のアカウントにログインしました。';
-          } else {
-            throw e;
-          }
-        }
-      }
-      if (result && result.user) {
-        logState.account.uid = result.user.uid;
-        logState.account.isAnonymous = false;
-        logState.account.linkedProviders.apple = true;
-        logState.account.knownLinkedProviders.apple = true;
-        saveLogState();
-        // ②: ログイン成功直後、保存済みユーザーネームの有無を確認する。
-        await this._syncUsernameAfterLogin();
-        return true;
-      }
-      showDebugError('Appleログイン', `linkWithApple()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
-      return false;
-    } catch (e) {
-      console.error('[CloudSync.linkApple] failed:', e);
-      showDebugError('Appleログイン (linkApple)', e);
-      return false;
-    }
+    });
   },
 
   // ②: ログイン(linkGoogle/linkApple)直後・起動時に、Firestore側の
