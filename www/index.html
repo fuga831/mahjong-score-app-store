@@ -2712,6 +2712,49 @@ function _resolvePendingPurchase(success){
   const resolvers = _pendingPurchaseResolvers.splice(0);
   resolvers.forEach(r => r(success));
 }
+// ①③(不具合修正): 購入が成立した(owned)ことを検知した時点で、isPremiumへの
+// 反映・ローカル保存・Firestore同期・保留中のpurchasePremium()呼び出しの
+// 解決・(タイムアウトで既に諦めていた場合の)ペイウォールの自動クローズと
+// 通知をまとめて行う共通処理。以前はproductUpdated()イベントの中でしか
+// 行っていなかったが、実機ログでapproved(+698ms)/verified(+903ms)は
+// 1秒以内に届いているにもかかわらず、その後に来るはずのproductUpdated()
+// イベントが届かない(または大きく遅れる)ケースが確認され、90秒の
+// タイムアウトまでisPremiumが一切反映されない不具合の原因になっていた。
+// verified()の時点でreceipt.finish()の直後にこれを呼ぶことで、
+// productUpdated()を待たずに即座に反映する(productUpdated()自体も、
+// 起動時の購入復元など他の経路から購入成立を検知できるよう、引き続き
+// 同じ処理を呼ぶ。wasPremium/hadPendingResolverの判定で二重発火しても
+// 副作用が起きないようになっている)。
+function _handlePurchaseOwned(){
+  const wasPremium = logState.settings.isPremium;
+  if (!wasPremium) {
+    logState.settings.isPremium = true;
+    saveLogState();
+    Native.hideBanner();
+    CloudSync.syncPremiumStatus(); // フレンドの表示名を金色にする機能・無料枠判定用
+    scheduleRenderApp();
+  }
+  // purchasePremium()が待機中(90秒のタイムアウト前)ならここで解決される。
+  const hadPendingResolver = _pendingPurchaseResolvers.length > 0;
+  _resolvePendingPurchase(true);
+  // 待機中の呼び出しが無いのに購入成立で届いた場合、それは「タイムアウト後に
+  // 遅れて届いたイベント」か「アプリ再起動後の初回同期」のいずれか。前者
+  // (!wasPremiumから今回trueになった)の場合だけ、ペイウォールが開いた
+  // ままなら自動で閉じてユーザーに知らせる(「失敗しました」の表示のまま
+  // 放置しない)。
+  if (!hadPendingResolver && !wasPremium) {
+    logState.ui.paywallErrorMsg = null;
+    if (logState.ui.paywallOpen) {
+      const pendingSource = logState.ui.paywallSource;
+      logState.ui.paywallOpen = false;
+      logState.ui.paywallSource = null;
+      logState.ui.paywallPurchasing = false;
+      if (pendingSource === 'archive') archiveCurrentMatch();
+    }
+    logState.ui.notifyBanner = '購入が反映されました。プレミアム会員になりました🎉';
+    scheduleRenderApp();
+  }
+}
 // ネイティブの購入ダイアログが「完了しました」と表示していても、アプリ側の
 // approved/verified/productUpdatedイベントの受信が(実機で確認されたケースでは)
 // 60秒以上遅れることがある。原因調査のため、購入試行1回ごとにどのイベントが
@@ -2860,7 +2903,13 @@ const Native = {
         platform: storePlatform,
       }]);
       store.when().approved(transaction => { _traceBilling('approved'); transaction.verify(); });
-      store.when().verified(receipt => { _traceBilling('verified'); receipt.finish(); });
+      store.when().verified(receipt => {
+        _traceBilling('verified');
+        receipt.finish();
+        // ①③: productUpdated()を待たず、レシート検証が済んだこの時点で
+        // 直接isPremiumへ反映する(_handlePurchaseOwned参照)。
+        _handlePurchaseOwned();
+      });
       // レシートのサーバー側検証(verify())が失敗した場合はverifiedではなく
       // こちらに来る。When型にはerror()というチェーンメソッド自体が存在しない
       // (store.error()が唯一のグローバルエラーハンドラ)ため、検証失敗はここで拾う。
@@ -2875,36 +2924,11 @@ const Native = {
         const product = store.get(MONETIZATION_CONFIG.billingProductId);
         const owned = !!(product && product.owned);
         _traceBilling(`productUpdated (owned=${owned})`);
-        const wasPremium = logState.settings.isPremium;
-        if (owned && !wasPremium) {
-          logState.settings.isPremium = true;
-          saveLogState();
-          Native.hideBanner();
-          CloudSync.syncPremiumStatus(); // フレンドの表示名を金色にする機能・無料枠判定用
-          scheduleRenderApp();
-        }
-        if (owned) {
-          // purchasePremium()が待機中(60秒のタイムアウト前)ならここで解決される。
-          const hadPendingResolver = _pendingPurchaseResolvers.length > 0;
-          _resolvePendingPurchase(true);
-          // 待機中の呼び出しが無いのにowned=trueで届いた場合、それは
-          // 「タイムアウト後に遅れて届いたイベント」か「アプリ再起動後の
-          // 初回同期」のいずれか。前者(!wasPremiumから今回trueになった)の
-          // 場合だけ、ペイウォールが開いたままなら自動で閉じてユーザーに
-          // 知らせる(「失敗しました」の表示のまま放置しない)。
-          if (!hadPendingResolver && !wasPremium) {
-            logState.ui.paywallErrorMsg = null;
-            if (logState.ui.paywallOpen) {
-              const pendingSource = logState.ui.paywallSource;
-              logState.ui.paywallOpen = false;
-              logState.ui.paywallSource = null;
-              logState.ui.paywallPurchasing = false;
-              if (pendingSource === 'archive') archiveCurrentMatch();
-            }
-            logState.ui.notifyBanner = '購入が反映されました。プレミアム会員になりました🎉';
-            scheduleRenderApp();
-          }
-        }
+        // ①③: verified()側で既に反映済みのことが多いが、起動時の購入復元など
+        // 他の経路から購入成立を検知する場合に備え、こちらでも同じ処理を呼ぶ
+        // (_handlePurchaseOwned内のwasPremium/hadPendingResolver判定により、
+        // 既に反映済みなら安全に無視される)。
+        if (owned) _handlePurchaseOwned();
       });
       // store.order()の失敗など、個別のPromiseの拒否に現れない
       // ストア側の非同期エラー(通信エラー・設定不備等)を拾うためのハンドラ。
