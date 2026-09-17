@@ -1830,7 +1830,7 @@
 
 <div class="stage">
   <div class="title-row">
-    <h1 id="appTitle"><span class="tile">🀄</span>麻雀点数電卓</h1>
+    <h1 id="appTitle" onclick="onAppTitleTap()"><span class="tile">🀄</span>麻雀点数電卓</h1>
     <button class="hamburger-btn" id="historyMenuBtn" onclick="openHistoryModal()" title="対局履歴" style="display:none;">☰</button>
   </div>
 
@@ -4001,6 +4001,14 @@ function defaultLogState(){
       billingMsg: null,         // 「購入を復元」結果などの短いメッセージ
       helpOpen: false,          // 「使い方」モーダル
       otherMenuOpen: false,     // 「その他」(利用規約・プライバシーポリシー・バージョン情報)モーダル
+      // ⚠️ デバッグメニュー(デバッグ:サインアウト・課金状態リセット)の表示解除
+      // フラグ。CloudSync.isAvailable()(ストアアプリ内)だけでは本番の
+      // App Store提出ビルドでも常にtrueになってしまい審査担当者・一般ユーザーの
+      // 目に触れてしまうため、加えてこのフラグも必要とする二重ガードにする。
+      // logState.uiはsaveLogState()の保存対象外なので、アプリを再起動すると
+      // 必ずfalseに戻る(=このセッション中、onAppTitleTap()で意図的に解除
+      // しない限り一切表示されない)。
+      devModeUnlocked: false,
       confirmDeleteAccount: false, // 「アカウントを削除」の誤タップ防止確認中か
       deletingAccount: false,
       deleteAccountErrorMsg: null,
@@ -7133,6 +7141,70 @@ async function debugSignOut(){
   // ①: 新しい匿名UIDが確立したら、端末のストア購入状態を新UIDへ同期する。
   CloudSync.init().then(resyncPurchaseStateAfterReinit); // 新しい匿名アカウントとして再初期化(ensureSignedIn()もこれを待つ)
 }
+
+// ⚠️ 一時的なデバッグ機能。Sandboxテスト環境では「購入履歴をクリア」が
+// App Store Connect上から行えないことがあり、正規の購入フロー(購入ボタン→
+// 決済→反映→プレミアム表示)を何度も検証するために、アプリ側で完結する
+// リセット手段として用意する。本リリース前に削除するか隠すこと
+// (renderOtherModal内の呼び出し元、およびonAppTitleTap/devModeUnlockedの
+// 仕組み自体も合わせて)。
+//
+// ⚠️ Apple/Googleのサーバー側に残っている実際の購入履歴・レシートには
+// 一切影響を与えない。そのため、このリセット後に「購入を復元」を押す、
+// または次回起動時の自動復元(_restorePurchasesOnBoot)が走ると、この
+// Sandboxテスターが既に購入済みであることが再度検出され、isPremiumは
+// 自動的にtrueへ戻る(これは正しい挙動であり、あくまで「アプリ側の
+// ローカル表示・キャッシュを一旦未購入状態に戻す」ためのものであることに
+// 注意)。
+async function debugResetPremiumStatus(){
+  logState.settings.isPremium = false;
+  saveLogState();
+  scheduleRenderApp();
+  // ログイン中であれば、users/{uid}.isPremiumもfalseへ同期する
+  // (syncPremiumStatus()自体が未サインイン/非対応環境ではベストエフォートで
+  // 何もしないため、ここでの追加のガードは不要)。
+  await CloudSync.syncPremiumStatus();
+  try {
+    // cordova-plugin-purchase側がローカルに保持している既知のトランザクション/
+    // レシート情報を、可能な範囲でリセットする。store.reset()はプラグインの
+    // バージョンによっては存在しない、または挙動が異なる可能性があるため、
+    // 存在する場合のみベストエフォートで呼ぶ(無くても致命的ではない。
+    // 次に「購入を復元」を押せばいずれにせよサーバー側の実際の状態で
+    // 上書きされる)。
+    const store = window.CdvPurchase && window.CdvPurchase.store;
+    if (store && typeof store.reset === 'function') await store.reset();
+  } catch (e) {
+    showDebugError('デバッグ:課金状態リセット', e);
+  }
+  logState.ui.notifyBanner = 'デバッグ:課金状態をリセットしました(ローカル・Firestoreのみ。Apple/Google側の購入履歴は変わりません)。';
+  scheduleRenderApp();
+}
+
+// ⚠️ 一時的なデバッグ機能。デバッグメニュー(デバッグ:サインアウト・課金
+// 状態リセット)は、CloudSync.isAvailable()(ストアアプリ内)が真であるだけの
+// 本番のApp Store提出ビルドでも表示されてしまわないよう、アプリタイトルを
+// 短時間に7回連続タップした時だけ表示解除する隠しジェスチャーにしている
+// (#appTitle要素のonclick。renderAppInner()はinnerHTMLだけを書き換えて
+// 要素自体は再作成しないため、この属性は再描画後も保持される)。
+// devModeUnlockedはlogState.ui配下(=保存対象外)のため、アプリを再起動する
+// たびに必ず未解除の状態に戻る。
+let _titleTapCount = 0;
+let _titleTapResetTimer = null;
+function onAppTitleTap(){
+  if (logState.ui.devModeUnlocked) return; // 解除済みなら何もしない(otherMenuOpen経由で毎回見えている)
+  clearTimeout(_titleTapResetTimer);
+  _titleTapCount++;
+  if (_titleTapCount >= 7) {
+    _titleTapCount = 0;
+    logState.ui.devModeUnlocked = true;
+    logState.ui.notifyBanner = 'デバッグメニューを表示しました(このセッション中のみ・再起動で自動的に元に戻ります)。';
+    scheduleRenderApp();
+    return;
+  }
+  // 1.5秒以内に次のタップが来なければ最初からやり直し(誤って部分的に
+  // 連打してしまった場合に、後から急に解除されて驚かないようにするため)。
+  _titleTapResetTimer = setTimeout(() => { _titleTapCount = 0; }, 1500);
+}
 function renderOtherModal(){
   const root = document.getElementById('otherModalRoot');
   if (!root) return;
@@ -7153,9 +7225,13 @@ function renderOtherModal(){
       </div>
     `
   );
-  // ⚠️ 一時的なデバッグ機能(debugSignOut参照)。本リリース前に削除すること。
-  const debugSignOutHtml = !CloudSync.isAvailable() ? '' : `
+  // ⚠️ 一時的なデバッグ機能(debugSignOut/debugResetPremiumStatus参照)。
+  // CloudSync.isAvailable()に加えてdevModeUnlocked(アプリタイトル7回タップで
+  // 解除、再起動で必ず元に戻る)も真の時だけ表示する二重ガード
+  // (onAppTitleTap参照)。本リリース前に削除すること。
+  const debugToolsHtml = (!CloudSync.isAvailable() || !logState.ui.devModeUnlocked) ? '' : `
     <button class="debug-signout-btn" onclick="debugSignOut()">デバッグ: サインアウト</button>
+    <button class="debug-signout-btn" onclick="debugResetPremiumStatus()">デバッグ: 課金状態をリセット</button>
   `;
   root.innerHTML = `
     <div class="history-modal-overlay">
@@ -7191,7 +7267,7 @@ function renderOtherModal(){
             </div>
           </div>
           ${deleteAccountHtml}
-          ${debugSignOutHtml}
+          ${debugToolsHtml}
         </div>
       </div>
     </div>`;
