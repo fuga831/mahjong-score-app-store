@@ -1594,6 +1594,11 @@
     width:100%;
   }
   .text-input:focus{outline:none;border-color:var(--gold);}
+  /* ②(不具合修正): .text-input自身のcolor指定と.premium-nameが同じ詳細度
+     (クラス1つ)のため、後から定義されている.text-inputのcolorが競合して
+     勝ってしまい、プレイヤー名入力欄ではプレミアム会員でも金色にならな
+     かった。詳細度の高い複合セレクタで明示的に上書きする。 */
+  .text-input.premium-name{color:var(--gold-strong);}
   .inline-fields{display:flex;gap:8px;}
   .inline-fields > div{flex:1;}
   .preview-line{
@@ -2691,6 +2696,25 @@ function admobConfigForPlatform(){
 }
 
 let _billingReady = false;
+// ①(不具合修正): アプリ起動直後、cordova-plugin-purchaseのJSブリッジ
+// (window.CdvPurchase.store)がまだ用意できていないタイミングで課金ボタンを
+// 押すと、initBilling()/purchasePremium()が即座に「見つかりません」エラーで
+// 失敗し、それ以上再試行する手段が無いまま操作できているように見えなく
+// なっていた(実際には閉じるボタン等は機能するが、正規の購入導線が二度と
+// 進まない)。ネイティブ側のプラグイン初期化はごく短時間で完了するのが
+// 通常のため、見つからない場合は即座に諦めず、一定時間だけ短い間隔で
+// ポーリングして待つ。ボタンは処理中表示のまま(paywallPurchasing)で、
+// 準備が整い次第そのまま通常の購入フローへ自動的に進む。
+const WAIT_FOR_STORE_TIMEOUT_MS = 8000;
+const WAIT_FOR_STORE_POLL_INTERVAL_MS = 200;
+async function _waitForCdvPurchaseStore(){
+  const deadline = Date.now() + WAIT_FOR_STORE_TIMEOUT_MS;
+  while (!(window.CdvPurchase && window.CdvPurchase.store)) {
+    if (Date.now() >= deadline) return null;
+    await new Promise(r => setTimeout(r, WAIT_FOR_STORE_POLL_INTERVAL_MS));
+  }
+  return window.CdvPurchase.store;
+}
 let _pendingPurchaseResolvers = [];
 // ②(不具合修正): 起動時に自動実行される_restorePurchasesOnBoot(Native.
 // restorePurchases())と、ユーザーが購入ボタン/「購入を復元」を押した時の
@@ -2885,14 +2909,17 @@ const Native = {
   async initBilling(){
     if (!this.isNativeApp() || _billingReady) return;
     try {
-      const store = window.CdvPurchase && window.CdvPurchase.store;
+      // ①: 起動直後はまだwindow.CdvPurchase.storeが用意できていないことが
+      // あるため、即座に諦めず一定時間ポーリングして待つ(_waitForCdvPurchaseStore
+      // 参照)。
+      const store = await _waitForCdvPurchaseStore();
       if (!store) {
         // cordova-plugin-purchaseはCapacitorプラグインではなくCordovaプラグイン
         // なので、window.Capacitor.Plugins一覧には元々現れない(Cordova互換層
         // 経由でwindow.CdvPurchaseとしてグローバルに公開される設計)。そのため
         // ここでの「見つからない」はwindow.CdvPurchase自体の有無、および
         // cordovaPluginListInfo()(cordova_plugins.js由来の登録済み一覧)で判定する。
-        showDebugError('課金初期化 (initBilling)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase})。${cordovaPluginListInfo()}`);
+        showDebugError('課金初期化 (initBilling)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase})。${WAIT_FOR_STORE_TIMEOUT_MS / 1000}秒待っても利用可能になりませんでした。${cordovaPluginListInfo()}`);
         return;
       }
       _billingReady = true;
@@ -2972,9 +2999,10 @@ const Native = {
     // ②: purchasePremium()の認証区間(prepare+order())と重ならないよう直列化する。
     return _withBillingLock(async () => {
       try {
-        const store = window.CdvPurchase && window.CdvPurchase.store;
+        // ①: 起動直後はまだ用意できていないことがあるため、即座に諦めず待つ。
+        const store = await _waitForCdvPurchaseStore();
         if (!store) {
-          showDebugError('購入情報の復元 (restorePurchases)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase})。${cordovaPluginListInfo()}`);
+          showDebugError('購入情報の復元 (restorePurchases)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase})。${WAIT_FOR_STORE_TIMEOUT_MS / 1000}秒待っても利用可能になりませんでした。${cordovaPluginListInfo()}`);
           return null;
         }
         await this.initBilling();
@@ -3000,9 +3028,15 @@ const Native = {
     // 外側にして、その間ずっと「購入を復元」等の他の操作をブロックしないようにする。
     const prep = await _withBillingLock(async () => {
       try {
-        const store = window.CdvPurchase && window.CdvPurchase.store;
+        // ①(不具合修正): 起動直後、まだwindow.CdvPurchase.storeが用意できて
+        // いないタイミングで購入ボタンを押すと、即座に「見つかりません」で
+        // 失敗し、以後正規の購入導線が二度と進まなくなっているように見える
+        // 不具合があった。即座に諦めず一定時間ポーリングして待つ
+        // (paywallPurchasingがtrueのまま「処理中…」表示が続き、準備が整い
+        // 次第そのまま通常の購入フローへ自動的に進む。アプリの再起動は不要)。
+        const store = await _waitForCdvPurchaseStore();
         if (!store) {
-          showDebugError('購入 (purchasePremium)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase})。${cordovaPluginListInfo()}`);
+          showDebugError('購入 (purchasePremium)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase})。${WAIT_FOR_STORE_TIMEOUT_MS / 1000}秒待っても利用可能になりませんでした。${cordovaPluginListInfo()}`);
           return { response: { success: false, reason: 'error' } };
         }
         await this.initBilling();
@@ -4419,7 +4453,18 @@ function _appendPermissionDeniedHint(text){
     + `3. 1・2のどちらでもない場合: 拒否されたドキュメントのパス(上記に表示)と、firestore.rules側の該当ルールの条件式(request.auth.uidの型・ドキュメントIDの形式など)を照らし合わせてご確認ください。`;
 }
 function showDebugError(context, err){
-  logState.ui.debugError = { context, detail: formatErrorForDisplay(err) };
+  const detail = formatErrorForDisplay(err);
+  // ③(不具合修正・審査対策): 画面上の赤いデバッグバナーは、devModeUnlocked
+  // (アプリタイトルを7回連続タップして解除、logState.uiは保存対象外なので
+  // 再起動のたびに必ず未解除に戻る)が有効な時だけ表示する。無効な場合
+  // (=通常の本番利用時・審査時)は、内部ログ(console.error)には残しつつ、
+  // 画面上には一切出さない。以前はここにガードが無く、①②の修正作業中に
+  // 発生させたエラーも含め、一般ユーザー・審査担当者の画面にまで
+  // window.CdvPurchase.storeやFirestoreのパスといった内部実装の詳細が
+  // そのまま露出してしまっていた。
+  console.error(`[showDebugError] ${context}:`, err);
+  if (!logState.ui.devModeUnlocked) return;
+  logState.ui.debugError = { context, detail };
   scheduleRenderApp();
 }
 // cordova-plugin-purchase等のCordovaプラグイン向けの「登録済み一覧」相当。
@@ -5841,7 +5886,7 @@ function renderPlayerRosterPanel(){
               return `
               <div class="name-edit-item">
                 <span class="num">${i+1}</span>
-                <input class="text-input" value="${escapeHtml(p)}" onchange="setPlayerName(${i}, this.value)">
+                <input class="text-input${premiumNameClass(p, s.participantLinks)}" value="${escapeHtml(p)}" onchange="setPlayerName(${i}, this.value)">
                 ${linkBtnHtml}
               </div>`;
             }).join('')}
