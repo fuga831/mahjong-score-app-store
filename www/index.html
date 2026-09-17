@@ -4114,7 +4114,7 @@ function defaultLogState(){
       historyOpen: false,       // 対局履歴モーダルを開いているか
       historyView: 'list',      // 'list' | 'detail' | 'stats'
       historyDetailId: null,
-      statsPlayer: null,        // 「成績」タブで選択中のプレイヤー名(nullなら自動選択)
+      statsPlayer: null,        // 「成績」タブで選択中の人物キー(personKeyFor参照。nullなら自動選択)
       statsPlayerPickerOpen: false, // 「成績」タブのプレイヤー選択(スクロール一覧)が開いているか
       editingArchiveTitleId: null,
       confirmDeleteArchiveId: null,
@@ -6537,22 +6537,33 @@ function confirmDeleteArchive(id){
 /* ---- 通算成績 ---- */
 // matchHistory中、playerNameが参加していた全対局の全半荘を対象に集計する。
 // 「試合数」は半荘数（1半荘あたりの平均収支などと単位を揃えるため）。
-function calcCareerStats(matchHistory, playerName){
+// ⑤(不具合修正): 以前はplayerName(表示中の名前文字列)を直接キーにして
+// いたため、ユーザーネーム・フレンドとして紐づけ済みのプレイヤーの表示名を
+// 変更すると、変更前・変更後が別人として2件に分かれて集計されてしまって
+// いた。personKeyFor()による人物キー(紐付け済みならuid、ゲストなら
+// scoreIds由来の参加者ID)を基準に集計するよう変更(personKeyFor定義箇所の
+// コメント参照)。
+function calcCareerStats(matchHistory, personKey){
   // ③: 控え交代で試合途中から/までしか出場していない場合、最終ロースター
   // (settingsSnapshot.playerNames)には名前が残らないことがあるため、
   // 「いずれかの半荘に一度でも登場したか」で対象の対局を絞り込む
   // (実際のカウントは下のhanchansループがhanchanごとに個別判定する)。
-  const relevant = matchHistory.filter(m =>
-    (m.hanchans || []).some(h => playerName in h.scores));
+  const relevant = matchHistory.filter(m => matchIncludesPersonKey(m, personKey));
   if (relevant.length === 0) return null;
 
   let games = 0, rankSum = 0, top1 = 0, top2 = 0, last = 0, tobiCount = 0, moneySum = 0, maxScore = -Infinity;
   relevant.forEach(m => {
     const s = m.settingsSnapshot;
+    const links = s.participantLinks;
     const players = s.playerNames.slice(0, s.playerCount);
     const settingsForCalc = { ...s, players };
+    const matchNames = new Set(); // この対局内でpersonKeyに該当した(改名を含む)全ての名前
     m.hanchans.forEach(h => {
-      if (!(playerName in h.scores)) return;
+      // ⑤: このpersonKeyに該当する、この半荘における実際の名前を特定する
+      // (紐付け済みならuidが同じ限り改名後でも一致する)。
+      const playerName = Object.keys(h.scores || {}).find(n => personKeyFor(h, links, n) === personKey);
+      if (!playerName) return;
+      matchNames.add(playerName);
       games++;
       // ③: この半荘に実際に参加した人だけを対象にする(現在の/最終的な
       // ロースターではなく、hanchan.scoresのキー=その半荘の実参加者)。
@@ -6574,7 +6585,10 @@ function calcCareerStats(matchHistory, playerName){
       const rate = (h.rulesSnapshot && h.rulesSnapshot.rate != null) ? h.rulesSnapshot.rate : s.rate;
       moneySum += pt[playerName] * rate;
     });
-    moneySum += ((m.chips && m.chips[playerName]) || 0) * s.chipUnitYen;
+    // チップはこの対局全体で1つの名前に対して記録されるが、念のため
+    // (理論上ありうる)対局内改名のケースも含め、該当した全ての名前分を
+    // 合算する(通常はmatchNamesの要素は高々1つ)。
+    matchNames.forEach(n => { moneySum += ((m.chips && m.chips[n]) || 0) * s.chipUnitYen; });
   });
   if (games === 0) return null;
 
@@ -6620,13 +6634,13 @@ function renderCareerStatCard(name, st, playerCount){
 // 総成績はメンバー構成を問わず全対局を合算するため、3人打ち・4人打ちが
 // 混在している場合に連対率/ラス回避率どちらの表現を使うか決めるために使う
 // (多数決。1件も無ければ4人打ちを既定値とする)。
-function dominantPlayerCountFor(matchHistory, playerName){
+function dominantPlayerCountFor(matchHistory, personKey){
   const counts = {};
   matchHistory.forEach(m => {
     const s = m.settingsSnapshot;
     // ③: 控え交代で最終ロースターに残っていなくても、この対局のどこかの
-    // 半荘に実際に参加していれば数える(getAllPlayerNamesEverPlayed参照)。
-    if (!s || !(m.hanchans || []).some(h => playerName in h.scores)) return;
+    // 半荘に実際に参加していれば数える(getAllPeopleEverPlayed参照)。
+    if (!s || !matchIncludesPersonKey(m, personKey)) return;
     counts[s.playerCount] = (counts[s.playerCount] || 0) + 1;
   });
   const keys = Object.keys(counts);
@@ -6640,29 +6654,93 @@ function dominantPlayerCountFor(matchHistory, playerName){
    複数の相手グループを跨いでも「自分がどの順位を何回取ったか」「平均着順が
    どう推移しているか」が分かるようにする。 ---- */
 
-// これまでの全対局に一度でも登場したプレイヤー名を、実際に半荘へ参加した
-// 回数が多い順に返す(先頭が「自分」である可能性が最も高い名前になる)。
-function getAllPlayerNamesEverPlayed(matchHistory){
+// 対局アーカイブ内のある「名前」を、対局・改名をまたいでも同一人物として
+// 集計するための一意な人物キーを返す。
+// - ユーザーネーム・フレンドとして「指定」で紐づけ済み(settingsSnapshot.
+//   participantLinksにuidがある)なら "user_<uid>" とする。以後この人物の
+//   名前欄の表示文字列が変わっても、uidが同じである限り同一人物として
+//   扱われる(名前の文字列・入力された枠の番号は判定材料にしない)。
+// - ゲスト(アカウント未紐付け)は、この対局内のscoreIds(playerIds/benchIds
+//   由来の内部参加者ID。control交代で入れ替わった別人には必ず新しいIDが
+//   振られる)を使い "guest_<id>" とする。
+// - どちらも無い(scoreIdsが存在しない、この機能追加より前に記録された
+//   古いデータ)場合のみ、フォールバックとして名前文字列そのものを
+//   キーにする(null/undefinedキーで異なる人物が不正に合算されることを
+//   防ぐための安全側の代替であり、積極的な同定はできない)。
+function personKeyFor(hanchan, participantLinks, name){
+  const link = participantLinks && participantLinks[name];
+  if (link && link.uid) return `user_${link.uid}`;
+  const id = hanchan && hanchan.scoreIds && hanchan.scoreIds[name];
+  if (id) return `guest_${id}`;
+  return `name_${name}`;
+}
+// この対局(m)に、指定した人物キーが実際に参加したことがあるか
+// (控え交代で最終ロースターに残っていなくても、いずれかの半荘に登場して
+// いれば含む)を判定する。
+function matchIncludesPersonKey(m, personKey){
+  const links = m.settingsSnapshot && m.settingsSnapshot.participantLinks;
+  return (m.hanchans || []).some(h =>
+    Object.keys(h.scores || {}).some(name => personKeyFor(h, links, name) === personKey));
+}
+// 人物キーに対する、現時点で最も適切な表示名を返す。user_<uid>の場合、
+// 自分ならlogState.account.username、フレンドならfriends[].usernameという
+// 「最新のアカウントプロファイル」を優先する(対局アーカイブに残っている
+// 当時の名前が古くなっていても、常に最新のユーザーネームで表示するため)。
+// それ以外(フレンド未登録・削除済み・ゲスト)は、対局履歴の中で最も新しく
+// 記録されている名前にフォールバックする。
+function displayNameForPersonKey(personKey, matchHistory){
+  if (personKey.startsWith('user_')) {
+    const uid = personKey.slice('user_'.length);
+    if (uid === logState.account.uid && logState.account.username) return logState.account.username;
+    const friend = logState.friends.find(f => f.uid === uid);
+    if (friend && friend.username) return friend.username;
+  }
+  const sorted = [...matchHistory].sort((a, b) =>
+    new Date(b.startedAt || b.endedAt || 0) - new Date(a.startedAt || a.endedAt || 0));
+  for (const m of sorted) {
+    const links = m.settingsSnapshot && m.settingsSnapshot.participantLinks;
+    const hanchans = (m.hanchans || []).slice().reverse();
+    for (const h of hanchans) {
+      for (const name of Object.keys(h.scores || {})) {
+        if (personKeyFor(h, links, name) === personKey) return name;
+      }
+    }
+  }
+  return personKey; // 理論上到達しないはずの最終フォールバック
+}
+
+// これまでの全対局に一度でも登場した人物を、実際に半荘へ参加した回数が
+// 多い順に返す(先頭が「自分」である可能性が最も高い人物になる)。
+// { key, label } の配列。keyはpersonKeyFor参照、labelは表示用の名前。
+function getAllPeopleEverPlayed(matchHistory){
   const counts = {};
   matchHistory.forEach(m => {
+    const links = m.settingsSnapshot && m.settingsSnapshot.participantLinks;
     // ③: 各半荘の実際の参加者(hanchan.scoresのキー)を直接数える。控え交代で
     // 対局終盤に控えに回り、最終ロースター(settingsSnapshot.playerNames)には
     // 残っていない人も、実際に出場した半荘の分はここに含める。
     (m.hanchans || []).forEach(h => {
-      Object.keys(h.scores).forEach(p => { counts[p] = (counts[p] || 0) + 1; });
+      Object.keys(h.scores || {}).forEach(name => {
+        const key = personKeyFor(h, links, name);
+        counts[key] = (counts[key] || 0) + 1;
+      });
     });
   });
-  return Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b));
+  return Object.keys(counts)
+    .sort((a, b) => counts[b] - counts[a] || a.localeCompare(b))
+    .map(key => ({ key, label: displayNameForPersonKey(key, matchHistory) }));
 }
 
 const OVERALL_STATS_MOVING_AVG_WINDOW = 10; // 平均着順グラフの移動平均の対象半荘数
 
-// calcOverallStats(matchHistory, playerName) -> プレイヤー1人分の通算成績。
+// calcOverallStats(matchHistory, personKey) -> プレイヤー1人分の通算成績。
 // matchHistoryはstartedAt昇順(=対局が行われた時系列順)に並べ替えてから、
 // 各対局のhanchans(こちらも記録された順)を順番に走査し、「このプレイヤーが
 // 実際にプレイした半荘」だけを対象に通し番号を振る。
-function calcOverallStats(matchHistory, playerName){
-  if (!playerName) return null;
+// ⑤: personKeyFor()による人物キー(紐付け済みならuid、ゲストなら参加者ID)
+// を基準にする(calcCareerStats参照)。
+function calcOverallStats(matchHistory, personKey){
+  if (!personKey) return null;
   const sorted = [...matchHistory].sort((a, b) =>
     new Date(a.startedAt || a.endedAt || 0) - new Date(b.startedAt || b.endedAt || 0));
 
@@ -6673,9 +6751,12 @@ function calcOverallStats(matchHistory, playerName){
     const s = m.settingsSnapshot;
     if (!s || !Array.isArray(s.playerNames) || !Array.isArray(m.hanchans)) return;
     const players = s.playerNames.slice(0, s.playerCount);
-    if (!players.includes(playerName)) return;
+    const links = s.participantLinks;
+    if (!matchIncludesPersonKey(m, personKey)) return;
     m.hanchans.forEach(h => {
-      if (!h || !h.scores || !(playerName in h.scores)) return;
+      if (!h || !h.scores) return;
+      const playerName = Object.keys(h.scores).find(n => personKeyFor(h, links, n) === personKey);
+      if (!playerName) return;
       // 一部のプレイヤーだけ素点が未記録の不完全なデータ(インポート由来等)は
       // 順位判定ができないため、この半荘の集計自体をスキップする。
       if (!players.every(p => typeof h.scores[p] === 'number')) return;
@@ -6772,18 +6853,22 @@ function renderOverallStatsSection(matchHistory, selected){
 
 // 成績を見たい人を選ぶUI。タップで開閉するスクロール一覧で、一覧内の項目を
 // 直接タップして選択が完結する(候補が1人だけの時は選ぶ意味がないため出さない)。
-function renderStatsPlayerPicker(names, selected){
-  if (names.length <= 1) return '';
+// ⑤: peopleは{key, label}の配列(getAllPeopleEverPlayed参照)、selectedKeyは
+// 選択中の人物キー。表示にはlabel(最新の表示名)を使い、判定・保存には
+// key(uidまたは参加者ID)を使う。
+function renderStatsPlayerPicker(people, selectedKey){
+  if (people.length <= 1) return '';
   const open = logState.ui.statsPlayerPickerOpen;
+  const selectedLabel = (people.find(p => p.key === selectedKey) || {}).label || '';
   return `
     <div class="stats-player-picker">
       <button class="stats-player-picker-btn" onclick="toggleStatsPlayerPicker()">
-        <span>👤 ${escapeHtml(selected)}さんの成績</span>
+        <span>👤 ${escapeHtml(selectedLabel)}さんの成績</span>
         <span class="picker-caret">${open ? '▲' : '▼'}</span>
       </button>
       ${open ? `
         <div class="stats-player-picker-list">
-          ${names.map(n => `<button class="stats-player-picker-item ${n === selected ? 'active' : ''}" onclick="setStatsPlayer('${escKey(n)}')">${escapeHtml(n)}</button>`).join('')}
+          ${people.map(p => `<button class="stats-player-picker-item ${p.key === selectedKey ? 'active' : ''}" onclick="setStatsPlayer('${escKey(p.key)}')">${escapeHtml(p.label)}</button>`).join('')}
         </div>` : ''}
     </div>`;
 }
@@ -6797,15 +6882,19 @@ function renderHistoryStats(){
       : `<div class="history-empty">まだ成績データがありません<br>対局を終了すると、ここに成績が表示されます</div>`;
   }
 
-  // 成績を見たい人を選ぶ(先頭は最も多く登場した名前=「自分」である可能性が高い)。
-  const names = getAllPlayerNamesEverPlayed(source);
-  if (names.length === 0) {
+  // 成績を見たい人を選ぶ(先頭は最も多く登場した人=「自分」である可能性が高い)。
+  // ⑤: 名前の文字列ではなく人物キー(紐付け済みならuid、ゲストなら参加者ID)を
+  // 基準にする(getAllPeopleEverPlayed参照)。これにより、紐付け済みプレイヤーの
+  // 表示名を変更しても、改名前後が別人として分かれず正しく1人として集計される。
+  const people = getAllPeopleEverPlayed(source);
+  if (people.length === 0) {
     return `<div class="history-empty">まだ成績データがありません<br>対局を終了すると、ここに成績が表示されます</div>`;
   }
-  const selected = (logState.ui.statsPlayer && names.includes(logState.ui.statsPlayer))
+  const selectedKey = (logState.ui.statsPlayer && people.some(p => p.key === logState.ui.statsPlayer))
     ? logState.ui.statsPlayer
-    : names[0];
-  logState.ui.statsPlayer = selected; // 選んだ結果を覚えておく
+    : people[0].key;
+  logState.ui.statsPlayer = selectedKey; // 選んだ結果を覚えておく(人物キーとして保存)
+  const selected = (people.find(p => p.key === selectedKey) || {}).label || '';
 
   // a) 総成績: メンバー構成を問わず、選んだ人が参加した全対局(このタブに
   //    表示中の範囲=source)を合算する。「メンバー構成ごとの成績」(b)と
@@ -6813,13 +6902,13 @@ function renderHistoryStats(){
   //    順位分布・平均着順の推移グラフ(旧ハンバーガーメニュー「アカウント」
   //    タブの内容)も続けて表示する。例外が起きてもb)の表示は道連れにせず、
   //    画面上にも表示する(showDebugError参照)。
-  const overallCareer = calcCareerStats(source, selected);
+  const overallCareer = calcCareerStats(source, selectedKey);
   const overallCardHtml = overallCareer
-    ? renderCareerStatCard(selected, overallCareer, dominantPlayerCountFor(source, selected))
+    ? renderCareerStatCard(selected, overallCareer, dominantPlayerCountFor(source, selectedKey))
     : '';
   let overallChartHtml = '';
   try {
-    overallChartHtml = renderOverallStatsSection(source, selected);
+    overallChartHtml = renderOverallStatsSection(source, selectedKey);
   } catch (e) {
     console.error('[renderHistoryStats] renderOverallStatsSection failed:', e);
     showDebugError('成績タブ(総成績)', e);
@@ -6837,7 +6926,8 @@ function renderHistoryStats(){
   source.forEach(m => {
     const s = m.settingsSnapshot;
     const players = s.playerNames.slice(0, s.playerCount);
-    if (!players.includes(selected)) return;
+    // ⑤: 「選んだ人が参加したか」も名前の文字列一致ではなく人物キーで判定する。
+    if (!matchIncludesPersonKey(m, selectedKey)) return;
     const key = memberKey(players);
     if (!groups[key]) groups[key] = { players, playerCount: s.playerCount, matches: [] };
     groups[key].matches.push(m);
@@ -6846,7 +6936,7 @@ function renderHistoryStats(){
 
   const groupsHtml = groupList.map(g => {
     const totalHanchans = g.matches.reduce((sum,m)=>sum+m.hanchans.length, 0);
-    const st = calcCareerStats(g.matches, selected);
+    const st = calcCareerStats(g.matches, selectedKey);
     if (!st) return '';
     return `
       <div class="stat-group">
@@ -6855,7 +6945,7 @@ function renderHistoryStats(){
       </div>`;
   }).join('');
 
-  const picker = renderStatsPlayerPicker(names, selected);
+  const picker = renderStatsPlayerPicker(people, selectedKey);
   if (!overallHtml && !groupsHtml) {
     return `${picker}<div class="history-empty">${escapeHtml(selected)}さんの記録がありません</div>`;
   }
