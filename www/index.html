@@ -6540,8 +6540,8 @@ function confirmDeleteArchive(id){
 // ⑤(不具合修正): 以前はplayerName(表示中の名前文字列)を直接キーにして
 // いたため、ユーザーネーム・フレンドとして紐づけ済みのプレイヤーの表示名を
 // 変更すると、変更前・変更後が別人として2件に分かれて集計されてしまって
-// いた。personKeyFor()による人物キー(紐付け済みならuid、ゲストなら
-// scoreIds由来の参加者ID)を基準に集計するよう変更(personKeyFor定義箇所の
+// いた。personKeyFor()による人物キー(紐付け済みならuid、ゲストなら名前
+// 文字列そのもの)を基準に集計するよう変更(personKeyFor定義箇所の
 // コメント参照)。
 function calcCareerStats(matchHistory, personKey){
   // ③: 控え交代で試合途中から/までしか出場していない場合、最終ロースター
@@ -6660,19 +6660,19 @@ function dominantPlayerCountFor(matchHistory, personKey){
 //   participantLinksにuidがある)なら "user_<uid>" とする。以後この人物の
 //   名前欄の表示文字列が変わっても、uidが同じである限り同一人物として
 //   扱われる(名前の文字列・入力された枠の番号は判定材料にしない)。
-// - ゲスト(アカウント未紐付け)は、この対局内のscoreIds(playerIds/benchIds
-//   由来の内部参加者ID。control交代で入れ替わった別人には必ず新しいIDが
-//   振られる)を使い "guest_<id>" とする。
-// - どちらも無い(scoreIdsが存在しない、この機能追加より前に記録された
-//   古いデータ)場合のみ、フォールバックとして名前文字列そのものを
-//   キーにする(null/undefinedキーで異なる人物が不正に合算されることを
-//   防ぐための安全側の代替であり、積極的な同定はできない)。
+// - ゲスト(アカウント未紐付け)は、入力された名前の文字列そのものを使い
+//   "guest_<name>" とする(⑥不具合修正: scoreIds/playerIds/benchIdsは
+//   1つの進行中セット内で控え交代が起きても最終結果発表の人数集計が
+//   崩れないようにするための「対局ログ用」の内部識別子であり、対局を
+//   またいだ人物同定の基準にすると、ゲストの名前を直接変更しただけでも
+//   同じ枠・同じIDのまま改名前後が誤って同一人物として統合されてしまう。
+//   ゲストにはアカウントによる恒久的な同一性がないため、名前を変えたら
+//   別人として扱うのが正しい仕様)。scoreIds自体・その本来の用途である
+//   対局ログ/最終結果発表の重複防止ロジックは変更しない。
 function personKeyFor(hanchan, participantLinks, name){
   const link = participantLinks && participantLinks[name];
   if (link && link.uid) return `user_${link.uid}`;
-  const id = hanchan && hanchan.scoreIds && hanchan.scoreIds[name];
-  if (id) return `guest_${id}`;
-  return `name_${name}`;
+  return `guest_${name}`;
 }
 // この対局(m)に、指定した人物キーが実際に参加したことがあるか
 // (控え交代で最終ロースターに残っていなくても、いずれかの半荘に登場して
@@ -6737,8 +6737,8 @@ const OVERALL_STATS_MOVING_AVG_WINDOW = 10; // 平均着順グラフの移動平
 // matchHistoryはstartedAt昇順(=対局が行われた時系列順)に並べ替えてから、
 // 各対局のhanchans(こちらも記録された順)を順番に走査し、「このプレイヤーが
 // 実際にプレイした半荘」だけを対象に通し番号を振る。
-// ⑤: personKeyFor()による人物キー(紐付け済みならuid、ゲストなら参加者ID)
-// を基準にする(calcCareerStats参照)。
+// ⑤: personKeyFor()による人物キー(紐付け済みならuid、ゲストなら名前文字列
+// そのもの)を基準にする(calcCareerStats参照)。
 function calcOverallStats(matchHistory, personKey){
   if (!personKey) return null;
   const sorted = [...matchHistory].sort((a, b) =>
