@@ -1870,6 +1870,7 @@
 <div id="paywallModalRoot"></div>
 <div id="tiebreakDealerModalRoot"></div>
 <div id="accountModalRoot"></div>
+<div id="usernameRequiredModalRoot"></div>
 <div id="friendPickerModalRoot"></div>
 <div id="loginPromptModalRoot"></div>
 <div id="friendsListModalRoot"></div>
@@ -3129,6 +3130,13 @@ const CloudSync = {
         if (user) { logState.account.uid = user.uid; logState.account.isAnonymous = true; }
       }
       saveLogState();
+      // ②: 起動時点で既にログイン済み(非匿名)なのにユーザーネーム未設定の
+      // 場合も、必須設定モーダルを出す(前回セッションが設定完了前に
+      // 中断された場合や、別端末で未設定のまま等)。匿名のままの利用は
+      // 対象外(従来通りログイン強制なし)。
+      if (!logState.account.isAnonymous && !logState.account.username) {
+        await this._syncUsernameAfterLogin();
+      }
       await this.refreshFriends();
       await this.syncIncomingMatchHistory();
       if (logState.room && logState.room.roomId) {
@@ -3201,6 +3209,8 @@ const CloudSync = {
         logState.account.linkedProviders.google = true;
         logState.account.knownLinkedProviders.google = true;
         saveLogState();
+        // ②: ログイン成功直後、保存済みユーザーネームの有無を確認する。
+        await this._syncUsernameAfterLogin();
         return true;
       }
       showDebugError('Googleログイン', `linkWithGoogle()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
@@ -3243,6 +3253,8 @@ const CloudSync = {
         logState.account.linkedProviders.apple = true;
         logState.account.knownLinkedProviders.apple = true;
         saveLogState();
+        // ②: ログイン成功直後、保存済みユーザーネームの有無を確認する。
+        await this._syncUsernameAfterLogin();
         return true;
       }
       showDebugError('Appleログイン', `linkWithApple()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
@@ -3254,6 +3266,35 @@ const CloudSync = {
     }
   },
 
+  // ②: ログイン(linkGoogle/linkApple)直後・起動時に、Firestore側の
+  // users/{uid}ドキュメントを取得する(既にユーザーネームを設定済みかどうかを
+  // 確認するため。同じアカウントで別端末からログインした場合も、この取得で
+  // 保存済みのユーザーネームをそのまま反映できる)。
+  async fetchAccountProfile(uid){
+    if (!this.isAvailable() || !uid) return null;
+    try {
+      const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
+      if (!Firestore) return null;
+      const doc = await Firestore.getDocument({ reference: `users/${uid}` });
+      return (doc && doc.snapshot && doc.snapshot.data) || null;
+    } catch (e) { return null; }
+  },
+  // ②: ログイン成功直後に呼ぶ。既にユーザーネームが設定済みならそれを
+  // ローカルへ反映してそのまま使わせ、未設定ならusernameRequiredを立てて
+  // 必須設定モーダル(renderUsernameRequiredModal)を表示させる。
+  async _syncUsernameAfterLogin(){
+    const profile = await this.fetchAccountProfile(logState.account.uid);
+    if (profile && profile.username) {
+      logState.account.username = profile.username;
+      logState.account.usernameChangeCount = profile.usernameChangeCount || 0;
+      logState.ui.usernameRequired = false;
+    } else {
+      logState.ui.usernameRequired = true;
+      logState.ui.usernameInput = '';
+      logState.ui.usernameError = null;
+    }
+    saveLogState();
+  },
   // ユーザーネームは一意。usernames/{normalized}ドキュメントの有無で申請の
   // 成否を判定する(先着順)。変更時、旧ユーザーネームは予約せず即座に解放する
   // (検討の結果、シンプルさを優先する方針で決定)。
@@ -3264,22 +3305,35 @@ const CloudSync = {
     // 書き込もうとすると、firestore.rules側でrequest.auth.uidが未確定に
     // なり毎回permission-deniedで失敗する。CloudSync.init()の完了を待つ。
     if (!(await this.ensureSignedIn())) return { ok: false, error: 'network' };
+    // ③: 初回設定(まだユーザーネームを持っていない)は無料。既に設定済みの
+    // ユーザーネームから別の文字列へ「変更」する場合のみ、生涯1回に制限する
+    // (同じ名前を再送信した場合は変更扱いにしない)。
+    const isChange = !!logState.account.username && logState.account.username !== name;
+    if (isChange && (logState.account.usernameChangeCount || 0) >= 1) {
+      return { ok: false, error: 'limit' };
+    }
     try {
       const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
       if (!Firestore) return { ok: false, error: 'unavailable' };
       const norm = normalizeUsername(name);
       const existing = await Firestore.getDocument({ reference: `usernames/${norm}` }).catch(() => null);
       const existingUid = existing && existing.snapshot && existing.snapshot.data && existing.snapshot.data.uid;
+      // ⑤: 既存の割り当てが自分自身のuidと一致する場合(=既に自分が持っている
+      // ユーザーネームを再送信した、または自分の別端末が先に確保していた場合)は
+      // 重複とみなさない。他人のuidと一致する場合のみ'taken'を返す。
       if (existingUid && existingUid !== logState.account.uid) {
         return { ok: false, error: 'taken' };
       }
       const oldNorm = logState.account.username ? normalizeUsername(logState.account.username) : null;
+      const nextChangeCount = isChange ? (logState.account.usernameChangeCount || 0) + 1 : (logState.account.usernameChangeCount || 0);
       await Firestore.setDocument({ reference: `usernames/${norm}`, data: { uid: logState.account.uid } });
-      await Firestore.setDocument({ reference: `users/${logState.account.uid}`, data: { username: name }, merge: true });
+      await Firestore.setDocument({ reference: `users/${logState.account.uid}`, data: { username: name, usernameChangeCount: nextChangeCount }, merge: true });
       if (oldNorm && oldNorm !== norm) {
         await Firestore.deleteDocument({ reference: `usernames/${oldNorm}` }).catch(() => {});
       }
       logState.account.username = name;
+      logState.account.usernameChangeCount = nextChangeCount;
+      logState.ui.usernameRequired = false;
       saveLogState();
       return { ok: true };
     } catch (e) {
@@ -3817,6 +3871,10 @@ function defaultLogState(){
       uid: null,
       isAnonymous: true,
       username: null,
+      // ③: ユーザーネームの「変更」(初回設定は含まない)を生涯1回だけに
+      // 制限するためのカウンタ。Firestore側もusers/{uid}.usernameChangeCount
+      // に同期する(claimUsername参照)。
+      usernameChangeCount: 0,
       linkedProviders: { google: false, apple: false },
       // ③: 「この端末でこのプロバイダをリンクした実績があるか」の記憶。
       // linkedProvidersと違い、debugSignOut()でサインアウトしてもクリアしない
@@ -3831,6 +3889,7 @@ function defaultLogState(){
     room: null,  // 進行中の卓。null=単独モード。
     // { roomId, isHost, hostUid, participants: [{ slot, uid, name, isGuest }] }
     ui: {
+      usernameRequired: false, // ②: ログイン済みなのにユーザーネーム未設定のため、必須設定モーダルを表示中か
       rosterOpen: true,   // ②: 人数・プレイヤー名・控えメンバーの折りたたみ状態
       settingsOpen: true,
       chipsOpen: false,
@@ -4868,9 +4927,11 @@ async function submitUsername(){
   } else {
     logState.ui.usernameError = result.error === 'taken'
       ? 'そのユーザーネームは既に使われています'
-      : result.error === 'unavailable'
-        ? 'この画面はストアアプリ内でのみ利用できます'
-        : '通信環境をご確認のうえ、もう一度お試しください';
+      : result.error === 'limit'
+        ? 'ユーザーネームの変更は生涯1回までです'
+        : result.error === 'unavailable'
+          ? 'この画面はストアアプリ内でのみ利用できます'
+          : '通信環境をご確認のうえ、もう一度お試しください';
     scheduleRenderApp();
   }
 }
@@ -6873,6 +6934,7 @@ async function confirmDeleteAccountFromMenu(){
   logState.ui.deleteAccountErrorMsg = null;
   logState.ui.otherMenuOpen = false;
   logState.ui.accountModalOpen = false;
+  logState.ui.usernameRequired = false; // ②: 匿名アカウントに戻るため、必須設定モーダルも解除する
   saveLogState();
   scheduleRenderApp();
   CloudSync.init(); // 新しい匿名アカウントとして再初期化
@@ -6921,6 +6983,7 @@ async function debugSignOut(){
   logState.room = null;
   logState.ui.otherMenuOpen = false;
   logState.ui.accountModalOpen = false;
+  logState.ui.usernameRequired = false; // ②: 匿名アカウントに戻るため、必須設定モーダルも解除する
   logState.ui.notifyBanner = 'デバッグ:サインアウトしました。新しい匿名アカウントとして再初期化します。';
   saveLogState();
   scheduleRenderApp();
@@ -7002,8 +7065,14 @@ function renderAccountModal(){
           <button class="history-close" onclick="closeAccountModal()">×</button>
         </div>
         <div class="history-modal-body">
+          ${a.username && (a.usernameChangeCount || 0) >= 1 ? `
           <div class="settings-row">
-            <div class="lbl">ユーザーネーム<span class="hint">検索・招待用。後から変更できます</span></div>
+            <div class="lbl">ユーザーネーム<span class="hint">変更は生涯1回までのため、これ以上変更できません</span></div>
+            <div class="check-banner ok">${escapeHtml(a.username)}</div>
+          </div>
+          ` : `
+          <div class="settings-row">
+            <div class="lbl">ユーザーネーム<span class="hint">検索・招待用。${a.username ? '変更できるのはあと1回のみです' : ''}</span></div>
             <input class="text-input" value="${escapeHtml(logState.ui.usernameInput)}" placeholder="例: taro_mahjong"
               oninput="setUsernameInput(this.value)">
             ${logState.ui.usernameError ? `<div class="check-banner bad" style="margin-top:6px;">${escapeHtml(logState.ui.usernameError)}</div>` : ''}
@@ -7011,6 +7080,7 @@ function renderAccountModal(){
               ${checking ? '確認しています…' : (a.username ? 'ユーザーネームを変更' : 'ユーザーネームを設定')}
             </button>
           </div>
+          `}
           <div class="settings-row" style="margin-top:14px;">
             <div class="lbl">ログイン連携<span class="hint">機種変更時の引き継ぎに必要</span></div>
             ${a.linkedProviders.google || a.linkedProviders.apple ? `
@@ -7031,6 +7101,36 @@ function renderAccountModal(){
             </label>
           </div>
           <button class="mentsu-add" style="margin-top:14px;" onclick="closeAccountModal(); openFriendsList();">👥 フレンド一覧を見る(${logState.friends.length}人)</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ②: ログイン済み(非匿名)なのにユーザーネーム未設定の間、必須で表示する
+// モーダル。閉じるボタンを持たず、.history-modal-overlay(position:fixed;
+// inset:0)がクリックを含めて背後のアプリ全体を覆うため、設定完了
+// (submitUsername成功→usernameRequired=false)までアプリへ入れない。
+function renderUsernameRequiredModal(){
+  const root = document.getElementById('usernameRequiredModalRoot');
+  if (!root) return;
+  if (!logState.ui.usernameRequired) { root.innerHTML = ''; return; }
+  const checking = logState.ui.usernameChecking;
+  root.innerHTML = `
+    <div class="history-modal-overlay">
+      <div class="history-modal">
+        <div class="history-modal-head">
+          <span class="history-modal-title">ユーザーネームの設定</span>
+        </div>
+        <div class="history-modal-body">
+          <p class="paywall-copy">続けるにはユーザーネームの設定が必要です。フレンド検索・同卓者指定に使われます。</p>
+          <div class="settings-row">
+            <input class="text-input" value="${escapeHtml(logState.ui.usernameInput)}" placeholder="例: taro_mahjong"
+              oninput="setUsernameInput(this.value)">
+            ${logState.ui.usernameError ? `<div class="check-banner bad" style="margin-top:6px;">${escapeHtml(logState.ui.usernameError)}</div>` : ''}
+            <button class="record-btn" style="margin-top:8px;width:100%;" ${checking?'disabled':''} onclick="submitUsername()">
+              ${checking ? '確認しています…' : 'ユーザーネームを設定して続ける'}
+            </button>
+          </div>
         </div>
       </div>
     </div>`;
@@ -7483,6 +7583,7 @@ function renderAppInner(){
   safeRender(renderPaywallModal, 'renderPaywallModal');
   safeRender(renderTiebreakDealerModal, 'renderTiebreakDealerModal');
   safeRender(renderAccountModal, 'renderAccountModal');
+  safeRender(renderUsernameRequiredModal, 'renderUsernameRequiredModal');
   safeRender(renderFriendPickerModal, 'renderFriendPickerModal');
   safeRender(renderLoginPromptModal, 'renderLoginPromptModal');
   safeRender(renderFriendsListModal, 'renderFriendsListModal');
