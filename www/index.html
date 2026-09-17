@@ -374,7 +374,7 @@
   .term-tip-btn:active{background:var(--felt-1);color:var(--ivory);}
   .term-tip-popover{
     position:fixed;
-    z-index:80; /* ③: .history-modal-overlay(モーダル本体)より常に手前に表示する */
+    z-index:60; /* .history-modal-overlay(モーダル本体)より手前、.debug-error-bannerより背面 */
     max-width:min(78vw, 260px);
     background:var(--felt-1);
     border:1px solid var(--gold);
@@ -951,11 +951,15 @@
     position:fixed;
     inset:0;
     background:rgba(5,16,12,.72);
-    /* ③(不具合修正): 以前はz-index:50で.debug-error-banner(70)より背面に
-       あったため、購入タイムアウト等でデバッグバナーが表示されると、開いて
-       いるモーダル(ペイウォール等)の閉じるボタンがバナーに覆われてクリック
-       できなくなっていた。モーダルは常にデバッグバナーより手前に出す。 */
-    z-index:75;
+    /* ③(不具合修正・再修正): 一時的にz-index:75へ引き上げ、.debug-error-banner
+       (70)より手前に出していたが、これだとデバッグバナーが表示されている間
+       バナー自体の×(dismissDebugError)がモーダルの全画面バックドロップに
+       覆われてクリックできなくなる、逆方向の不具合を引き起こしていた
+       (バナーは常にモーダルより手前で、押せば消えなければならない)。
+       .debug-error-banner(z-index:70)より背面のz-index:50に戻す。両者が
+       同時に表示された場合は、直近に表示された(=より手前にある)デバッグ
+       バナーを先に閉じてから、その下のモーダルを操作する。 */
+    z-index:50;
     display:flex;
     align-items:flex-end;
     justify-content:center;
