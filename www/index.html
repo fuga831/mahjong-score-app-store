@@ -1794,6 +1794,7 @@
     gap:8px;
   }
   .chip-input-row .pname{width:5.2em;flex-shrink:0;font-size:.8rem;font-weight:700;color:var(--ivory-dim);}
+  .chip-input-row .pname small{display:block;font-weight:400;font-size:.65rem;color:var(--ink-soft);}
   .chip-stepper{display:flex;align-items:center;gap:6px;flex:1;}
   .chip-stepper button{
     width:30px;height:30px;border-radius:50%;
@@ -4177,6 +4178,18 @@ try {
 function activePlayers(){
   return logState.settings.playerNames.slice(0, logState.settings.playerCount);
 }
+// チップ精算は「現在卓についているメンバー」だけでなく、控えメンバー同士・
+// 控えと卓上メンバーの間でもやり取りされうるため、チップ管理・ゼロサム集計の
+// 対象はアクティブメンバー(baseNames)に控えメンバー(settings.benchNames)を
+// 加えた全員とする。控えメンバー機能が無効な場合はbaseNamesのみ返す。
+function withBenchNames(baseNames, settings){
+  if (!settings.benchEnabled) return baseNames;
+  const bench = settings.benchNames || [];
+  const seen = new Set(baseNames);
+  const merged = baseNames.slice();
+  bench.forEach(n => { if (!seen.has(n)) { seen.add(n); merged.push(n); } });
+  return merged;
+}
 // ④: playerNamesと同じ並び・長さで、各枠の内部参加者ID(実アカウントuidとは
 // 無関係)を保持する配列。activePlayers()と対になるインデックスを返す。
 function activePlayerIds(){
@@ -5180,18 +5193,37 @@ function toggleBenchEnabled(){
 }
 function addBenchMember(){
   const n = logState.settings.benchNames.length + 1;
-  logState.settings.benchNames.push(`控え${n}`);
+  const name = `控え${n}`;
+  logState.settings.benchNames.push(name);
   logState.settings.benchIds.push(genParticipantId()); // ④: benchNamesと対になるID配列を維持する
+  // ⑤: 控えメンバー追加と同時に、チップ管理へもデフォルト0枚で登録しておく。
+  if (!(name in logState.chips)) logState.chips[name] = 0;
   saveLogState(); scheduleRenderApp();
 }
 function setBenchName(i, value){
   const trimmed = (value || '').trim();
-  logState.settings.benchNames[i] = trimmed || `控え${i + 1}`;
+  const oldName = logState.settings.benchNames[i];
+  const newName = trimmed || `控え${i + 1}`;
+  logState.settings.benchNames[i] = newName;
+  // ⑤: 控えメンバーの改名(=同一人物の表示名変更)でも、setPlayerName()と同様に
+  // これまで積み上げたチップ枚数(交代前にアクティブとして参加した半荘の記録も
+  // 含む)を新しい名前へ引き継ぐ。引き継がないと旧名義のチップ残高が孤立し、
+  // ゼロサム集計から見えなくなってしまう。
+  if (oldName) renamePlayerEverywhere(oldName, newName);
   saveLogState(); scheduleRenderApp();
 }
 function removeBenchMember(i){
+  const removedName = logState.settings.benchNames[i];
   logState.settings.benchNames.splice(i, 1);
   logState.settings.benchIds.splice(i, 1); // ④: benchNamesと対になるID配列を維持する
+  // ⑤: この対局で一度も半荘に参加していない(=単なる控え登録のみの)名前で
+  // あれば、削除と同時にチップ残高も破棄する。既に半荘へ参加したことがある
+  // 名前は、控えから外れた後もcalcTotals側で結果を表示し続ける対象なので、
+  // チップ残高を消してしまうとその人の収支だけゼロサムから欠落してしまう
+  // ため残す。
+  if (removedName != null && !logState.hanchans.some(h => Object.prototype.hasOwnProperty.call(h.scores || {}, removedName))) {
+    delete logState.chips[removedName];
+  }
   saveLogState(); scheduleRenderApp();
 }
 // 交代アイコンは控えメンバーの行にある。タップした控えメンバーを、次に
@@ -5814,7 +5846,10 @@ function renderSettingsAccordion(){
 function renderChipsAccordion(){
   const s = logState.settings;
   const open = logState.ui.chipsOpen;
-  const players = activePlayers();
+  // ⑤: 卓上のアクティブメンバーだけでなく、控えメンバーもチップ入力・
+  // ゼロサム集計の対象に含める(withBenchNames、activePlayers()参照)。
+  const players = withBenchNames(activePlayers(), s);
+  const benchSet = new Set(s.benchEnabled ? (s.benchNames || []) : []);
   const chipSum = players.reduce((sum,p)=> sum + (logState.chips[p]||0), 0);
   return `
     <div class="accordion ${open?'open':''}">
@@ -5830,7 +5865,7 @@ function renderChipsAccordion(){
         </div>
         ${players.map(p=>`
           <div class="chip-input-row">
-            <span class="pname">${escapeHtml(p)}</span>
+            <span class="pname">${escapeHtml(p)}${benchSet.has(p) ? '<small>(控え)</small>' : ''}</span>
             <div class="chip-stepper">
               <button onclick="chipStep('${escKey(p)}',-1)">−</button>
               ${logState.ui.editingChipFor === p
@@ -6261,7 +6296,11 @@ function renderHistoryDetail(id){
   const order = [...players].sort((a,b)=>totals.money[b]-totals.money[a]);
   const topMoney = order.length ? totals.money[order[0]] : 0;
   const editingTitle = logState.ui.editingArchiveTitleId === id;
-  const chipSum = players.reduce((sum,p)=> sum + (m.chips[p]||0), 0);
+  // ⑤: ゼロサム集計は、この対局で実際に半荘へ参加した人(players)だけでなく、
+  // 対局終了時点で控えに残っていた(一度も出場しないままだった)メンバーの
+  // チップも含めて判定する(settingsSnapshotのbenchNamesを参照)。
+  const chipPlayers = withBenchNames(players, s);
+  const chipSum = chipPlayers.reduce((sum,p)=> sum + (m.chips[p]||0), 0);
 
   const titleHtml = editingTitle
     ? `<input class="text-input" id="archiveTitleInput" value="${escapeHtml(m.title||'')}" placeholder="対局メモ・タイトル（例: 〇〇杯 第3戦）" onchange="saveArchiveTitle('${escKey(id)}', this.value)" onblur="saveArchiveTitle('${escKey(id)}', this.value)">`
