@@ -374,7 +374,7 @@
   .term-tip-btn:active{background:var(--felt-1);color:var(--ivory);}
   .term-tip-popover{
     position:fixed;
-    z-index:60;
+    z-index:60; /* .history-modal-overlay(モーダル本体)より手前、.debug-error-bannerより背面 */
     max-width:min(78vw, 260px);
     background:var(--felt-1);
     border:1px solid var(--gold);
@@ -951,6 +951,14 @@
     position:fixed;
     inset:0;
     background:rgba(5,16,12,.72);
+    /* ③(不具合修正・再修正): 一時的にz-index:75へ引き上げ、.debug-error-banner
+       (70)より手前に出していたが、これだとデバッグバナーが表示されている間
+       バナー自体の×(dismissDebugError)がモーダルの全画面バックドロップに
+       覆われてクリックできなくなる、逆方向の不具合を引き起こしていた
+       (バナーは常にモーダルより手前で、押せば消えなければならない)。
+       .debug-error-banner(z-index:70)より背面のz-index:50に戻す。両者が
+       同時に表示された場合は、直近に表示された(=より手前にある)デバッグ
+       バナーを先に閉じてから、その下のモーダルを操作する。 */
     z-index:50;
     display:flex;
     align-items:flex-end;
@@ -2684,9 +2692,68 @@ function admobConfigForPlatform(){
 
 let _billingReady = false;
 let _pendingPurchaseResolvers = [];
+// ②(不具合修正): 起動時に自動実行される_restorePurchasesOnBoot(Native.
+// restorePurchases())と、ユーザーが購入ボタン/「購入を復元」を押した時の
+// 呼び出しが短時間に重なると、それぞれが独立にStoreKit/Play Billing側の
+// ネイティブ認証(Apple ID・Face ID確認等、店頭のlinkWithX()/signInWithX()に
+// 相当する「認証を求める呼び出し」)を要求してしまい、以前linkGoogle/
+// linkAppleで発生していた「2回連続認証」と同種の体験を引き起こしていた。
+// restorePurchases()とpurchasePremium()の、実際にストアの認証UIを
+// 要求しうる区間をこのロックで直列化し、同時に複数のStoreKit操作が
+// 走らないようにする(ensureSignedIn()がCloudSync._initPromiseを待つのと
+// 同じ考え方)。
+let _billingOpLock = Promise.resolve();
+function _withBillingLock(fn){
+  const run = _billingOpLock.catch(() => {}).then(fn);
+  _billingOpLock = run.catch(() => {});
+  return run;
+}
 function _resolvePendingPurchase(success){
   const resolvers = _pendingPurchaseResolvers.splice(0);
   resolvers.forEach(r => r(success));
+}
+// ①③(不具合修正): 購入が成立した(owned)ことを検知した時点で、isPremiumへの
+// 反映・ローカル保存・Firestore同期・保留中のpurchasePremium()呼び出しの
+// 解決・(タイムアウトで既に諦めていた場合の)ペイウォールの自動クローズと
+// 通知をまとめて行う共通処理。以前はproductUpdated()イベントの中でしか
+// 行っていなかったが、実機ログでapproved(+698ms)/verified(+903ms)は
+// 1秒以内に届いているにもかかわらず、その後に来るはずのproductUpdated()
+// イベントが届かない(または大きく遅れる)ケースが確認され、90秒の
+// タイムアウトまでisPremiumが一切反映されない不具合の原因になっていた。
+// verified()の時点でreceipt.finish()の直後にこれを呼ぶことで、
+// productUpdated()を待たずに即座に反映する(productUpdated()自体も、
+// 起動時の購入復元など他の経路から購入成立を検知できるよう、引き続き
+// 同じ処理を呼ぶ。wasPremium/hadPendingResolverの判定で二重発火しても
+// 副作用が起きないようになっている)。
+function _handlePurchaseOwned(){
+  const wasPremium = logState.settings.isPremium;
+  if (!wasPremium) {
+    logState.settings.isPremium = true;
+    saveLogState();
+    Native.hideBanner();
+    CloudSync.syncPremiumStatus(); // フレンドの表示名を金色にする機能・無料枠判定用
+    scheduleRenderApp();
+  }
+  // purchasePremium()が待機中(90秒のタイムアウト前)ならここで解決される。
+  const hadPendingResolver = _pendingPurchaseResolvers.length > 0;
+  _resolvePendingPurchase(true);
+  // 待機中の呼び出しが無いのに購入成立で届いた場合、それは「タイムアウト後に
+  // 遅れて届いたイベント」か「アプリ再起動後の初回同期」のいずれか。前者
+  // (!wasPremiumから今回trueになった)の場合だけ、ペイウォールが開いた
+  // ままなら自動で閉じてユーザーに知らせる(「失敗しました」の表示のまま
+  // 放置しない)。
+  if (!hadPendingResolver && !wasPremium) {
+    logState.ui.paywallErrorMsg = null;
+    if (logState.ui.paywallOpen) {
+      const pendingSource = logState.ui.paywallSource;
+      logState.ui.paywallOpen = false;
+      logState.ui.paywallSource = null;
+      logState.ui.paywallPurchasing = false;
+      if (pendingSource === 'archive') archiveCurrentMatch();
+    }
+    logState.ui.notifyBanner = '購入が反映されました。プレミアム会員になりました🎉';
+    scheduleRenderApp();
+  }
 }
 // ネイティブの購入ダイアログが「完了しました」と表示していても、アプリ側の
 // approved/verified/productUpdatedイベントの受信が(実機で確認されたケースでは)
@@ -2836,7 +2903,13 @@ const Native = {
         platform: storePlatform,
       }]);
       store.when().approved(transaction => { _traceBilling('approved'); transaction.verify(); });
-      store.when().verified(receipt => { _traceBilling('verified'); receipt.finish(); });
+      store.when().verified(receipt => {
+        _traceBilling('verified');
+        receipt.finish();
+        // ①③: productUpdated()を待たず、レシート検証が済んだこの時点で
+        // 直接isPremiumへ反映する(_handlePurchaseOwned参照)。
+        _handlePurchaseOwned();
+      });
       // レシートのサーバー側検証(verify())が失敗した場合はverifiedではなく
       // こちらに来る。When型にはerror()というチェーンメソッド自体が存在しない
       // (store.error()が唯一のグローバルエラーハンドラ)ため、検証失敗はここで拾う。
@@ -2851,36 +2924,11 @@ const Native = {
         const product = store.get(MONETIZATION_CONFIG.billingProductId);
         const owned = !!(product && product.owned);
         _traceBilling(`productUpdated (owned=${owned})`);
-        const wasPremium = logState.settings.isPremium;
-        if (owned && !wasPremium) {
-          logState.settings.isPremium = true;
-          saveLogState();
-          Native.hideBanner();
-          CloudSync.syncPremiumStatus(); // フレンドの表示名を金色にする機能・無料枠判定用
-          scheduleRenderApp();
-        }
-        if (owned) {
-          // purchasePremium()が待機中(60秒のタイムアウト前)ならここで解決される。
-          const hadPendingResolver = _pendingPurchaseResolvers.length > 0;
-          _resolvePendingPurchase(true);
-          // 待機中の呼び出しが無いのにowned=trueで届いた場合、それは
-          // 「タイムアウト後に遅れて届いたイベント」か「アプリ再起動後の
-          // 初回同期」のいずれか。前者(!wasPremiumから今回trueになった)の
-          // 場合だけ、ペイウォールが開いたままなら自動で閉じてユーザーに
-          // 知らせる(「失敗しました」の表示のまま放置しない)。
-          if (!hadPendingResolver && !wasPremium) {
-            logState.ui.paywallErrorMsg = null;
-            if (logState.ui.paywallOpen) {
-              const pendingSource = logState.ui.paywallSource;
-              logState.ui.paywallOpen = false;
-              logState.ui.paywallSource = null;
-              logState.ui.paywallPurchasing = false;
-              if (pendingSource === 'archive') archiveCurrentMatch();
-            }
-            logState.ui.notifyBanner = '購入が反映されました。プレミアム会員になりました🎉';
-            scheduleRenderApp();
-          }
-        }
+        // ①③: verified()側で既に反映済みのことが多いが、起動時の購入復元など
+        // 他の経路から購入成立を検知する場合に備え、こちらでも同じ処理を呼ぶ
+        // (_handlePurchaseOwned内のwasPremium/hadPendingResolver判定により、
+        // 既に反映済みなら安全に無視される)。
+        if (owned) _handlePurchaseOwned();
       });
       // store.order()の失敗など、個別のPromiseの拒否に現れない
       // ストア側の非同期エラー(通信エラー・設定不備等)を拾うためのハンドラ。
@@ -2921,20 +2969,23 @@ const Native = {
   // 非ネイティブ環境か通信エラー等。呼び出し側は既存のisPremium値を維持すること)。
   async restorePurchases(){
     if (!this.isNativeApp()) return null;
-    try {
-      const store = window.CdvPurchase && window.CdvPurchase.store;
-      if (!store) {
-        showDebugError('購入情報の復元 (restorePurchases)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase})。${cordovaPluginListInfo()}`);
+    // ②: purchasePremium()の認証区間(prepare+order())と重ならないよう直列化する。
+    return _withBillingLock(async () => {
+      try {
+        const store = window.CdvPurchase && window.CdvPurchase.store;
+        if (!store) {
+          showDebugError('購入情報の復元 (restorePurchases)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase})。${cordovaPluginListInfo()}`);
+          return null;
+        }
+        await this.initBilling();
+        await store.restorePurchases();
+        const product = store.get(MONETIZATION_CONFIG.billingProductId);
+        return !!(product && product.owned);
+      } catch (e) {
+        showDebugError('購入情報の復元 (restorePurchases)', e);
         return null;
       }
-      await this.initBilling();
-      await store.restorePurchases();
-      const product = store.get(MONETIZATION_CONFIG.billingProductId);
-      return !!(product && product.owned);
-    } catch (e) {
-      showDebugError('購入情報の復元 (restorePurchases)', e);
-      return null;
-    }
+    });
   },
   // 戻り値: { success: true } | { success: false, reason: 'not_native'|'error'|'timeout' }
   //   'timeout'は「決済自体は成立しているがイベント受信が遅れているだけ」の
@@ -2943,44 +2994,52 @@ const Native = {
   //   は生き続けており、遅れて届けば自動的にisPremiumへ反映される。
   async purchasePremium(){
     if (!this.isNativeApp()) return { success: false, reason: 'not_native' };
-    try {
-      const store = window.CdvPurchase && window.CdvPurchase.store;
-      if (!store) {
-        showDebugError('購入 (purchasePremium)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase})。${cordovaPluginListInfo()}`);
-        return { success: false, reason: 'error' };
+    // ②: 実際にストアの認証UIを要求しうる区間(店舗への接続確立〜order()呼び出し
+    // まで)だけを_withBillingLockで直列化し、restorePurchases()と重ならない
+    // ようにする。approved/verifiedイベントを待つ区間(最大90秒)はロックの
+    // 外側にして、その間ずっと「購入を復元」等の他の操作をブロックしないようにする。
+    const prep = await _withBillingLock(async () => {
+      try {
+        const store = window.CdvPurchase && window.CdvPurchase.store;
+        if (!store) {
+          showDebugError('購入 (purchasePremium)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase})。${cordovaPluginListInfo()}`);
+          return { response: { success: false, reason: 'error' } };
+        }
+        await this.initBilling();
+        const product = store.get(MONETIZATION_CONFIG.billingProductId);
+        const offer = product && product.getOffer && product.getOffer();
+        if (!offer) {
+          showDebugError('購入 (purchasePremium)', `商品「${MONETIZATION_CONFIG.billingProductId}」の購入可能なオファーが見つかりません。product=${product ? `{valid:${product.valid}, canPurchase:${product.canPurchase}, state:${product.state}, offers件数:${(product.offers||[]).length}}` : 'null'}`);
+          return { response: { success: false, reason: 'error' } };
+        }
+        _billingTraceLog = [];
+        _billingTraceStart = Date.now();
+        _traceBilling('order() 呼び出し開始');
+        const resultPromise = new Promise(resolve => {
+          _pendingPurchaseResolvers.push(resolve);
+          // PURCHASE_TIMEOUT_MS経ってもイベントが来なければUI上は諦める
+          // (ユーザーがストアのダイアログをキャンセルした場合など、approved
+          // イベントが永遠に来ないケースの保険)。ただしこのタイムアウトは
+          // あくまで「これ以上UIを待たせない」ためのものであり、
+          // store.when().productUpdated()自体はこの後も生き続けて監視を
+          // 継続する(実機で、ストア側は成立しているのにイベント受信だけ
+          // 60秒以上遅れるケースを確認したため)。
+          setTimeout(() => {
+            _pendingPurchaseResolvers = _pendingPurchaseResolvers.filter(r => r !== resolve);
+            showDebugError('購入 (purchasePremium)', `${PURCHASE_TIMEOUT_MS / 1000}秒待ってもapproved/verifiedイベントが届きませんでした(ストアの購入ダイアログをキャンセルした場合も含みます)。決済自体は完了しており受信が遅延しているだけの可能性があるため、監視は継続します(遅れて届けば自動的にプレミアム状態へ反映されます)。\n\nイベント受信ログ:\n${_formatBillingTrace()}`);
+            resolve(false);
+          }, PURCHASE_TIMEOUT_MS);
+        });
+        await offer.order();
+        return { resultPromise };
+      } catch (e) {
+        showDebugError('購入 (purchasePremium)', e);
+        return { response: { success: false, reason: 'error' } };
       }
-      await this.initBilling();
-      const product = store.get(MONETIZATION_CONFIG.billingProductId);
-      const offer = product && product.getOffer && product.getOffer();
-      if (!offer) {
-        showDebugError('購入 (purchasePremium)', `商品「${MONETIZATION_CONFIG.billingProductId}」の購入可能なオファーが見つかりません。product=${product ? `{valid:${product.valid}, canPurchase:${product.canPurchase}, state:${product.state}, offers件数:${(product.offers||[]).length}}` : 'null'}`);
-        return { success: false, reason: 'error' };
-      }
-      _billingTraceLog = [];
-      _billingTraceStart = Date.now();
-      _traceBilling('order() 呼び出し開始');
-      const resultPromise = new Promise(resolve => {
-        _pendingPurchaseResolvers.push(resolve);
-        // PURCHASE_TIMEOUT_MS経ってもイベントが来なければUI上は諦める
-        // (ユーザーがストアのダイアログをキャンセルした場合など、approved
-        // イベントが永遠に来ないケースの保険)。ただしこのタイムアウトは
-        // あくまで「これ以上UIを待たせない」ためのものであり、
-        // store.when().productUpdated()自体はこの後も生き続けて監視を
-        // 継続する(実機で、ストア側は成立しているのにイベント受信だけ
-        // 60秒以上遅れるケースを確認したため)。
-        setTimeout(() => {
-          _pendingPurchaseResolvers = _pendingPurchaseResolvers.filter(r => r !== resolve);
-          showDebugError('購入 (purchasePremium)', `${PURCHASE_TIMEOUT_MS / 1000}秒待ってもapproved/verifiedイベントが届きませんでした(ストアの購入ダイアログをキャンセルした場合も含みます)。決済自体は完了しており受信が遅延しているだけの可能性があるため、監視は継続します(遅れて届けば自動的にプレミアム状態へ反映されます)。\n\nイベント受信ログ:\n${_formatBillingTrace()}`);
-          resolve(false);
-        }, PURCHASE_TIMEOUT_MS);
-      });
-      await offer.order();
-      const ok = await resultPromise;
-      return ok ? { success: true } : { success: false, reason: 'timeout' };
-    } catch (e) {
-      showDebugError('購入 (purchasePremium)', e);
-      return { success: false, reason: 'error' };
-    }
+    });
+    if (prep.response) return prep.response;
+    const ok = await prep.resultPromise;
+    return ok ? { success: true } : { success: false, reason: 'timeout' };
   },
   getPriceLabel(){
     try {
@@ -3057,6 +3116,18 @@ function _isCredentialAlreadyInUseError(e){
   const msg = String((e && e.message) || '').toLowerCase();
   return code.includes('already-in-use') || code.includes('credential_already_in_use')
     || msg.includes('already-in-use') || msg.includes('already in use');
+}
+// ③(不具合修正・一元化): linkGoogle()/linkApple()はプロバイダごとに二重
+// タップを防ぐが、それとは別に「Googleでログイン」と「Sign in with Apple」を
+// ほぼ同時に(誤タップ等で)押した場合、異なるプロバイダの呼び出し同士が
+// 並行してネイティブの認証UIを要求してしまう可能性がある。課金フロー
+// (Native._withBillingLock)と同じ考え方で、実際にストアの認証UIを
+// 要求しうる呼び出し同士を直列化する共有ロック。
+let _authOpLock = Promise.resolve();
+function _withAuthLock(fn){
+  const run = _authOpLock.catch(() => {}).then(fn);
+  _authOpLock = run.catch(() => {});
+  return run;
 }
 
 /* ---- ゲストプレイヤーへの結果受け取りリンク(Universal Links + claimTokens) ---- */
@@ -3208,9 +3279,72 @@ const CloudSync = {
   // 省略する。初めてそのプロバイダを使う場合(knownLinkedProviders未設定)は、
   // 従来通りlinkWithX()を先に試す(匿名時代のデータをuid切り替えで
   // 失わないようにするため、これは変えない)。
-  async linkGoogle(){
-    if (!this.isAvailable()) { showDebugError('Googleログイン', 'Native.isAvailable()がfalse(ストアアプリ内ではない、またはCloudSync未初期化)'); return false; }
-    // ②(不具合修正): デバッグ:サインアウトやアカウント削除の直後に呼ばれる
+  // ③(不具合修正・一元化): 「Googleでログイン」「Sign in with Apple」の
+  // ボタンには処理中の連打を防ぐdisabled状態が無く、素早く2回タップすると
+  // linkGoogle()/linkApple()が並行して2回走り、ネイティブの認証UIが2回
+  // 連続で要求される不具合が(①②とはまた別の経路で)発生していた。
+  // ①(サインアウト→再サインイン、_initPromise待ちで対策済み)・②(課金
+  // フロー、_withBillingLockで対策済み)と同じ「2回連続認証」が3回目の
+  // 別の場所で再発したことを踏まえ、今後は個別の場当たり対応を重ねず、
+  // Google/Appleへの実際のログイン呼び出し自体をlinkGoogle()/linkApple()の
+  // 薄いラッパーに一元化する。呼び出しの最初(いかなるawaitより前)で、
+  // 同じプロバイダの呼び出しが既に進行中かどうかを同期的にチェックし、
+  // 進行中ならそれと同じPromiseをそのまま返す(=新たな認証UIを要求せず、
+  // 進行中の呼び出しの結果に相乗りする)。この同期チェックはawaitを
+  // 一切挟まないため、JSのシングルスレッド実行の性質上、native側の
+  // ブリッジ呼び出しのタイミングに関わらず確実に機能する。
+  _linkInFlight: { google: null, apple: null },
+  linkGoogle(){
+    if (this._linkInFlight.google) return this._linkInFlight.google;
+    const p = this._linkOrSignIn('google').finally(() => { this._linkInFlight.google = null; });
+    this._linkInFlight.google = p;
+    return p;
+  },
+  // App Store Review Guideline 4.8対応: Googleログインを提供する場合、
+  // Sign in with Appleも同格の選択肢として必ず用意する。
+  linkApple(){
+    if (this._linkInFlight.apple) return this._linkInFlight.apple;
+    const p = this._linkOrSignIn('apple').finally(() => { this._linkInFlight.apple = null; });
+    this._linkInFlight.apple = p;
+    return p;
+  },
+  // linkGoogle()/linkApple()共通の実装本体。
+  //
+  // ⚠️ ここでは必ずAuth.linkWithGoogle/linkWithApple(既存の匿名ユーザーに認証情報を
+  // 「連携」するAPI)を使うこと。以前はAuth.signInWithGoogle/signInWithApple
+  // (「新規サインイン」のAPI)を誤って呼んでおり、匿名時代とは別の新しいuidに
+  // 切り替わってしまっていた。その結果、匿名時代に既にusernames/{name}や
+  // friends/matchHistoryを保存していたユーザーが後からGoogle/Appleでログインすると、
+  // それらのドキュメントは古いuidの持ち物のまま取り残され、以降そのドキュメントへの
+  // 書き込み・削除がfirestore.rules側のisSelf(uid)チェックに落ちて
+  // 「Missing or insufficient permissions」になる実バグの原因だった
+  // (アカウント削除時にusernames/{name}のdeleteDocumentが失敗するケースを実機で確認)。
+  // linkWithX()は「その認証情報は既に別のFirebaseアカウントで使用済み」の場合にだけ
+  // 失敗する(auth/credential-already-in-use等)。機種変更・再インストール後に
+  // 元のアカウントへ戻りたいケースはこれに該当するため、その場合のみ
+  // signInWithX()にフォールバックし、既存アカウントへ切り替える。
+  //
+  // ②(不具合修正): このフォールバック自体は必要だが、linkWithX()の失敗を
+  // 検知するまでにGoogle/Apple側の認証UI(2段階認証含む)を最後まで1回
+  // 完走してしまい、その後signInWithX()で「もう一度」丸ごと認証UIを
+  // やり直すため、結果として2段階認証などが2回連続で求められていた
+  // (サインアウト→同じアカウントで再サインインする場合、credential-
+  // already-in-useに毎回必ず該当するため、この端末で一度でもそのプロバイダを
+  // リンクしたことがあれば、ほぼ確実にこの二度手間が発生する)。
+  // knownLinkedProviders(account.linkedProvidersと違い、サインアウトしても
+  // クリアしない「この端末でこのプロバイダをリンクした実績があるか」の記憶)を
+  // 見て、既に実績があるプロバイダは最初からsignInWithX()を直接呼び、
+  // 失敗が確定しているlinkWithX()の呼び出し(=1回目の認証UI)を丸ごと
+  // 省略する。初めてそのプロバイダを使う場合(knownLinkedProviders未設定)は、
+  // 従来通りlinkWithX()を先に試す(匿名時代のデータをuid切り替えで
+  // 失わないようにするため、これは変えない)。
+  async _linkOrSignIn(provider){
+    const label = provider === 'google' ? 'Googleログイン' : 'Appleログイン';
+    const providerLabel = provider === 'google' ? 'Googleアカウント' : 'Apple ID';
+    const linkMethod = provider === 'google' ? 'linkWithGoogle' : 'linkWithApple';
+    const signInMethod = provider === 'google' ? 'signInWithGoogle' : 'signInWithApple';
+    if (!this.isAvailable()) { showDebugError(label, 'Native.isAvailable()がfalse(ストアアプリ内ではない、またはCloudSync未初期化)'); return false; }
+    // ①(不具合修正): デバッグ:サインアウトやアカウント削除の直後に呼ばれる
     // CloudSync.init()(内部で新しい匿名UIDを確立する_doInit()が非同期に
     // 走る)は、呼び出し元でawaitされていない(fire-and-forget)。ここで
     // in-flightのinitを待たずにログインを開始すると、まだ処理中だった
@@ -3220,92 +3354,51 @@ const CloudSync = {
     // このレースコンディションだった可能性が高い。ensureSignedIn()と
     // 同じ待ち合わせパターンをここでも使う)。
     if (this._initPromise) { await this._initPromise.catch(() => {}); }
-    try {
-      const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
-      if (!Auth || !Auth.linkWithGoogle || !Auth.signInWithGoogle) {
-        const registered = Object.keys((window.Capacitor && window.Capacitor.Plugins) || {}).join(', ') || '(なし)';
-        showDebugError('Googleログイン', `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, linkWithGoogle=${!!(Auth&&Auth.linkWithGoogle)})。ネイティブ側でプラグインが正しく登録されていない可能性があります。登録済みプラグイン一覧: ${registered}`);
-        return false;
-      }
-      let result;
-      if (logState.account.knownLinkedProviders.google) {
-        result = await Auth.signInWithGoogle();
-      } else {
-        try {
-          result = await Auth.linkWithGoogle();
-        } catch (e) {
-          if (_isCredentialAlreadyInUseError(e)) {
-            result = await Auth.signInWithGoogle();
-            logState.ui.notifyBanner = 'このGoogleアカウントは既に登録済みのため、既存のアカウントにログインしました。';
-          } else {
-            throw e;
+    // ③: 実際にストアの認証UIを要求しうる区間を_withAuthLockで直列化し、
+    // Google/Appleへのログインが互いに重ならないようにする(コメントは
+    // _withAuthLock定義箇所参照)。
+    return _withAuthLock(async () => {
+      try {
+        const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
+        if (!Auth || !Auth[linkMethod] || !Auth[signInMethod]) {
+          const registered = Object.keys((window.Capacitor && window.Capacitor.Plugins) || {}).join(', ') || '(なし)';
+          showDebugError(label, `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, ${linkMethod}=${!!(Auth&&Auth[linkMethod])})。ネイティブ側でプラグインが正しく登録されていない可能性があります。登録済みプラグイン一覧: ${registered}`);
+          return false;
+        }
+        let result;
+        if (logState.account.knownLinkedProviders[provider]) {
+          result = await Auth[signInMethod]();
+        } else {
+          try {
+            result = await Auth[linkMethod]();
+          } catch (e) {
+            if (_isCredentialAlreadyInUseError(e)) {
+              result = await Auth[signInMethod]();
+              logState.ui.notifyBanner = `この${providerLabel}は既に登録済みのため、既存のアカウントにログインしました。`;
+            } else {
+              throw e;
+            }
           }
         }
-      }
-      if (result && result.user) {
-        logState.account.uid = result.user.uid;
-        logState.account.isAnonymous = false;
-        logState.account.linkedProviders.google = true;
-        logState.account.knownLinkedProviders.google = true;
-        saveLogState();
-        // ②: ログイン成功直後、保存済みユーザーネームの有無を確認する。
-        await this._syncUsernameAfterLogin();
-        return true;
-      }
-      showDebugError('Googleログイン', `linkWithGoogle()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
-      return false;
-    } catch (e) {
-      console.error('[CloudSync.linkGoogle] failed:', e);
-      showDebugError('Googleログイン (linkGoogle)', e);
-      return false;
-    }
-  },
-  // App Store Review Guideline 4.8対応: Googleログインを提供する場合、
-  // Sign in with Appleも同格の選択肢として必ず用意する。
-  async linkApple(){
-    if (!this.isAvailable()) { showDebugError('Appleログイン', 'Native.isAvailable()がfalse(ストアアプリ内ではない、またはCloudSync未初期化)'); return false; }
-    // ②(不具合修正): linkGoogle()と同じ理由でin-flightの初期化を待つ
-    // (コメントはlinkGoogle()参照)。
-    if (this._initPromise) { await this._initPromise.catch(() => {}); }
-    try {
-      const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
-      if (!Auth || !Auth.linkWithApple || !Auth.signInWithApple) {
-        const registered = Object.keys((window.Capacitor && window.Capacitor.Plugins) || {}).join(', ') || '(なし)';
-        showDebugError('Appleログイン', `FirebaseAuthenticationプラグインが見つかりません(Auth=${!!Auth}, linkWithApple=${!!(Auth&&Auth.linkWithApple)})。ネイティブ側でプラグインが正しく登録されていない可能性があります。登録済みプラグイン一覧: ${registered}`);
+        if (result && result.user) {
+          logState.account.uid = result.user.uid;
+          logState.account.isAnonymous = false;
+          logState.account.linkedProviders[provider] = true;
+          logState.account.knownLinkedProviders[provider] = true;
+          saveLogState();
+          // ②: ログイン成功直後、保存済みユーザーネームの有無を確認する。
+          await this._syncUsernameAfterLogin();
+          return true;
+        }
+        showDebugError(label, `${linkMethod}()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
+        return false;
+      } catch (e) {
+        const fnName = provider === 'google' ? 'linkGoogle' : 'linkApple';
+        console.error(`[CloudSync.${fnName}] failed:`, e);
+        showDebugError(`${label} (${fnName})`, e);
         return false;
       }
-      let result;
-      if (logState.account.knownLinkedProviders.apple) {
-        result = await Auth.signInWithApple();
-      } else {
-        try {
-          result = await Auth.linkWithApple();
-        } catch (e) {
-          if (_isCredentialAlreadyInUseError(e)) {
-            result = await Auth.signInWithApple();
-            logState.ui.notifyBanner = 'このApple IDは既に登録済みのため、既存のアカウントにログインしました。';
-          } else {
-            throw e;
-          }
-        }
-      }
-      if (result && result.user) {
-        logState.account.uid = result.user.uid;
-        logState.account.isAnonymous = false;
-        logState.account.linkedProviders.apple = true;
-        logState.account.knownLinkedProviders.apple = true;
-        saveLogState();
-        // ②: ログイン成功直後、保存済みユーザーネームの有無を確認する。
-        await this._syncUsernameAfterLogin();
-        return true;
-      }
-      showDebugError('Appleログイン', `linkWithApple()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
-      return false;
-    } catch (e) {
-      console.error('[CloudSync.linkApple] failed:', e);
-      showDebugError('Appleログイン (linkApple)', e);
-      return false;
-    }
+    });
   },
 
   // ②: ログイン(linkGoogle/linkApple)直後・起動時に、Firestore側の
@@ -4652,6 +4745,17 @@ async function purchaseFromPaywall(){
   logState.ui.paywallPurchasing = true;
   logState.ui.paywallErrorMsg = null;
   scheduleRenderApp();
+  // ①(不具合修正): 購入処理を始める前に、必ず(最低限)匿名認証済みのUIDを
+  // 確保しておく。CloudSync.init()は起動時にfire-and-forgetで走るため、
+  // これを待たずに購入ボタンが押せてしまうと、isPremiumの同期先となる
+  // uidが未確定のまま購入が成立してしまうおそれがあった(ensureSignedIn()が
+  // 既存のCloudSync._initPromiseを待つのと同じ考え方)。
+  if (CloudSync.isAvailable() && !(await CloudSync.ensureSignedIn())) {
+    logState.ui.paywallPurchasing = false;
+    logState.ui.paywallErrorMsg = 'サインイン状態を確認できませんでした。通信環境をご確認のうえ、もう一度お試しください。';
+    scheduleRenderApp();
+    return;
+  }
   const result = await Native.purchasePremium();
   logState.ui.paywallPurchasing = false;
   if (result.success) {
