@@ -5512,7 +5512,7 @@ function renderPlayerRosterPanel(){
   return `
     <div class="accordion roster-accordion ${open?'open':''}">
       <div class="accordion-head" onclick="toggleAccordion('rosterOpen')">
-        <div class="t">人数・プレイヤー名${activeMemberPresetName ? `<small>⭐ ${escapeHtml(activeMemberPresetName)}</small>` : ''}</div>
+        <div class="t">人数・プレイヤー名${activeMemberPresetName ? `<small>${escapeHtml(activeMemberPresetName)}</small>` : ''}</div>
         <div class="chev">▾</div>
       </div>
       ${open ? `
@@ -5588,7 +5588,7 @@ function renderSettingsAccordion(){
   return `
     <div class="accordion rules-accordion ${open?'open':''}">
       <div class="accordion-head" onclick="toggleAccordion('settingsOpen')">
-        <div class="t">対局ルール設定${activeRulePresetName ? `<small>⭐ ${escapeHtml(activeRulePresetName)}</small>` : ''}</div>
+        <div class="t">対局ルール設定${activeRulePresetName ? `<small>${escapeHtml(activeRulePresetName)}</small>` : ''}</div>
         <div class="chev">▾</div>
       </div>
       ${open ? `
