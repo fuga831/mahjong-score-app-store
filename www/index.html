@@ -2273,12 +2273,22 @@ function calcHanchanResult(hanchan, settings) {
 // 不在だった半荘は、その人のptに一切加算しない(0点として数えることもしない)。
 function calcTotals(hanchans, chips, settings) {
   const totals = {};
-  settings.players.forEach(p => { totals[p] = 0; });
+  // ①(不具合修正): 円換算(money)も、ウマ・オカ・飛び賞と同じく各半荘の
+  // rulesSnapshot(記録時点のレート)で換算してから半荘ごとに積み上げる。
+  // 以前はpt(点数)だけ半荘スナップショットを使い、円換算は最後に現在の
+  // settings.rateを合計ptへ一括適用していたため、対局途中でレートを
+  // 変更すると、既に確定しているはずの過去の半荘の収支(円)まで
+  // 遡って変わってしまっていた(calcCareerStats側では既にこの対策が
+  // 入っており、ここだけ抜けていた)。
+  const moneyFromScores = {};
+  settings.players.forEach(p => { totals[p] = 0; moneyFromScores[p] = 0; });
   hanchans.forEach(h => {
     const { pt, players } = calcHanchanResult(h, settings);
+    const hanchanRate = (h.rulesSnapshot && h.rulesSnapshot.rate != null) ? h.rulesSnapshot.rate : settings.rate;
     players.forEach(p => {
-      if (!(p in totals)) totals[p] = 0;
+      if (!(p in totals)) { totals[p] = 0; moneyFromScores[p] = 0; }
       totals[p] += pt[p];
+      moneyFromScores[p] += pt[p] * hanchanRate;
     });
   });
   // ④: totals(上のループ)には、控え交代で退いた元アクティブメンバーなど、
@@ -2293,7 +2303,7 @@ function calcTotals(hanchans, chips, settings) {
   const chipMoney = {}; // 合計金額(money)のうち、チップ分だけの内訳(円)。表示の2段組みで使う。
   allNames.forEach(p => {
     chipMoney[p] = (chips[p] || 0) * settings.chipUnitYen;
-    money[p] = totals[p] * settings.rate + chipMoney[p];
+    money[p] = moneyFromScores[p] + chipMoney[p];
   });
   return { pt: totals, money, chipMoney, chipImbalance: chipSum !== 0, chipSum };
 }
@@ -3270,29 +3280,64 @@ const CloudSync = {
   // users/{uid}ドキュメントを取得する(既にユーザーネームを設定済みかどうかを
   // 確認するため。同じアカウントで別端末からログインした場合も、この取得で
   // 保存済みのユーザーネームをそのまま反映できる)。
+  // 戻り値は{ok, data}。okは「取得自体が成功したか」を表し、dataが無い
+  // (=本当にusernameが未設定)場合と取得そのものが失敗した場合を
+  // _syncUsernameAfterLogin側で区別できるようにする。
   async fetchAccountProfile(uid){
-    if (!this.isAvailable() || !uid) return null;
+    if (!this.isAvailable() || !uid) return { ok: false, data: null };
     try {
       const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
-      if (!Firestore) return null;
+      if (!Firestore) return { ok: false, data: null };
       const doc = await Firestore.getDocument({ reference: `users/${uid}` });
-      return (doc && doc.snapshot && doc.snapshot.data) || null;
-    } catch (e) { return null; }
+      return { ok: true, data: (doc && doc.snapshot && doc.snapshot.data) || null };
+    } catch (e) { return { ok: false, data: null }; }
   },
-  // ②: ログイン成功直後に呼ぶ。既にユーザーネームが設定済みならそれを
-  // ローカルへ反映してそのまま使わせ、未設定ならusernameRequiredを立てて
-  // 必須設定モーダル(renderUsernameRequiredModal)を表示させる。
+  // ②(不具合修正): ログイン成功直後に呼ぶ。既にユーザーネームが設定済みなら
+  // それをローカルへ反映してそのまま使わせ、未設定ならusernameRequiredを
+  // 立てて必須設定モーダル(renderUsernameRequiredModal)を表示させる。
+  //
+  // サインアウト→同じアカウントで再サインインすると、設定済みのはずの
+  // ユーザーネームが未設定と誤判定され、モーダルが再表示される不具合が
+  // あった。原因はここのFirestore読み取り(fetchAccountProfile)で、
+  // サインイン直後はFirestoreプラグイン側の内部トークンキャッシュが
+  // まだ更新されておらず、getDocumentがpermission-deniedで失敗することが
+  // ある(_forceRefreshIdTokenのコメント参照。deleteAccount/createClaimToken
+  // で確認済みの既知の類の不具合)。この「取得自体の失敗」を「username
+  // フィールドが無い(=本当に未設定)」と区別せず同じ扱いにしていたため、
+  // 毎回このタイミングでたまたま読み取りが失敗すると、実際には設定済みの
+  // ユーザーネームを持つアカウントでも必須モーダルが出てしまっていた。
+  // 対策: (1)読み取り前に必ずIDトークンを強制リフレッシュする、
+  // (2)それでも取得自体が失敗した場合、少し待ってから一度だけ再試行する
+  // (サインアウト直後の再サインインではローカルのusernameも一緒に
+  // リセットされているため、(3)のローカル値フォールバックだけでは
+  // このケースを救えない。トークン反映タイミングのズレをやり過ごすための
+  // 実質的な対策はこちら)、(3)それでも取得自体が失敗した場合は
+  // 「未設定と確定できない」として、既にローカルにusernameが残っていれば
+  // それを信頼して継続させ、モーダルを誤って出さない。
   async _syncUsernameAfterLogin(){
-    const profile = await this.fetchAccountProfile(logState.account.uid);
-    if (profile && profile.username) {
-      logState.account.username = profile.username;
-      logState.account.usernameChangeCount = profile.usernameChangeCount || 0;
+    await this._forceRefreshIdToken('ログイン後のユーザーネーム確認');
+    let result = await this.fetchAccountProfile(logState.account.uid);
+    if (!result.ok) {
+      await new Promise(resolve => setTimeout(resolve, 800));
+      result = await this.fetchAccountProfile(logState.account.uid);
+    }
+    if (result.data && result.data.username) {
+      logState.account.username = result.data.username;
+      logState.account.usernameChangeCount = result.data.usernameChangeCount || 0;
       logState.ui.usernameRequired = false;
-    } else {
+    } else if (result.ok) {
+      // 取得は成功したが、Firestore側に本当にusernameが無い(初回ログイン等)。
+      logState.ui.usernameRequired = true;
+      logState.ui.usernameInput = '';
+      logState.ui.usernameError = null;
+    } else if (!logState.account.username) {
+      // 取得自体が失敗し、かつローカルにも手がかりが無い場合のみモーダルを出す。
       logState.ui.usernameRequired = true;
       logState.ui.usernameInput = '';
       logState.ui.usernameError = null;
     }
+    // elseケース(取得失敗だがローカルにusernameが残っている)は何もしない
+    // (usernameRequiredをtrueにもfalseにもせず、既存のローカル状態を維持する)。
     saveLogState();
   },
   // ユーザーネームは一意。usernames/{normalized}ドキュメントの有無で申請の
