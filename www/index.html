@@ -2273,12 +2273,22 @@ function calcHanchanResult(hanchan, settings) {
 // 不在だった半荘は、その人のptに一切加算しない(0点として数えることもしない)。
 function calcTotals(hanchans, chips, settings) {
   const totals = {};
-  settings.players.forEach(p => { totals[p] = 0; });
+  // ①(不具合修正): 円換算(money)も、ウマ・オカ・飛び賞と同じく各半荘の
+  // rulesSnapshot(記録時点のレート)で換算してから半荘ごとに積み上げる。
+  // 以前はpt(点数)だけ半荘スナップショットを使い、円換算は最後に現在の
+  // settings.rateを合計ptへ一括適用していたため、対局途中でレートを
+  // 変更すると、既に確定しているはずの過去の半荘の収支(円)まで
+  // 遡って変わってしまっていた(calcCareerStats側では既にこの対策が
+  // 入っており、ここだけ抜けていた)。
+  const moneyFromScores = {};
+  settings.players.forEach(p => { totals[p] = 0; moneyFromScores[p] = 0; });
   hanchans.forEach(h => {
     const { pt, players } = calcHanchanResult(h, settings);
+    const hanchanRate = (h.rulesSnapshot && h.rulesSnapshot.rate != null) ? h.rulesSnapshot.rate : settings.rate;
     players.forEach(p => {
-      if (!(p in totals)) totals[p] = 0;
+      if (!(p in totals)) { totals[p] = 0; moneyFromScores[p] = 0; }
       totals[p] += pt[p];
+      moneyFromScores[p] += pt[p] * hanchanRate;
     });
   });
   // ④: totals(上のループ)には、控え交代で退いた元アクティブメンバーなど、
@@ -2293,7 +2303,7 @@ function calcTotals(hanchans, chips, settings) {
   const chipMoney = {}; // 合計金額(money)のうち、チップ分だけの内訳(円)。表示の2段組みで使う。
   allNames.forEach(p => {
     chipMoney[p] = (chips[p] || 0) * settings.chipUnitYen;
-    money[p] = totals[p] * settings.rate + chipMoney[p];
+    money[p] = moneyFromScores[p] + chipMoney[p];
   });
   return { pt: totals, money, chipMoney, chipImbalance: chipSum !== 0, chipSum };
 }
@@ -2639,6 +2649,12 @@ const LEGAL_CONFIG = {
   supportUrl: 'https://fuga831.github.io/mahjong-score-app-store/support.html', // よくある質問(docs/support.html)
   contactEmail: 'gechi.studio@gmail.com', // docs/terms.html・docs/privacy.html・docs/support.html記載の連絡先と同じアドレス
 };
+// ③: 「友だちに送る」で共有するアプリのリンク。他の場所にはハードコードせず、
+// 必ずこの定数経由で参照すること。今はApp Store Connectで発行したTestFlight
+// のベータ版公開リンク(ベータ版参加用リンク)。正式にApp Store公開後は
+// https://apps.apple.com/app/id〇〇〇〇〇〇〇〇 の形式のURLへ、ここ1箇所を
+// 書き換えるだけで反映される。
+const SHARE_LINK_URL = 'https://testflight.apple.com/join/XXXXXXXX'; // TODO: App Store Connectで発行した実際のTestFlightリンクに差し替える
 // 実行環境(iOS/Android)を返す。Capacitor.getPlatform()はCapacitor標準の
 // APIで 'ios' | 'android' | 'web' を返す。Web(非ネイティブ)ではNative.
 // isNativeApp()がfalseになり、これを使う各メソッドの先頭でreturnするため、
@@ -3181,6 +3197,16 @@ const CloudSync = {
   // 失わないようにするため、これは変えない)。
   async linkGoogle(){
     if (!this.isAvailable()) { showDebugError('Googleログイン', 'Native.isAvailable()がfalse(ストアアプリ内ではない、またはCloudSync未初期化)'); return false; }
+    // ②(不具合修正): デバッグ:サインアウトやアカウント削除の直後に呼ばれる
+    // CloudSync.init()(内部で新しい匿名UIDを確立する_doInit()が非同期に
+    // 走る)は、呼び出し元でawaitされていない(fire-and-forget)。ここで
+    // in-flightのinitを待たずにログインを開始すると、まだ処理中だった
+    // 古い匿名初期化が「後から」完了してlogState.account.uid/isAnonymousを
+    // 上書きし、直前に成功したはずのログイン結果を消してしまうことがある
+    // (再サインイン時にユーザーネームが引き継がれない不具合の実体は、
+    // このレースコンディションだった可能性が高い。ensureSignedIn()と
+    // 同じ待ち合わせパターンをここでも使う)。
+    if (this._initPromise) { await this._initPromise.catch(() => {}); }
     try {
       const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
       if (!Auth || !Auth.linkWithGoogle || !Auth.signInWithGoogle) {
@@ -3225,6 +3251,9 @@ const CloudSync = {
   // Sign in with Appleも同格の選択肢として必ず用意する。
   async linkApple(){
     if (!this.isAvailable()) { showDebugError('Appleログイン', 'Native.isAvailable()がfalse(ストアアプリ内ではない、またはCloudSync未初期化)'); return false; }
+    // ②(不具合修正): linkGoogle()と同じ理由でin-flightの初期化を待つ
+    // (コメントはlinkGoogle()参照)。
+    if (this._initPromise) { await this._initPromise.catch(() => {}); }
     try {
       const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
       if (!Auth || !Auth.linkWithApple || !Auth.signInWithApple) {
@@ -3270,29 +3299,64 @@ const CloudSync = {
   // users/{uid}ドキュメントを取得する(既にユーザーネームを設定済みかどうかを
   // 確認するため。同じアカウントで別端末からログインした場合も、この取得で
   // 保存済みのユーザーネームをそのまま反映できる)。
+  // 戻り値は{ok, data}。okは「取得自体が成功したか」を表し、dataが無い
+  // (=本当にusernameが未設定)場合と取得そのものが失敗した場合を
+  // _syncUsernameAfterLogin側で区別できるようにする。
   async fetchAccountProfile(uid){
-    if (!this.isAvailable() || !uid) return null;
+    if (!this.isAvailable() || !uid) return { ok: false, data: null };
     try {
       const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
-      if (!Firestore) return null;
+      if (!Firestore) return { ok: false, data: null };
       const doc = await Firestore.getDocument({ reference: `users/${uid}` });
-      return (doc && doc.snapshot && doc.snapshot.data) || null;
-    } catch (e) { return null; }
+      return { ok: true, data: (doc && doc.snapshot && doc.snapshot.data) || null };
+    } catch (e) { return { ok: false, data: null }; }
   },
-  // ②: ログイン成功直後に呼ぶ。既にユーザーネームが設定済みならそれを
-  // ローカルへ反映してそのまま使わせ、未設定ならusernameRequiredを立てて
-  // 必須設定モーダル(renderUsernameRequiredModal)を表示させる。
+  // ②(不具合修正): ログイン成功直後に呼ぶ。既にユーザーネームが設定済みなら
+  // それをローカルへ反映してそのまま使わせ、未設定ならusernameRequiredを
+  // 立てて必須設定モーダル(renderUsernameRequiredModal)を表示させる。
+  //
+  // サインアウト→同じアカウントで再サインインすると、設定済みのはずの
+  // ユーザーネームが未設定と誤判定され、モーダルが再表示される不具合が
+  // あった。原因はここのFirestore読み取り(fetchAccountProfile)で、
+  // サインイン直後はFirestoreプラグイン側の内部トークンキャッシュが
+  // まだ更新されておらず、getDocumentがpermission-deniedで失敗することが
+  // ある(_forceRefreshIdTokenのコメント参照。deleteAccount/createClaimToken
+  // で確認済みの既知の類の不具合)。この「取得自体の失敗」を「username
+  // フィールドが無い(=本当に未設定)」と区別せず同じ扱いにしていたため、
+  // 毎回このタイミングでたまたま読み取りが失敗すると、実際には設定済みの
+  // ユーザーネームを持つアカウントでも必須モーダルが出てしまっていた。
+  // 対策: (1)読み取り前に必ずIDトークンを強制リフレッシュする、
+  // (2)それでも取得自体が失敗した場合、少し待ってから一度だけ再試行する
+  // (サインアウト直後の再サインインではローカルのusernameも一緒に
+  // リセットされているため、(3)のローカル値フォールバックだけでは
+  // このケースを救えない。トークン反映タイミングのズレをやり過ごすための
+  // 実質的な対策はこちら)、(3)それでも取得自体が失敗した場合は
+  // 「未設定と確定できない」として、既にローカルにusernameが残っていれば
+  // それを信頼して継続させ、モーダルを誤って出さない。
   async _syncUsernameAfterLogin(){
-    const profile = await this.fetchAccountProfile(logState.account.uid);
-    if (profile && profile.username) {
-      logState.account.username = profile.username;
-      logState.account.usernameChangeCount = profile.usernameChangeCount || 0;
+    await this._forceRefreshIdToken('ログイン後のユーザーネーム確認');
+    let result = await this.fetchAccountProfile(logState.account.uid);
+    if (!result.ok) {
+      await new Promise(resolve => setTimeout(resolve, 800));
+      result = await this.fetchAccountProfile(logState.account.uid);
+    }
+    if (result.data && result.data.username) {
+      logState.account.username = result.data.username;
+      logState.account.usernameChangeCount = result.data.usernameChangeCount || 0;
       logState.ui.usernameRequired = false;
-    } else {
+    } else if (result.ok) {
+      // 取得は成功したが、Firestore側に本当にusernameが無い(初回ログイン等)。
+      logState.ui.usernameRequired = true;
+      logState.ui.usernameInput = '';
+      logState.ui.usernameError = null;
+    } else if (!logState.account.username) {
+      // 取得自体が失敗し、かつローカルにも手がかりが無い場合のみモーダルを出す。
       logState.ui.usernameRequired = true;
       logState.ui.usernameInput = '';
       logState.ui.usernameError = null;
     }
+    // elseケース(取得失敗だがローカルにusernameが残っている)は何もしない
+    // (usernameRequiredをtrueにもfalseにもせず、既存のローカル状態を維持する)。
     saveLogState();
   },
   // ユーザーネームは一意。usernames/{normalized}ドキュメントの有無で申請の
@@ -4072,6 +4136,23 @@ CloudSync.init().then(async () => {
   await _restorePurchasesOnBoot;
   CloudSync.syncPremiumStatus();
 });
+
+// ①: 「課金(広告削除・記録し放題)は端末に紐づき、アカウント(ユーザーネーム・
+// フレンド・対局履歴)とは独立して継続する」という設計を、アカウント削除・
+// デバッグサインアウトで新しい匿名UIDに切り替わった直後にも成立させる
+// ためのヘルパー。起動時(_restorePurchasesOnBoot + 上のCloudSync.init().then)
+// と同じ処理を、新しいUIDが確立した後にも行う。これにより、同じ端末で
+// 購入済みである限り、手動で「購入を復元」を押さなくても自動的に
+// 新しいアカウントへ課金特典が反映される。
+async function resyncPurchaseStateAfterReinit(){
+  const restored = await Native.restorePurchases();
+  if (restored !== null && restored !== logState.settings.isPremium) {
+    logState.settings.isPremium = restored;
+    saveLogState();
+    scheduleRenderApp();
+  }
+  await CloudSync.syncPremiumStatus();
+}
 
 // ---- ゲストプレイヤーへの結果受け取りリンク(Universal Links) ----
 // Universal Links経由でアプリが直接起動された場合、iOS側(AppDelegate.swift の
@@ -6655,6 +6736,15 @@ function buildShareText(players, totals, headerLine){
   const lines = order.map((p,i) => `${i+1}位 ${p}　${formatMoney(totals.money[p])}`);
   return `${headerLine ? headerLine + '\n\n' : ''}${lines.join('\n')}`;
 }
+// ③: ハンバーガーメニューの「友だちに送る」。iOS標準の共有シート
+// (UIActivityViewController、WKWebViewのnavigator.share経由)でLINE等へ
+// アプリ紹介文+リンクを送れるようにする。shareText()は対局結果シェアと
+// 同じ既存の共有処理(navigator.share→失敗時クリップボードへフォールバック)
+// をそのまま流用する。
+function shareAppInvite(){
+  const text = `麻雀のセット打ちがはかどるアプリ「雀スコア」を使ってみませんか？\n点数計算から成績記録までこれ1つです。\n${SHARE_LINK_URL}`;
+  shareText(text, '雀スコアを友だちに紹介');
+}
 async function shareText(text, title){
   if (navigator.share) {
     try {
@@ -6704,7 +6794,7 @@ function renderHistoryActionBar(){
         ? `<button class="history-action-btn premium" disabled>✓ プレミアム会員</button>`
         : `<button class="history-action-btn" onclick="openPaywallFromMenu()">💎 課金する</button>`}
       <button class="history-action-btn" onclick="openHelpModal()">📖 使い方</button>
-      <a class="history-action-btn" href="mailto:${escapeHtml(LEGAL_CONFIG.contactEmail)}">✉️ お問い合わせ</a>
+      <button class="history-action-btn" onclick="shareAppInvite()">🔗 友だちに送る</button>
       <button class="history-action-btn" onclick="openOtherMenu()">⋯ その他</button>
     </div>`;
 }
@@ -6937,7 +7027,9 @@ async function confirmDeleteAccountFromMenu(){
   logState.ui.usernameRequired = false; // ②: 匿名アカウントに戻るため、必須設定モーダルも解除する
   saveLogState();
   scheduleRenderApp();
-  CloudSync.init(); // 新しい匿名アカウントとして再初期化
+  // ①: 新しい匿名UIDが確立したら、端末のストア購入状態を新UIDへ同期する
+  // (同じ端末で購入済みなら、アカウント削除後も自動的に課金特典が続く)。
+  CloudSync.init().then(resyncPurchaseStateAfterReinit); // 新しい匿名アカウントとして再初期化
 
   if (result.error === 'auth') {
     // Firestore側のデータは削除済みだが、Authユーザー自体の削除には失敗している
@@ -6987,7 +7079,8 @@ async function debugSignOut(){
   logState.ui.notifyBanner = 'デバッグ:サインアウトしました。新しい匿名アカウントとして再初期化します。';
   saveLogState();
   scheduleRenderApp();
-  CloudSync.init(); // 新しい匿名アカウントとして再初期化(ensureSignedIn()もこれを待つ)
+  // ①: 新しい匿名UIDが確立したら、端末のストア購入状態を新UIDへ同期する。
+  CloudSync.init().then(resyncPurchaseStateAfterReinit); // 新しい匿名アカウントとして再初期化(ensureSignedIn()もこれを待つ)
 }
 function renderOtherModal(){
   const root = document.getElementById('otherModalRoot');
@@ -7032,6 +7125,9 @@ function renderOtherModal(){
             </div>
             <a class="other-menu-item" href="${LEGAL_CONFIG.supportUrl}" target="_blank" rel="noopener">
               <span>よくある質問・サポート</span><span class="arrow">›</span>
+            </a>
+            <a class="other-menu-item" href="mailto:${escapeHtml(LEGAL_CONFIG.contactEmail)}">
+              <span>お問い合わせ</span><span class="arrow">›</span>
             </a>
             <a class="other-menu-item" href="${LEGAL_CONFIG.termsUrl}" target="_blank" rel="noopener">
               <span>利用規約</span><span class="arrow">›</span>
