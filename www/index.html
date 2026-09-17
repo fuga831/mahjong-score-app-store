@@ -374,7 +374,7 @@
   .term-tip-btn:active{background:var(--felt-1);color:var(--ivory);}
   .term-tip-popover{
     position:fixed;
-    z-index:60;
+    z-index:80; /* ③: .history-modal-overlay(モーダル本体)より常に手前に表示する */
     max-width:min(78vw, 260px);
     background:var(--felt-1);
     border:1px solid var(--gold);
@@ -951,7 +951,11 @@
     position:fixed;
     inset:0;
     background:rgba(5,16,12,.72);
-    z-index:50;
+    /* ③(不具合修正): 以前はz-index:50で.debug-error-banner(70)より背面に
+       あったため、購入タイムアウト等でデバッグバナーが表示されると、開いて
+       いるモーダル(ペイウォール等)の閉じるボタンがバナーに覆われてクリック
+       できなくなっていた。モーダルは常にデバッグバナーより手前に出す。 */
+    z-index:75;
     display:flex;
     align-items:flex-end;
     justify-content:center;
@@ -2684,6 +2688,22 @@ function admobConfigForPlatform(){
 
 let _billingReady = false;
 let _pendingPurchaseResolvers = [];
+// ②(不具合修正): 起動時に自動実行される_restorePurchasesOnBoot(Native.
+// restorePurchases())と、ユーザーが購入ボタン/「購入を復元」を押した時の
+// 呼び出しが短時間に重なると、それぞれが独立にStoreKit/Play Billing側の
+// ネイティブ認証(Apple ID・Face ID確認等、店頭のlinkWithX()/signInWithX()に
+// 相当する「認証を求める呼び出し」)を要求してしまい、以前linkGoogle/
+// linkAppleで発生していた「2回連続認証」と同種の体験を引き起こしていた。
+// restorePurchases()とpurchasePremium()の、実際にストアの認証UIを
+// 要求しうる区間をこのロックで直列化し、同時に複数のStoreKit操作が
+// 走らないようにする(ensureSignedIn()がCloudSync._initPromiseを待つのと
+// 同じ考え方)。
+let _billingOpLock = Promise.resolve();
+function _withBillingLock(fn){
+  const run = _billingOpLock.catch(() => {}).then(fn);
+  _billingOpLock = run.catch(() => {});
+  return run;
+}
 function _resolvePendingPurchase(success){
   const resolvers = _pendingPurchaseResolvers.splice(0);
   resolvers.forEach(r => r(success));
@@ -2921,20 +2941,23 @@ const Native = {
   // 非ネイティブ環境か通信エラー等。呼び出し側は既存のisPremium値を維持すること)。
   async restorePurchases(){
     if (!this.isNativeApp()) return null;
-    try {
-      const store = window.CdvPurchase && window.CdvPurchase.store;
-      if (!store) {
-        showDebugError('購入情報の復元 (restorePurchases)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase})。${cordovaPluginListInfo()}`);
+    // ②: purchasePremium()の認証区間(prepare+order())と重ならないよう直列化する。
+    return _withBillingLock(async () => {
+      try {
+        const store = window.CdvPurchase && window.CdvPurchase.store;
+        if (!store) {
+          showDebugError('購入情報の復元 (restorePurchases)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase})。${cordovaPluginListInfo()}`);
+          return null;
+        }
+        await this.initBilling();
+        await store.restorePurchases();
+        const product = store.get(MONETIZATION_CONFIG.billingProductId);
+        return !!(product && product.owned);
+      } catch (e) {
+        showDebugError('購入情報の復元 (restorePurchases)', e);
         return null;
       }
-      await this.initBilling();
-      await store.restorePurchases();
-      const product = store.get(MONETIZATION_CONFIG.billingProductId);
-      return !!(product && product.owned);
-    } catch (e) {
-      showDebugError('購入情報の復元 (restorePurchases)', e);
-      return null;
-    }
+    });
   },
   // 戻り値: { success: true } | { success: false, reason: 'not_native'|'error'|'timeout' }
   //   'timeout'は「決済自体は成立しているがイベント受信が遅れているだけ」の
@@ -2943,44 +2966,52 @@ const Native = {
   //   は生き続けており、遅れて届けば自動的にisPremiumへ反映される。
   async purchasePremium(){
     if (!this.isNativeApp()) return { success: false, reason: 'not_native' };
-    try {
-      const store = window.CdvPurchase && window.CdvPurchase.store;
-      if (!store) {
-        showDebugError('購入 (purchasePremium)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase})。${cordovaPluginListInfo()}`);
-        return { success: false, reason: 'error' };
+    // ②: 実際にストアの認証UIを要求しうる区間(店舗への接続確立〜order()呼び出し
+    // まで)だけを_withBillingLockで直列化し、restorePurchases()と重ならない
+    // ようにする。approved/verifiedイベントを待つ区間(最大90秒)はロックの
+    // 外側にして、その間ずっと「購入を復元」等の他の操作をブロックしないようにする。
+    const prep = await _withBillingLock(async () => {
+      try {
+        const store = window.CdvPurchase && window.CdvPurchase.store;
+        if (!store) {
+          showDebugError('購入 (purchasePremium)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase})。${cordovaPluginListInfo()}`);
+          return { response: { success: false, reason: 'error' } };
+        }
+        await this.initBilling();
+        const product = store.get(MONETIZATION_CONFIG.billingProductId);
+        const offer = product && product.getOffer && product.getOffer();
+        if (!offer) {
+          showDebugError('購入 (purchasePremium)', `商品「${MONETIZATION_CONFIG.billingProductId}」の購入可能なオファーが見つかりません。product=${product ? `{valid:${product.valid}, canPurchase:${product.canPurchase}, state:${product.state}, offers件数:${(product.offers||[]).length}}` : 'null'}`);
+          return { response: { success: false, reason: 'error' } };
+        }
+        _billingTraceLog = [];
+        _billingTraceStart = Date.now();
+        _traceBilling('order() 呼び出し開始');
+        const resultPromise = new Promise(resolve => {
+          _pendingPurchaseResolvers.push(resolve);
+          // PURCHASE_TIMEOUT_MS経ってもイベントが来なければUI上は諦める
+          // (ユーザーがストアのダイアログをキャンセルした場合など、approved
+          // イベントが永遠に来ないケースの保険)。ただしこのタイムアウトは
+          // あくまで「これ以上UIを待たせない」ためのものであり、
+          // store.when().productUpdated()自体はこの後も生き続けて監視を
+          // 継続する(実機で、ストア側は成立しているのにイベント受信だけ
+          // 60秒以上遅れるケースを確認したため)。
+          setTimeout(() => {
+            _pendingPurchaseResolvers = _pendingPurchaseResolvers.filter(r => r !== resolve);
+            showDebugError('購入 (purchasePremium)', `${PURCHASE_TIMEOUT_MS / 1000}秒待ってもapproved/verifiedイベントが届きませんでした(ストアの購入ダイアログをキャンセルした場合も含みます)。決済自体は完了しており受信が遅延しているだけの可能性があるため、監視は継続します(遅れて届けば自動的にプレミアム状態へ反映されます)。\n\nイベント受信ログ:\n${_formatBillingTrace()}`);
+            resolve(false);
+          }, PURCHASE_TIMEOUT_MS);
+        });
+        await offer.order();
+        return { resultPromise };
+      } catch (e) {
+        showDebugError('購入 (purchasePremium)', e);
+        return { response: { success: false, reason: 'error' } };
       }
-      await this.initBilling();
-      const product = store.get(MONETIZATION_CONFIG.billingProductId);
-      const offer = product && product.getOffer && product.getOffer();
-      if (!offer) {
-        showDebugError('購入 (purchasePremium)', `商品「${MONETIZATION_CONFIG.billingProductId}」の購入可能なオファーが見つかりません。product=${product ? `{valid:${product.valid}, canPurchase:${product.canPurchase}, state:${product.state}, offers件数:${(product.offers||[]).length}}` : 'null'}`);
-        return { success: false, reason: 'error' };
-      }
-      _billingTraceLog = [];
-      _billingTraceStart = Date.now();
-      _traceBilling('order() 呼び出し開始');
-      const resultPromise = new Promise(resolve => {
-        _pendingPurchaseResolvers.push(resolve);
-        // PURCHASE_TIMEOUT_MS経ってもイベントが来なければUI上は諦める
-        // (ユーザーがストアのダイアログをキャンセルした場合など、approved
-        // イベントが永遠に来ないケースの保険)。ただしこのタイムアウトは
-        // あくまで「これ以上UIを待たせない」ためのものであり、
-        // store.when().productUpdated()自体はこの後も生き続けて監視を
-        // 継続する(実機で、ストア側は成立しているのにイベント受信だけ
-        // 60秒以上遅れるケースを確認したため)。
-        setTimeout(() => {
-          _pendingPurchaseResolvers = _pendingPurchaseResolvers.filter(r => r !== resolve);
-          showDebugError('購入 (purchasePremium)', `${PURCHASE_TIMEOUT_MS / 1000}秒待ってもapproved/verifiedイベントが届きませんでした(ストアの購入ダイアログをキャンセルした場合も含みます)。決済自体は完了しており受信が遅延しているだけの可能性があるため、監視は継続します(遅れて届けば自動的にプレミアム状態へ反映されます)。\n\nイベント受信ログ:\n${_formatBillingTrace()}`);
-          resolve(false);
-        }, PURCHASE_TIMEOUT_MS);
-      });
-      await offer.order();
-      const ok = await resultPromise;
-      return ok ? { success: true } : { success: false, reason: 'timeout' };
-    } catch (e) {
-      showDebugError('購入 (purchasePremium)', e);
-      return { success: false, reason: 'error' };
-    }
+    });
+    if (prep.response) return prep.response;
+    const ok = await prep.resultPromise;
+    return ok ? { success: true } : { success: false, reason: 'timeout' };
   },
   getPriceLabel(){
     try {
@@ -4652,6 +4683,17 @@ async function purchaseFromPaywall(){
   logState.ui.paywallPurchasing = true;
   logState.ui.paywallErrorMsg = null;
   scheduleRenderApp();
+  // ①(不具合修正): 購入処理を始める前に、必ず(最低限)匿名認証済みのUIDを
+  // 確保しておく。CloudSync.init()は起動時にfire-and-forgetで走るため、
+  // これを待たずに購入ボタンが押せてしまうと、isPremiumの同期先となる
+  // uidが未確定のまま購入が成立してしまうおそれがあった(ensureSignedIn()が
+  // 既存のCloudSync._initPromiseを待つのと同じ考え方)。
+  if (CloudSync.isAvailable() && !(await CloudSync.ensureSignedIn())) {
+    logState.ui.paywallPurchasing = false;
+    logState.ui.paywallErrorMsg = 'サインイン状態を確認できませんでした。通信環境をご確認のうえ、もう一度お試しください。';
+    scheduleRenderApp();
+    return;
+  }
   const result = await Native.purchasePremium();
   logState.ui.paywallPurchasing = false;
   if (result.success) {
