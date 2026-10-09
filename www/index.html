@@ -2676,11 +2676,8 @@ const LEGAL_CONFIG = {
   contactEmail: 'gechi.studio@gmail.com', // docs/terms.html・docs/privacy.html・docs/support.html記載の連絡先と同じアドレス
 };
 // ③: 「友だちに送る」で共有するアプリのリンク。他の場所にはハードコードせず、
-// 必ずこの定数経由で参照すること。今はApp Store Connectで発行したTestFlight
-// のベータ版公開リンク(ベータ版参加用リンク)。正式にApp Store公開後は
-// https://apps.apple.com/app/id〇〇〇〇〇〇〇〇 の形式のURLへ、ここ1箇所を
-// 書き換えるだけで反映される。
-const SHARE_LINK_URL = 'https://testflight.apple.com/join/XXXXXXXX'; // TODO: App Store Connectで発行した実際のTestFlightリンクに差し替える
+// 必ずこの定数経由で参照すること。App Store公開後の正式なアプリページURL。
+const SHARE_LINK_URL = 'https://apps.apple.com/app/id6810488211';
 // 実行環境(iOS/Android)を返す。Capacitor.getPlatform()はCapacitor標準の
 // APIで 'ios' | 'android' | 'web' を返す。Web(非ネイティブ)ではNative.
 // isNativeApp()がfalseになり、これを使う各メソッドの先頭でreturnするため、
@@ -3049,22 +3046,39 @@ const Native = {
         _billingTraceLog = [];
         _billingTraceStart = Date.now();
         _traceBilling('order() 呼び出し開始');
+        let resolveResult, timeoutId;
         const resultPromise = new Promise(resolve => {
+          resolveResult = resolve;
           _pendingPurchaseResolvers.push(resolve);
           // PURCHASE_TIMEOUT_MS経ってもイベントが来なければUI上は諦める
-          // (ユーザーがストアのダイアログをキャンセルした場合など、approved
-          // イベントが永遠に来ないケースの保険)。ただしこのタイムアウトは
+          // (approvedイベントが永遠に来ないケースの保険)。ただしこのタイムアウトは
           // あくまで「これ以上UIを待たせない」ためのものであり、
           // store.when().productUpdated()自体はこの後も生き続けて監視を
           // 継続する(実機で、ストア側は成立しているのにイベント受信だけ
           // 60秒以上遅れるケースを確認したため)。
-          setTimeout(() => {
+          timeoutId = setTimeout(() => {
             _pendingPurchaseResolvers = _pendingPurchaseResolvers.filter(r => r !== resolve);
-            showDebugError('購入 (purchasePremium)', `${PURCHASE_TIMEOUT_MS / 1000}秒待ってもapproved/verifiedイベントが届きませんでした(ストアの購入ダイアログをキャンセルした場合も含みます)。決済自体は完了しており受信が遅延しているだけの可能性があるため、監視は継続します(遅れて届けば自動的にプレミアム状態へ反映されます)。\n\nイベント受信ログ:\n${_formatBillingTrace()}`);
+            showDebugError('購入 (purchasePremium)', `${PURCHASE_TIMEOUT_MS / 1000}秒待ってもapproved/verifiedイベントが届きませんでした。決済自体は完了しており受信が遅延しているだけの可能性があるため、監視は継続します(遅れて届けば自動的にプレミアム状態へ反映されます)。\n\nイベント受信ログ:\n${_formatBillingTrace()}`);
             resolve(false);
           }, PURCHASE_TIMEOUT_MS);
         });
-        await offer.order();
+        const orderResult = await offer.order();
+        // ④(不具合修正): ユーザーがストアの購入ダイアログをキャンセルした場合、
+        // approved/verifiedイベントは一切発火せず、以前はPURCHASE_TIMEOUT_MS
+        // (90秒)経過するまで「処理中…」のまま待たされ、最終的にキャンセルとは
+        // 無関係な「反映に時間がかかっています」という文言が出てしまっていた。
+        // cordova-plugin-purchase(Apple App Store実装)はstore.when()に
+        // cancelled()イベント自体を持たず、キャンセル時はoffer.order()の
+        // 戻り値としてisError:true, code:PAYMENT_CANCELLEDを返す設計になって
+        // いる(node_modules/cordova-plugin-purchase/www/store.jsのAppStore
+        // decoratorのorder()参照)。これを検知し、タイムアウトを待たず即座に
+        // 「処理中」状態を解除する。
+        if (orderResult && orderResult.isError && orderResult.code === store.PAYMENT_CANCELLED) {
+          _traceBilling('cancelled (user)');
+          clearTimeout(timeoutId);
+          _pendingPurchaseResolvers = _pendingPurchaseResolvers.filter(r => r !== resolveResult);
+          return { response: { success: false, reason: 'cancelled' } };
+        }
         return { resultPromise };
       } catch (e) {
         showDebugError('購入 (purchasePremium)', e);
@@ -4816,6 +4830,11 @@ async function purchaseFromPaywall(){
       logState.ui.paywallSource = null;
       scheduleRenderApp();
     }
+  } else if (result.reason === 'cancelled') {
+    // ④: ユーザーがストアの購入ダイアログを自分の意思でキャンセルした場合は、
+    // タイムアウト用の「反映に時間がかかっています」という紛らわしい文言を
+    // 出さず、エラー表示なしで静かに購入前の状態へ戻す。
+    scheduleRenderApp();
   } else if (result.reason === 'timeout') {
     // 実機では、ストア側の購入自体は成立しているのにapproved/verifiedイベントの
     // 受信だけが60秒以上遅れるケースを確認している。「失敗しました」と断定すると
