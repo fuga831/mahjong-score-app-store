@@ -2658,7 +2658,6 @@ const MONETIZATION_CONFIG = {
   },
   billingProductId: 'remove_ads_unlock_history', // Play Console/App Store Connectの商品(買い切り)ID
   // ▲▲▲ ここまで ▲▲▲
-  fallbackPriceLabel: '¥400', // Billing APIから価格が取得できない場合の表示用(実価格はストア設定に従う)
 };
 
 const APP_VERSION = '1.0.0'; // package.jsonのversionと合わせて手動更新(ビルド時の自動注入は未実装)
@@ -2952,7 +2951,15 @@ const Native = {
         // 他の経路から購入成立を検知する場合に備え、こちらでも同じ処理を呼ぶ
         // (_handlePurchaseOwned内のwasPremium/hadPendingResolver判定により、
         // 既に反映済みなら安全に無視される)。
-        if (owned) _handlePurchaseOwned();
+        if (owned) {
+          _handlePurchaseOwned();
+        } else if (logState.ui.paywallOpen) {
+          // ④: 価格情報(offer.pricing.price)はこのイベントで非同期に届く。
+          // ペイウォールが先に(価格未取得のまま)開いていた場合、再描画しないと
+          // Native.getPriceLabel()の戻り値が変わっても画面に反映されないため、
+          // ペイウォールが開いている時だけ再描画する(無駄な再描画を避ける)。
+          scheduleRenderApp();
+        }
       });
       // store.order()の失敗など、個別のPromiseの拒否に現れない
       // ストア側の非同期エラー(通信エラー・設定不備等)を拾うためのハンドラ。
@@ -3089,13 +3096,18 @@ const Native = {
     const ok = await prep.resultPromise;
     return ok ? { success: true } : { success: false, reason: 'timeout' };
   },
+  // ④(不具合修正): 実際の価格が取得できない間に、実在の金額のように見える
+  // 固定値(旧: 日本円のフォールバック表示)を出すと、価格取得前・取得失敗時は
+  // もちろん、米国など日本以外のストアでもストア側の実価格が届くまで誤った
+  // 通貨・金額が表示されてしまっていた。取得できない場合はnullを返し、
+  // 呼び出し側(renderPaywallModal)で価格非表示のボタン文言に切り替える。
   getPriceLabel(){
     try {
       const store = window.CdvPurchase && window.CdvPurchase.store;
       const product = store && store.get(MONETIZATION_CONFIG.billingProductId);
       const offer = product && product.getOffer && product.getOffer();
-      return (offer && offer.pricing && offer.pricing.price) || MONETIZATION_CONFIG.fallbackPriceLabel;
-    } catch (e) { return MONETIZATION_CONFIG.fallbackPriceLabel; }
+      return (offer && offer.pricing && offer.pricing.price) || null;
+    } catch (e) { return null; }
   },
 };
 
@@ -7205,7 +7217,7 @@ function renderPaywallModal(){
           </ul>
           ${logState.ui.paywallErrorMsg ? `<div class="check-banner bad" style="margin-bottom:10px;">${escapeHtml(logState.ui.paywallErrorMsg)}</div>` : ''}
           <button class="record-btn" style="width:100%;" ${purchasing?'disabled':''} onclick="purchaseFromPaywall()">
-            ${purchasing ? '処理中…' : `${escapeHtml(price)} で広告削除＋記録し放題にする`}
+            ${purchasing ? '処理中…' : (price ? `${escapeHtml(price)} で広告削除＋記録し放題にする` : '広告削除＋記録し放題にする')}
           </button>
           <button class="mentsu-add" style="margin-top:9px;" ${purchasing?'disabled':''} onclick="closePaywall()">閉じる（今回は保存しない）</button>
           <div class="paywall-note">※閉じても今回の対局データは消えません。半荘の記録はそのまま残るので、後からいつでも購入して保存できます。</div>
