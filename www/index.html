@@ -4607,7 +4607,15 @@ function renamePlayerEverywhere(oldName, newName){
     logState.chips[newName] = logState.chips[oldName];
     delete logState.chips[oldName];
   }
-  [logState.ui.formScores, logState.ui.formBuster].forEach(obj => {
+  // ⑥(不具合修正): formScoreSign/formScoreAutoもformScores/formBusterと同じ
+  // プレイヤー名キーで管理しているが、ここに含まれていなかったため、素点入力欄に
+  // マイナスの値(符号は符号トグルボタンでformScoreSignへ別管理)を入力した状態で
+  // プレイヤー名を変更すると、符号だけ古い名前のキーに取り残され、新しい名前の
+  // formScoreSignはundefined(=「+」扱い)に戻ってしまい、入力中のマイナスの点数が
+  // 画面上もrecordHanchan()の保存結果もプラスへ反転してしまっていた(得点記入表で
+  // 最後の順位・飛んだプレイヤーなど、マイナスの素点になりやすい箇所で特に
+  // 気づきやすい不具合)。
+  [logState.ui.formScores, logState.ui.formScoreSign, logState.ui.formScoreAuto, logState.ui.formBuster].forEach(obj => {
     Object.keys(obj).forEach(k => { if (obj[k] === oldName) obj[k] = newName; });
     if (Object.prototype.hasOwnProperty.call(obj, oldName)) {
       obj[newName] = obj[oldName];
