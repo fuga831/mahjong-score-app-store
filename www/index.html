@@ -2290,6 +2290,21 @@ function calcHanchanResult(hanchan, settings) {
     });
   }
 
+  // ⑦(不具合修正): 素点−返し点をプレイヤーごとに個別に端数処理(五捨六入/
+  // 四捨五入/切り捨て)しているため、4人分を独立に丸めた結果の合計が、本来の
+  // 合計(0。ウマは必ず合計0になるよう設計されており、オカ・飛び賞も渡す分と
+  // 受け取る分が必ず相殺するため)と一致しない端数が生じることがある(実測で
+  // 約1/4の確率で±1pt)。この端数を1位(トップ)のプレイヤーに寄せて、
+  // 必ず半荘ごとの収支合計が0になるようにする(同着1位が複数いる場合は、
+  // オカ・トップ取り飛び賞と同じ考え方で均等に按分する)。
+  if (topGroup.length > 0) {
+    const sum = players.reduce((s, p) => s + pt[p], 0);
+    const residual = -sum;
+    if (residual !== 0) {
+      topGroup.forEach(r => { pt[r.name] += residual / topGroup.length; });
+    }
+  }
+
   return { pt, ranked, players };
 }
 
