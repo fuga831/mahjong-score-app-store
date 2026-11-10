@@ -1856,6 +1856,33 @@
       </div>
     </div>
 
+    <div class="toprow" style="margin-top:8px;">
+      <div class="kiriage" id="sanmaToggle" onclick="toggleSanma()">
+        <span class="label">三人麻雀</span>
+        <span class="switch" id="sanmaSwitch"></span>
+      </div>
+    </div>
+    <section id="sanmaOptionsSection" style="display:none;">
+      <div class="toprow" style="margin-top:8px;">
+        <div class="kiriage" id="sanmaTsumoLossToggle" onclick="toggleSanmaTsumoLoss()">
+          <span class="label"></span>
+          <span class="switch" id="sanmaTsumoLossSwitch"></span>
+        </div>
+        <div class="kiriage" id="sanmaFuCalcToggle" onclick="toggleSanmaFuCalc()">
+          <span class="label"></span>
+          <span class="switch" id="sanmaFuCalcSwitch"></span>
+        </div>
+      </div>
+      <div class="chip-input-row" style="margin-top:8px;">
+        <span class="pname">抜きドラ</span>
+        <div class="chip-stepper">
+          <button onclick="nukidoraStep(-1)">−</button>
+          <span class="val" id="nukidoraVal"></span>
+          <button onclick="nukidoraStep(1)">＋</button>
+        </div>
+      </div>
+    </section>
+
     <div class="result" id="resultPanel"></div>
 
     <section id="hanSection">
@@ -2133,6 +2160,77 @@ function calcScore(isDealer, han, fuRon, fuTsumo, isKiriageMangan){
 }
 
 /* =========================================================================
+   三人麻雀(北家が存在しない)モード。
+   ロンは4人麻雀と完全に同じ(calcScoreをそのまま使う)。
+   ツモだけ、本来北家が支払うはずだった分を「ツモ損アリ」なら単に除き、
+   「ツモ損ナシ」ならその半分(100点単位で切り上げ)を残り2人の支払いに
+   均等に上乗せして、ツモった人の取り分が4人麻雀と同額になるよう埋め合わせる。
+   符計算ナシの場合は、符を使わず翻数だけで決まる固定表を直接参照する
+   (値はいずれもユーザー提示の仕様どおりの固定値で、式からの逆算ではない)。
+   ========================================================================= */
+
+// 符計算アリ: calcScore()の4人麻雀用ツモ結果に対し、ツモ損の有無に応じた
+// 補正を後から適用するだけ(ロンには一切手を加えない)。
+function sanmaAdjustTsumo(tsumo, tsumoLossOn){
+  if (tsumoLossOn) return tsumo; // 北家の支払い分を除くだけ(=残り2人の金額は4人麻雀と同じ)
+  if (tsumo.all !== undefined) {
+    const add = roundUpTo(tsumo.all / 2, 100); // 北家分(=tsumo.allと同額)の半分を切り上げて上乗せ
+    return { all: tsumo.all + add };
+  }
+  const add = roundUpTo(tsumo.fromNonDealer / 2, 100); // 北家分(=子の支払い額と同額)の半分を切り上げて上乗せ
+  return { fromDealer: tsumo.fromDealer + add, fromNonDealer: tsumo.fromNonDealer + add };
+}
+
+// 符計算ナシ: 翻数だけで決まる固定表(ユーザー提示の仕様値そのまま)。
+function sanmaFixedTierKey(han){
+  if (han <= 3) return String(han);
+  if (han <= 5) return '4-5';
+  if (han <= 7) return '6-7';
+  if (han <= 10) return '8-10';
+  if (han <= 12) return '11-12';
+  return '13+';
+}
+const SANMA_FIXED_RON = {
+  '1': { dealer: 2000, nonDealer: 1000 }, '2': { dealer: 3000, nonDealer: 2000 },
+  '3': { dealer: 6000, nonDealer: 4000 }, '4-5': { dealer: 12000, nonDealer: 8000 },
+  '6-7': { dealer: 18000, nonDealer: 12000 }, '8-10': { dealer: 24000, nonDealer: 16000 },
+  '11-12': { dealer: 36000, nonDealer: 24000 }, '13+': { dealer: 48000, nonDealer: 32000 },
+};
+const SANMA_FIXED_TSUMO = {
+  // ツモ損アリ: { 親ツモALL, 子ツモ(親払い), 子ツモ(子払い) }
+  on: {
+    '1': [1000, 1000, 1000], '2': [1000, 1000, 1000], '3': [2000, 2000, 1000],
+    '4-5': [4000, 4000, 2000], '6-7': [6000, 6000, 3000], '8-10': [8000, 8000, 4000],
+    '11-12': [12000, 12000, 6000], '13+': [16000, 16000, 8000],
+  },
+  // ツモ損ナシ
+  off: {
+    '1': [1000, 1000, 1000], '2': [2000, 1000, 1000], '3': [3000, 3000, 1000],
+    '4-5': [6000, 5000, 3000], '6-7': [9000, 8000, 4000], '8-10': [12000, 10000, 6000],
+    '11-12': [18000, 16000, 8000], '13+': [24000, 20000, 12000],
+  },
+};
+function calcSanmaFixedScore(isDealer, han, tsumoLossOn){
+  const key = sanmaFixedTierKey(han);
+  const ronRow = SANMA_FIXED_RON[key];
+  const [dealerAll, fromDealer, fromNonDealer] = SANMA_FIXED_TSUMO[tsumoLossOn ? 'on' : 'off'][key];
+  return {
+    ron: isDealer ? ronRow.dealer : ronRow.nonDealer,
+    tsumo: isDealer ? { all: dealerAll } : { fromDealer, fromNonDealer },
+    ronCapped: false, tsumoCapped: false,
+  };
+}
+
+// calcScoreSanma(isDealer, han, fuRon, fuTsumo, isKiriageMangan, tsumoLossOn, fuCalcOn)
+// -> calcScore()と同じ戻り値の形。fuCalcOnがfalseならfuRon/fuTsumoは無視して
+// 固定表を直接使う。
+function calcScoreSanma(isDealer, han, fuRon, fuTsumo, isKiriageMangan, tsumoLossOn, fuCalcOn){
+  if (!fuCalcOn) return calcSanmaFixedScore(isDealer, han, tsumoLossOn);
+  const r = calcScore(isDealer, han, fuRon, fuTsumo, isKiriageMangan);
+  return { ...r, tsumo: sanmaAdjustTsumo(r.tsumo, tsumoLossOn) };
+}
+
+/* =========================================================================
    ScoreSheet module — pure settlement logic for the 得点記録票 tab.
    (Would live in utils/scoreSheet.ts alongside mahjongScore.ts.)
    ========================================================================= */
@@ -2385,6 +2483,10 @@ function participantNamesFor(hanchans, fallbackNames){
 const state = {
   isDealer: false,
   kiriageMangan: true,
+  sanma: false,          // 三人麻雀モード
+  sanmaTsumoLoss: true,  // 三人麻雀: ツモ損 アリ(true)/ナシ(false)。デフォルトはアリ
+  sanmaFuCalc: true,     // 三人麻雀: 符計算 アリ(true)/ナシ(false)。デフォルトはアリ
+  nukidora: 0,           // 三人麻雀: 抜きドラの枚数(1枚=1翻、ドラと同じ扱いで翻数に加算)
   hanTier: 3,      // 1 | 2 | 3 | 4 | 'mangan' | 'haneman' | 'baiman' | 'sanbaiman' | 'yakuman'
   keitai: 'menzen', // 'menzen' | 'naki' | 'pinfu' | 'chiitoitsu'
   machi: 'ryanmen', // 'ryanmen' | 'bad' | 'shanpon'
@@ -2395,6 +2497,29 @@ const state = {
   manualFu: 30,
 };
 let mentsuSeq = 1;
+
+// 三人麻雀トグル(sanma/sanmaTsumoLoss/sanmaFuCalc)だけを保存し、次回起動時も
+// 引き継ぐ。抜きドラの枚数は素点入力中の翻数・符数などと同じく半荘ごとの
+// 一時的な値のため、こちらは保存対象にしない。
+const CALC_STORAGE_KEY = 'mahjong-calc-v1';
+function loadCalcState(){
+  try {
+    const raw = localStorage.getItem(CALC_STORAGE_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (typeof saved.sanma === 'boolean') state.sanma = saved.sanma;
+    if (typeof saved.sanmaTsumoLoss === 'boolean') state.sanmaTsumoLoss = saved.sanmaTsumoLoss;
+    if (typeof saved.sanmaFuCalc === 'boolean') state.sanmaFuCalc = saved.sanmaFuCalc;
+  } catch (e) { /* 壊れたデータは無視し、デフォルト値のまま続行 */ }
+}
+function saveCalcState(){
+  try {
+    localStorage.setItem(CALC_STORAGE_KEY, JSON.stringify({
+      sanma: state.sanma, sanmaTsumoLoss: state.sanmaTsumoLoss, sanmaFuCalc: state.sanmaFuCalc,
+    }));
+  } catch (e) { /* 保存できない環境ではメモリ上のみで継続 */ }
+}
+loadCalcState();
 
 // 別のボタンへのタップが、テキスト入力のonchange(blur)によるDOM作り直しと
 // 同じ一連の操作の中で競合して消えてしまうのを防ぐため、render()も
@@ -2410,6 +2535,10 @@ function setDealer(v){ state.isDealer = v; scheduleRender(); }
 function toggleKiriage(){ state.kiriageMangan = !state.kiriageMangan; scheduleRender(); }
 function toggleFuDirectMode(){ state.fuDirectMode = !state.fuDirectMode; scheduleRender(); }
 function setManualFu(v){ state.manualFu = Math.max(0, v); scheduleRender(); }
+function toggleSanma(){ state.sanma = !state.sanma; saveCalcState(); scheduleRender(); }
+function toggleSanmaTsumoLoss(){ state.sanmaTsumoLoss = !state.sanmaTsumoLoss; saveCalcState(); scheduleRender(); }
+function toggleSanmaFuCalc(){ state.sanmaFuCalc = !state.sanmaFuCalc; saveCalcState(); scheduleRender(); }
+function nukidoraStep(delta){ state.nukidora = Math.max(0, state.nukidora + delta); scheduleRender(); }
 // 符は常に10の位に切り上げ（七対子の25符だけ例外）というルールを、
 // 直接入力された値にも適用する。
 function normalizeManualFu(v){ return v === 25 ? 25 : roundUpTo(v, 10); }
@@ -2463,6 +2592,19 @@ function render(){
   const sw = document.getElementById('kiriageSwitch');
   sw.className = 'switch' + (state.kiriageMangan ? ' on' : '');
 
+  // 三人麻雀トグル・サブトグル(ツモ損・符計算)・抜きドラ入力
+  document.getElementById('sanmaSwitch').className = 'switch' + (state.sanma ? ' on' : '');
+  document.getElementById('sanmaOptionsSection').style.display = state.sanma ? '' : 'none';
+  if (state.sanma) {
+    document.getElementById('sanmaTsumoLossToggle').querySelector('.label').innerHTML =
+      `ツモ損<br><b>${state.sanmaTsumoLoss ? 'アリ' : 'ナシ'}</b>`;
+    document.getElementById('sanmaTsumoLossSwitch').className = 'switch' + (state.sanmaTsumoLoss ? ' on' : '');
+    document.getElementById('sanmaFuCalcToggle').querySelector('.label').innerHTML =
+      `符計算<br><b>${state.sanmaFuCalc ? 'アリ' : 'ナシ'}</b>`;
+    document.getElementById('sanmaFuCalcSwitch').className = 'switch' + (state.sanmaFuCalc ? ' on' : '');
+    document.getElementById('nukidoraVal').textContent = `${state.nukidora}枚`;
+  }
+
   // han grids
   const hanRow1 = [1,2,3,4].map(h=>{
     const disabled = h===1 && state.keitai==='chiitoitsu';
@@ -2480,17 +2622,22 @@ function render(){
 
   // 符数を直接入力するモード（中級者・上級者向け）への切り替えリンク
   const keitaiActive = isTierHan(state.hanTier);
+  // 三人麻雀の「符計算ナシ」は符を一切使わない固定表のみで点数が決まるため、
+  // 符計算に関わるUI(アガリの形・待ちの形・刻子槓・符数直接入力)は、
+  // 満貫以上を選んだ時と同じ「触っても意味が無い」扱い(disabledで表示)にする。
+  const fixedTableMode = state.sanma && !state.sanmaFuCalc;
+  const fuApplicable = keitaiActive && !fixedTableMode;
   document.getElementById('fuModeHint').textContent = state.fuDirectMode ? '← ガイドで選ぶ' : '符数を直接入力 →';
-  document.getElementById('keitaiSection').style.display = (keitaiActive && state.fuDirectMode) ? 'none' : '';
-  document.getElementById('fuSection').style.display = (keitaiActive && state.fuDirectMode) ? 'none' : '';
-  document.getElementById('fuDirectSection').style.display = (keitaiActive && state.fuDirectMode) ? '' : 'none';
-  if (keitaiActive && state.fuDirectMode) {
+  document.getElementById('keitaiSection').style.display = (fuApplicable && state.fuDirectMode) ? 'none' : '';
+  document.getElementById('fuSection').style.display = (fuApplicable && state.fuDirectMode) ? 'none' : '';
+  document.getElementById('fuDirectSection').style.display = (fuApplicable && state.fuDirectMode) ? '' : 'none';
+  if (fuApplicable && state.fuDirectMode) {
     document.getElementById('manualFuInput').value = state.manualFu;
   }
 
   // keitai section
-  document.getElementById('keitaiSection').classList.toggle('disabled', !keitaiActive);
-  document.getElementById('keitaiHint').textContent = keitaiActive ? '' : '（満貫以上は不要）';
+  document.getElementById('keitaiSection').classList.toggle('disabled', !fuApplicable);
+  document.getElementById('keitaiHint').textContent = fuApplicable ? '' : (fixedTableMode ? '（符計算ナシのため不要）' : '（満貫以上は不要）');
   const keitaiOptions = [
     ['menzen','門前','ポン・チーなし'],
     ['naki','鳴き','ポン・チーあり'],
@@ -2505,7 +2652,7 @@ function render(){
 
   // fu section
   const fuLocked = state.keitai==='chiitoitsu' || state.keitai==='pinfu' || !state.keitai;
-  document.getElementById('fuSection').classList.toggle('disabled', !keitaiActive || fuLocked);
+  document.getElementById('fuSection').classList.toggle('disabled', !fuApplicable || fuLocked);
 
   // 待ちの形（良形・悪形・シャンポン）
   const machiOptions = [
@@ -2565,11 +2712,17 @@ function render(){
   document.getElementById('mentsuAddBtn').classList.toggle('disabled', state.mentsuList.length >= MAX_MENTSU);
 
   // ---- result ----
+  // 三人麻雀の抜きドラは、ドラと同じ扱いでそのまま翻数に加算する(符には影響しない)。
+  const nukidoraHan = state.sanma ? state.nukidora : 0;
   const panel = document.getElementById('resultPanel');
-  if (!keitaiActive) {
-    const info = HAN_TIER_INFO[state.hanTier];
-    const r = calcScore(state.isDealer, info.minHan, 0, 0, state.kiriageMangan);
-    panel.innerHTML = resultHtml(`${info.name}（${info.sub}）`, null, null, r);
+  if (!fuApplicable) {
+    const baseHan = keitaiActive ? state.hanTier : HAN_TIER_INFO[state.hanTier].minHan;
+    const effectiveHan = baseHan + nukidoraHan;
+    const r = state.sanma
+      ? calcScoreSanma(state.isDealer, effectiveHan, 0, 0, state.kiriageMangan, state.sanmaTsumoLoss, false)
+      : calcScore(state.isDealer, effectiveHan, 0, 0, state.kiriageMangan);
+    const baseLabel = keitaiActive ? `${state.hanTier}翻` : `${HAN_TIER_INFO[state.hanTier].name}（${HAN_TIER_INFO[state.hanTier].sub}）`;
+    panel.innerHTML = resultHtml(nukidoraLabel(baseLabel, baseHan, nukidoraHan), null, null, r);
   } else {
     // 符数直接入力モードでは計算過程自体が存在しない(手入力値をそのまま使う)ため
     // 内訳(breakdown)はnullのままにし、resultHtml側で内訳表示を省略する。
@@ -2577,11 +2730,20 @@ function render(){
     const { fuRon, fuTsumo } = state.fuDirectMode
       ? (() => { const f = normalizeManualFu(state.manualFu); return { fuRon: f, fuTsumo: f }; })()
       : breakdown;
-    const r = calcScore(state.isDealer, state.hanTier, fuRon, fuTsumo, state.kiriageMangan);
+    const effectiveHan = state.hanTier + nukidoraHan;
+    const r = state.sanma
+      ? calcScoreSanma(state.isDealer, effectiveHan, fuRon, fuTsumo, state.kiriageMangan, state.sanmaTsumoLoss, true)
+      : calcScore(state.isDealer, effectiveHan, fuRon, fuTsumo, state.kiriageMangan);
     const ronFuLabel = r.ronCapped ? `${fuRon}符→満貫` : `${fuRon}符`;
     const tsumoFuLabel = r.tsumoCapped ? `${fuTsumo}符→満貫` : `${fuTsumo}符`;
-    panel.innerHTML = resultHtml(`${state.hanTier}翻`, ronFuLabel, tsumoFuLabel, r, breakdown);
+    panel.innerHTML = resultHtml(nukidoraLabel(`${state.hanTier}翻`, state.hanTier, nukidoraHan), ronFuLabel, tsumoFuLabel, r, breakdown);
   }
+}
+
+// 抜きドラがある場合だけ、合計翻数が分かるよう表示ラベルに追記する。
+function nukidoraLabel(baseLabel, baseHan, nukidora){
+  if (!nukidora) return baseLabel;
+  return `${baseLabel}+抜き${nukidora}翻=${baseHan + nukidora}翻`;
 }
 
 // 符計算の内訳1本分(ron側 or tsumo側)を「項目1a + 項目b = 小計符 → 切り上げ後符」
@@ -2675,7 +2837,7 @@ const MONETIZATION_CONFIG = {
   // ▲▲▲ ここまで ▲▲▲
 };
 
-const APP_VERSION = '1.0.0'; // package.jsonのversionと合わせて手動更新(ビルド時の自動注入は未実装)
+const APP_VERSION = '1.0.2'; // package.jsonのversionと合わせて手動更新(ビルド時の自動注入は未実装)
 
 // ハンバーガーメニュー配下の「その他」・購入導線に表示する法務・問い合わせリンク。
 const LEGAL_CONFIG = {
@@ -4586,7 +4748,15 @@ function moneyStackInnerHtml(amount, chipMoney, mainClass){
 }
 
 /* ---- tab switching ---- */
-function setActiveTab(tab){ logState._activeTab = tab; scheduleRenderApp(); }
+function setActiveTab(tab){
+  logState._activeTab = tab;
+  // ⑧: 得点記録が3人打ちの対局から点数計算タブを開いた場合、三人麻雀を自動でONにする。
+  if (tab === 'calc' && logState.settings.playerCount === 3) {
+    state.sanma = true;
+    saveCalcState();
+  }
+  scheduleRenderApp();
+}
 
 /* ---- settings handlers ---- */
 function setPlayerCount(n){
