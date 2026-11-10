@@ -374,7 +374,7 @@
   .term-tip-btn:active{background:var(--felt-1);color:var(--ivory);}
   .term-tip-popover{
     position:fixed;
-    z-index:60; /* .history-modal-overlay(モーダル本体)より手前、.debug-error-bannerより背面 */
+    z-index:60; /* .history-modal-overlay(モーダル本体)より手前 */
     max-width:min(78vw, 260px);
     background:var(--felt-1);
     border:1px solid var(--gold);
@@ -951,14 +951,6 @@
     position:fixed;
     inset:0;
     background:rgba(5,16,12,.72);
-    /* ③(不具合修正・再修正): 一時的にz-index:75へ引き上げ、.debug-error-banner
-       (70)より手前に出していたが、これだとデバッグバナーが表示されている間
-       バナー自体の×(dismissDebugError)がモーダルの全画面バックドロップに
-       覆われてクリックできなくなる、逆方向の不具合を引き起こしていた
-       (バナーは常にモーダルより手前で、押せば消えなければならない)。
-       .debug-error-banner(z-index:70)より背面のz-index:50に戻す。両者が
-       同時に表示された場合は、直近に表示された(=より手前にある)デバッグ
-       バナーを先に閉じてから、その下のモーダルを操作する。 */
     z-index:50;
     display:flex;
     align-items:flex-end;
@@ -1230,53 +1222,10 @@
     word-break:break-all;
   }
 
-  /* ---- 画面上デバッグ表示(Xcode/Macが無い環境向け) ----
-     実際のエラー内容(code/message)をconsole.errorだけでなく画面にも出す
-     ための共通の仕組み。showDebugError(context, err)から呼ぶ。タップでは
-     消えず、明示的に閉じるかコピーするまで残る(内容を読む・報告する時間を
-     確保するため、他のトースト類と違って自動では消さない)。 */
-  .debug-error-banner{
-    position:fixed;
-    left:10px; right:10px;
-    top:calc(64px + env(safe-area-inset-top, 0px) + 8px);
-    z-index:70;
-    background:#3a1414;
-    border:1.5px solid var(--red);
-    border-radius:12px;
-    padding:10px 12px;
-    box-shadow:var(--shadow);
-    max-height:44vh;
-    overflow-y:auto;
-  }
-  .debug-error-head{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    gap:8px;
-    font-family:"Zen Maru Gothic",sans-serif;
-    font-weight:700;
-    font-size:.76rem;
-    color:var(--red-soft);
-    margin-bottom:5px;
-  }
-  .debug-error-detail{
-    white-space:pre-wrap;
-    word-break:break-word;
-    font-size:.72rem;
-    line-height:1.5;
-    color:var(--ivory);
-  }
-  .debug-error-actions{
-    display:flex;
-    gap:8px;
-    margin-top:8px;
-  }
-
   /* ---- renderApp()が致命的にクラッシュした際の最終フォールバック表示 ----
-     通常のモーダル・デバッグバナーの描画経路(renderApp()経由)自体が
-     壊れている可能性があるため、このオーバーレイはrenderApp()を一切
-     経由せず直接DOM操作で表示する(renderFatalErrorFallback参照)。
-     debug-error-banner(z-index:70)よりさらに手前に出す。 ---- */
+     通常のモーダルの描画経路(renderApp()経由)自体が壊れている可能性が
+     あるため、このオーバーレイはrenderApp()を一切経由せず直接DOM操作で
+     表示する(renderFatalErrorFallback参照)。 ---- */
   .fatal-error-overlay{
     position:fixed;
     inset:0;
@@ -1919,7 +1868,6 @@
 <div id="substituteModalRoot"></div>
 <div id="notifyBannerRoot"></div>
 <div id="termTipRoot"></div>
-<div id="debugErrorRoot"></div>
 <div id="fatalErrorRoot"></div>
 <input type="file" id="importFileInput" accept="application/json,.json" style="display:none;" onchange="handleImportFile(this.files)">
 
@@ -3605,6 +3553,14 @@ const CloudSync = {
           saveLogState();
           // ②: ログイン成功直後、保存済みユーザーネームの有無を確認する。
           await this._syncUsernameAfterLogin();
+          // ①: uidが確定した直後、起動時(_restorePurchasesOnBoot)やアカウント
+          // 削除後と同じ手順(端末のストア購入状態を再確認し、確定した時点で
+          // users/{この新uid}.isPremiumへ同期)を行う。特にsignInWithX()への
+          // フォールバックで既存アカウントのuidに切り替わった場合、その既存
+          // アカウント側のisPremiumがこの端末の実際の購入状態で上書きされる
+          // ことを保証するため。完了を待たずにログイン自体は確定させる
+          // (起動時・アカウント削除後と同じ fire-and-forget のパターン)。
+          resyncPurchaseStateAfterReinit();
           return true;
         }
         showDebugError(label, `${linkMethod}()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
@@ -3797,14 +3753,22 @@ const CloudSync = {
   // (get(users/{uid}).data.isPremium、archiveMatchFanout参照)や、フレンドの
   // 表示名を金色にする機能(refreshFriends参照)から参照できるようにするため。
   // 失敗しても致命的ではないのでベストエフォート(次回同期のタイミングで揃う)。
+  //
+  // ②(不具合修正): この端末でisPremium===trueが確認できた時だけ書き込み、
+  // falseでは上書きしない(=既に課金済みのusers/{uid}ドキュメントに対して、
+  // 未課金の別端末から同じアカウントへログインしてもisPremiumをfalseに
+  // 消してしまわないようにするため。課金は「どの端末かに紐づく」ものであり、
+  // 複数端末で同じアカウントを使う場合、1台でも購入済みならそのアカウントは
+  // プレミアムのままであるべき)。
   async syncPremiumStatus(){
     if (!this.isAvailable() || !logState.account.uid) return;
+    if (!logState.settings.isPremium) return;
     try {
       const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
       if (!Firestore) return;
       await Firestore.setDocument({
         reference: `users/${logState.account.uid}`,
-        data: { isPremium: !!logState.settings.isPremium },
+        data: { isPremium: true },
         merge: true,
       });
     } catch (e) { /* オフライン等は無視 */ }
@@ -4317,12 +4281,6 @@ function defaultLogState(){
       // 「💎 課金する」も出さず、「確認中…」の無効ボタンを表示する
       // (初回起動直後に一瞬プレミアム表示→課金ボタンに切り替わる不具合の対策)。
       billingStatus: 'checking',
-      // showDebugError()の画面上デバッグバナー表示用ガード(デバッグ用の
-      // サインアウト・課金状態リセットボタンと、これを解除するための
-      // アプリタイトル連続タップ(onAppTitleTap)は削除済みのため、この
-      // フラグをtrueにする手段は現在存在しない=常にfalse。つまり
-      // showDebugError()のバナーは今後表示されない。
-      devModeUnlocked: false,
       confirmDeleteAccount: false, // 「アカウントを削除」の誤タップ防止確認中か
       deletingAccount: false,
       deleteAccountErrorMsg: null,
@@ -4341,7 +4299,6 @@ function defaultLogState(){
       loginPromptOpen: false,      // 匿名のままでは困る操作をした時のログイン誘導モーダル
       loginPromptReason: null,
       notifyBanner: null,          // 「〇〇さんとの対局記録が追加されました」の簡易トースト
-      debugError: null,            // { context, detail } — 実機にXcode接続できない環境向けの画面上デバッグ表示
       addFriendOpen: false,        // 同卓者指定を介さない、単独の「フレンドを追加」モーダル
       addFriendSearchInput: '',
       addFriendSearchResult: null,
@@ -4611,10 +4568,9 @@ function escapeHtml(str){
 }
 function escKey(str){ return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
 
-/* ---- 画面上デバッグ表示(Xcode/Macが無くコンソールを見られない環境向け) ----
-   console.errorだけでなく、実際のエラー内容(code/message等)をそのまま
-   画面上のバナーにも出す共通の仕組み。今後もcatchブロックから
-   showDebugError('文脈の説明', e) を呼ぶだけで使える。 ---- */
+// エラーオブジェクトから実際の内容(code/message等)を人間が読める文字列に
+// まとめる。showDebugError()のconsole.error出力や、_appendPermissionDeniedHint
+// 経由でユーザー向けエラーメッセージに付加する詳細テキストとして使う。
 function formatErrorForDisplay(err){
   if (err === undefined || err === null) return '(エラーオブジェクトなし: undefined/null)';
   if (typeof err === 'string') return err;
@@ -4647,17 +4603,7 @@ function _appendPermissionDeniedHint(text){
     + `3. 1・2のどちらでもない場合: 拒否されたドキュメントのパス(上記に表示)と、firestore.rules側の該当ルールの条件式(request.auth.uidの型・ドキュメントIDの形式など)を照らし合わせてご確認ください。`;
 }
 function showDebugError(context, err){
-  const detail = formatErrorForDisplay(err);
-  // ③(不具合修正・審査対策): 画面上の赤いデバッグバナーは、devModeUnlocked
-  // (現在これをtrueにする手段は無く常にfalse)が有効な時だけ表示する。
-  // 無効な場合(=常時)は、内部ログ(console.error)には残しつつ、画面上には
-  // 一切出さない。以前はここにガードが無く、①②の修正作業中に発生させた
-  // エラーも含め、一般ユーザー・審査担当者の画面にまでwindow.CdvPurchase.store
-  // やFirestoreのパスといった内部実装の詳細がそのまま露出してしまっていた。
   console.error(`[showDebugError] ${context}:`, err);
-  if (!logState.ui.devModeUnlocked) return;
-  logState.ui.debugError = { context, detail };
-  scheduleRenderApp();
 }
 // cordova-plugin-purchase等のCordovaプラグイン向けの「登録済み一覧」相当。
 // Cordovaプラグインはwindow.Capacitor.Pluginsには現れない(Capacitorプラグイン
@@ -4681,40 +4627,6 @@ function cordovaPluginListInfo(){
   } catch (e) {
     return `cordova.require('cordova/plugin_list')の取得に失敗しました: ${e && e.message}`;
   }
-}
-function dismissDebugError(){
-  logState.ui.debugError = null;
-  scheduleRenderApp();
-}
-async function copyDebugError(){
-  const d = logState.ui.debugError;
-  if (!d) return;
-  const text = `[${d.context}]\n${d.detail}`;
-  try {
-    await navigator.clipboard.writeText(text);
-    logState.ui.notifyBanner = 'エラー内容をコピーしました';
-  } catch (e) {
-    // クリップボードが使えない環境では諦めず、せめてバナーにそのまま流す
-    logState.ui.notifyBanner = text;
-  }
-  scheduleRenderApp();
-}
-function renderDebugError(){
-  const root = document.getElementById('debugErrorRoot');
-  if (!root) return;
-  const d = logState.ui.debugError;
-  if (!d) { root.innerHTML = ''; return; }
-  root.innerHTML = `
-    <div class="debug-error-banner">
-      <div class="debug-error-head">
-        <span>⚠️ デバッグ: ${escapeHtml(d.context)}</span>
-        <button class="history-close" onclick="dismissDebugError()">×</button>
-      </div>
-      <div class="debug-error-detail">${escapeHtml(d.detail)}</div>
-      <div class="debug-error-actions">
-        <button class="preset-btn" onclick="copyDebugError()">📋 コピー</button>
-      </div>
-    </div>`;
 }
 function formatMoney(n){
   const sign = n > 0 ? '+' : n < 0 ? '-' : '';
@@ -5414,16 +5326,8 @@ async function submitUsername(){
   }
 }
 async function loginFromAccountModal(provider){
-  // ボタンのタップ自体がハンドラまで届いているかをまず画面上で確認できる
-  // ようにする(成功すればdismissDebugError()で消える)。
-  showDebugError(`ログインボタン(${provider})`, 'タップを検知しました。サインイン処理を呼び出します…');
   const ok = provider === 'google' ? await CloudSync.linkGoogle() : await CloudSync.linkApple();
-  if (ok) {
-    dismissDebugError();
-  } else if (logState.ui.debugError && logState.ui.debugError.context === `ログインボタン(${provider})`) {
-    // linkGoogle/linkAppleが例外も投げず詳細も出せなかった(=想定外の失敗経路)場合の最終フォールバック。
-    showDebugError(`ログインボタン(${provider})`, '処理は呼ばれましたが、詳細不明のまま失敗しました(例外なし・エラー情報なし)。');
-  }
+  if (!ok) console.error(`[loginFromAccountModal] ${provider}: login failed`);
   scheduleRenderApp();
 }
 
@@ -8163,7 +8067,6 @@ function renderAppInner(){
   safeRender(renderDeletePresetConfirmModal, 'renderDeletePresetConfirmModal');
   safeRender(renderSubstituteModal, 'renderSubstituteModal');
   safeRender(renderNotifyBanner, 'renderNotifyBanner');
-  safeRender(renderDebugError, 'renderDebugError');
   safeRender(() => updateBannerState(onLog), 'updateBannerState');
 }
 
