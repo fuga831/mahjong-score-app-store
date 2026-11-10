@@ -1455,25 +1455,6 @@
   .other-menu-item:active{background:var(--felt-2);}
   .other-menu-item .arrow{color:var(--ink-soft);font-size:.76rem;}
 
-  /* ⚠️ debugSignOut()用の一時的なデバッグボタン。本リリース前に削除すること。
-     赤い画面上デバッグバナー(.debug-error-banner)とも「アカウントを削除」の
-     危険ボタン(.danger-text)とも見分けがつくよう、アンバー系の破線にしている。 */
-  .debug-signout-btn{
-    display:block;
-    width:100%;
-    margin-top:10px;
-    font-family:"Noto Sans JP",sans-serif;
-    font-weight:700;
-    font-size:.8rem;
-    color:#e0a848;
-    background:transparent;
-    border:1.5px dashed #e0a848;
-    border-radius:10px;
-    padding:11px;
-    cursor:pointer;
-  }
-  .debug-signout-btn:active{background:rgba(224,168,72,.12);}
-
   /* ---- accordion ---- */
   .accordion{
     background:var(--felt-1);
@@ -1843,7 +1824,7 @@
 
 <div class="stage">
   <div class="title-row">
-    <h1 id="appTitle" onclick="onAppTitleTap()"><span class="tile">🀄</span>麻雀点数電卓</h1>
+    <h1 id="appTitle"><span class="tile">🀄</span>麻雀点数電卓</h1>
     <button class="hamburger-btn" id="historyMenuBtn" onclick="openHistoryModal()" title="対局履歴" style="display:none;">☰</button>
   </div>
 
@@ -3288,18 +3269,17 @@ const Native = {
   },
 };
 
-// ストアアプリ以外(このプレビューや素のブラウザ・GitHub Pages版)では常にtrue、
-// つまり「常に無制限・広告なし」を返す。ユーザーの指示により、広告/課金/対局数
-// 制限はCapacitorでラップしたストア配信版アプリの中だけに適用するため。
+// Web版(GitHub Pages)は廃止し、本リポジトリはストアアプリ専用のため、
+// 非ネイティブ環境を特別扱いする分岐は持たない。購入済みかどうかは
+// logState.settings.isPremium(起動時にNative.restorePurchases()の結果で
+// 確定させる値)だけで判定する。
 function isPremiumUnlocked(){
-  if (!Native.isNativeApp()) return true;
   return !!logState.settings.isPremium;
 }
 
 // プレイヤー名の表示を金色にするかどうかの判定。ゲスト(participantLinksに
 // 紐付けが無い=ユーザーネームを指定していない)は対象外。自分自身は
-// logState.settings.isPremium(実際の購入フラグ。isPremiumUnlocked()は
-// 非ネイティブ環境で常にtrueを返してしまうため、ここでは使わない)を、
+// logState.settings.isPremium(実際の購入フラグ)を、
 // フレンドはrefreshFriends()で同期済みのfriends[].isPremiumキャッシュを見る。
 // participantLinksを省略した場合は現在編集中の対局(logState.settings)を見るが、
 // 対局履歴の表示では、その対局が終了した時点のsettingsSnapshot.participantLinks
@@ -4284,7 +4264,8 @@ function defaultLogState(){
       usernameChangeCount: 0,
       linkedProviders: { google: false, apple: false },
       // ③: 「この端末でこのプロバイダをリンクした実績があるか」の記憶。
-      // linkedProvidersと違い、debugSignOut()でサインアウトしてもクリアしない
+      // linkedProvidersと違い、サインアウト相当の再初期化(アカウント削除後の
+      // 新しい匿名UIDへの切り替えなど)でもクリアしない
       // (linkGoogle/linkApple参照。実績があれば2回目以降は2段階認証などを
       // 含む認証UIを1回で済ませるため、signInWithX()を直接呼ぶ判断に使う)。
       knownLinkedProviders: { google: false, apple: false },
@@ -4331,13 +4312,16 @@ function defaultLogState(){
       billingMsg: null,         // 「購入を復元」結果などの短いメッセージ
       helpOpen: false,          // 「使い方」モーダル
       otherMenuOpen: false,     // 「その他」(利用規約・プライバシーポリシー・バージョン情報)モーダル
-      // ⚠️ デバッグメニュー(デバッグ:サインアウト・課金状態リセット)の表示解除
-      // フラグ。CloudSync.isAvailable()(ストアアプリ内)だけでは本番の
-      // App Store提出ビルドでも常にtrueになってしまい審査担当者・一般ユーザーの
-      // 目に触れてしまうため、加えてこのフラグも必要とする二重ガードにする。
-      // logState.uiはsaveLogState()の保存対象外なので、アプリを再起動すると
-      // 必ずfalseに戻る(=このセッション中、onAppTitleTap()で意図的に解除
-      // しない限り一切表示されない)。
+      // 課金状態の確定状況: 'checking'(起動直後、Native.restorePurchases()の
+      // 応答待ち) | 'premium' | 'free'。確定するまでは「✓ プレミアム会員」も
+      // 「💎 課金する」も出さず、「確認中…」の無効ボタンを表示する
+      // (初回起動直後に一瞬プレミアム表示→課金ボタンに切り替わる不具合の対策)。
+      billingStatus: 'checking',
+      // showDebugError()の画面上デバッグバナー表示用ガード(デバッグ用の
+      // サインアウト・課金状態リセットボタンと、これを解除するための
+      // アプリタイトル連続タップ(onAppTitleTap)は削除済みのため、この
+      // フラグをtrueにする手段は現在存在しない=常にfalse。つまり
+      // showDebugError()のバナーは今後表示されない。
       devModeUnlocked: false,
       confirmDeleteAccount: false, // 「アカウントを削除」の誤タップ防止確認中か
       deletingAccount: false,
@@ -4467,14 +4451,24 @@ applyTextSizeClass(); // 保存済みの文字サイズ設定を起動直後か�
 // 起動時に必ずPlay Billingへ購入履歴を問い合わせて上書きする。ローカル保存の
 // isPremiumだけに頼ると、端末変更・再インストール時に無料枠へ戻ってしまうため。
 // (非ネイティブ環境ではrestorePurchases()がnullを返し、何も上書きしない。)
-Native.initAds();
-const _restorePurchasesOnBoot = (async () => {
-  const restored = await Native.restorePurchases();
+//
+// logState.ui.billingStatus('checking'|'premium'|'free')は、この問い合わせが
+// 確定するまでの間、画面に「✓ プレミアム会員」も「💎 課金する」も出さず
+// 「確認中…」を表示するための状態。restorePurchases()がtrue/falseを返した
+// 時点でそのまま確定させ、null(タイムアウト・通信エラーなど)の場合は
+// 保存済みのisPremiumの値で確定させる(未課金に倒さない)。
+function _settleBillingStatus(restored){
   if (restored !== null && restored !== logState.settings.isPremium) {
     logState.settings.isPremium = restored;
     saveLogState();
-    scheduleRenderApp();
   }
+  logState.ui.billingStatus = logState.settings.isPremium ? 'premium' : 'free';
+  scheduleRenderApp();
+}
+Native.initAds();
+const _restorePurchasesOnBoot = (async () => {
+  const restored = await Native.restorePurchases();
+  _settleBillingStatus(restored);
 })();
 // マルチプレイヤー(フレンド・卓)機能の起動処理。匿名認証を確立し、フレンド
 // 一覧を最新化し、前回終了時に進行中の卓があれば再購読する。
@@ -4496,12 +4490,9 @@ CloudSync.init().then(async () => {
 // 購入済みである限り、手動で「購入を復元」を押さなくても自動的に
 // 新しいアカウントへ課金特典が反映される。
 async function resyncPurchaseStateAfterReinit(){
+  logState.ui.billingStatus = 'checking';
   const restored = await Native.restorePurchases();
-  if (restored !== null && restored !== logState.settings.isPremium) {
-    logState.settings.isPremium = restored;
-    saveLogState();
-    scheduleRenderApp();
-  }
+  _settleBillingStatus(restored);
   await CloudSync.syncPremiumStatus();
 }
 
@@ -4658,13 +4649,11 @@ function _appendPermissionDeniedHint(text){
 function showDebugError(context, err){
   const detail = formatErrorForDisplay(err);
   // ③(不具合修正・審査対策): 画面上の赤いデバッグバナーは、devModeUnlocked
-  // (アプリタイトルを7回連続タップして解除、logState.uiは保存対象外なので
-  // 再起動のたびに必ず未解除に戻る)が有効な時だけ表示する。無効な場合
-  // (=通常の本番利用時・審査時)は、内部ログ(console.error)には残しつつ、
-  // 画面上には一切出さない。以前はここにガードが無く、①②の修正作業中に
-  // 発生させたエラーも含め、一般ユーザー・審査担当者の画面にまで
-  // window.CdvPurchase.storeやFirestoreのパスといった内部実装の詳細が
-  // そのまま露出してしまっていた。
+  // (現在これをtrueにする手段は無く常にfalse)が有効な時だけ表示する。
+  // 無効な場合(=常時)は、内部ログ(console.error)には残しつつ、画面上には
+  // 一切出さない。以前はここにガードが無く、①②の修正作業中に発生させた
+  // エラーも含め、一般ユーザー・審査担当者の画面にまでwindow.CdvPurchase.store
+  // やFirestoreのパスといった内部実装の詳細がそのまま露出してしまっていた。
   console.error(`[showDebugError] ${context}:`, err);
   if (!logState.ui.devModeUnlocked) return;
   logState.ui.debugError = { context, detail };
@@ -4943,7 +4932,9 @@ function confirmEndMatch(){
   logState.ui.confirmEndMatch = false;
   // 無料枠(FREE_MATCH_LIMIT)を超えて新規保存しようとした場合は、保存フローに進まず
   // ペイウォールを表示する。半荘データ(hanchans)はここでは一切消さない。
-  if (!isPremiumUnlocked() && logState.matchHistory.length >= FREE_MATCH_LIMIT) {
+  // billingStatusが'checking'(起動直後の購入復元待ち)の間は、確定するまで
+  // ペイウォールを出さない(保存自体は先に進める)。
+  if (logState.ui.billingStatus === 'free' && logState.matchHistory.length >= FREE_MATCH_LIMIT) {
     logState.ui.paywallOpen = true;
     logState.ui.paywallSource = 'archive';
     logState.ui.paywallErrorMsg = null;
@@ -7308,13 +7299,15 @@ function shareMatchResult(id){
 // (課金する/使い方/お問い合わせ/その他)。両画面から呼び出す共通コンポーネントとして
 // ここに1箇所だけ実装する。
 function renderHistoryActionBar(){
-  const premium = isPremiumUnlocked();
+  const billingStatus = logState.ui.billingStatus;
   return `
     <div class="history-action-bar">
       ${CloudSync.isAvailable() ? `<button class="history-action-btn" onclick="openAccountModal()">👤 アカウント</button>` : ''}
-      ${premium
-        ? `<button class="history-action-btn premium" disabled>✓ プレミアム会員</button>`
-        : `<button class="history-action-btn" onclick="openPaywallFromMenu()">💎 課金する</button>`}
+      ${billingStatus === 'checking'
+        ? `<button class="history-action-btn" disabled>確認中…</button>`
+        : billingStatus === 'premium'
+          ? `<button class="history-action-btn premium" disabled>✓ プレミアム会員</button>`
+          : `<button class="history-action-btn" onclick="openPaywallFromMenu()">💎 課金する</button>`}
       <button class="history-action-btn" onclick="openHelpModal()">📖 使い方</button>
       <button class="history-action-btn" onclick="shareAppInvite()">🔗 友だちに送る</button>
       <button class="history-action-btn" onclick="openOtherMenu()">⋯ その他</button>
@@ -7352,9 +7345,11 @@ function renderHistoryModal(){
       ${logState.ui.importResultMsg ? `<div class="check-banner ok" style="margin-bottom:10px;">${escapeHtml(logState.ui.importResultMsg)}</div>` : ''}
       ${Native.isNativeApp() ? `
         <div class="premium-status-row">
-          ${isPremiumUnlocked()
-            ? `<span class="premium-badge">✓ 広告削除・記録し放題 が有効です</span>`
-            : `<button class="mentsu-add" onclick="restorePurchasesFromMenu()">購入を復元</button>`}
+          ${logState.ui.billingStatus === 'checking'
+            ? `<span class="premium-badge" style="opacity:.6;">確認中…</span>`
+            : logState.ui.billingStatus === 'premium'
+              ? `<span class="premium-badge">✓ 広告削除・記録し放題 が有効です</span>`
+              : `<button class="mentsu-add" onclick="restorePurchasesFromMenu()">購入を復元</button>`}
         </div>
         ${logState.ui.billingMsg ? `<div class="check-banner ok" style="margin-bottom:10px;">${escapeHtml(logState.ui.billingMsg)}</div>` : ''}
       ` : ''}
@@ -7562,112 +7557,6 @@ async function confirmDeleteAccountFromMenu(){
   }
 }
 
-// ⚠️ 一時的なデバッグ機能。各種バグ検証(ユーザーネーム設定・Google/Apple
-// ログイン等)を何度も繰り返し試すため、アプリを再起動せずに「未ログイン」
-// 状態へ手早く戻すためのもの。本リリース前に削除するか隠すこと
-// (renderOtherModal内の呼び出し元も合わせて)。
-// アカウント削除(confirmDeleteAccountFromMenu)とは異なり、クラウド側の
-// データ(ユーザーネーム・フレンド・対局記録)は一切削除しない。あくまで
-// この端末上のログインセッションをサインアウトし、ローカルのaccount/friends/
-// roomをリセットして、新しい匿名アカウントとして再初期化するだけ。
-async function debugSignOut(){
-  try {
-    const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
-    if (Auth && Auth.signOut) {
-      await Auth.signOut();
-    }
-  } catch (e) {
-    showDebugError('デバッグ:サインアウト', e);
-    // signOut()自体が失敗しても、ローカル側のリセットは続行する
-    // (ローカルだけでも未ログイン状態から試せるようにするため)。
-  }
-  // ③: knownLinkedProviders(この端末でどのプロバイダをリンクした実績が
-  // あるか)だけは、サインアウトしても消さずに引き継ぐ。消してしまうと、
-  // このデバッグ:サインアウト→再ログインのテストサイクルのたびに
-  // linkWithX()が「必ず失敗するとわかっている1回目の認証UI」を毎回
-  // 律儀にやり直し、2段階認証などが二重に求められる不具合が再発する
-  // (confirmDeleteAccountFromMenuでの本当のアカウント削除とは異なり、
-  // ここではFirebase側のGoogle/Appleとの紐付け自体は消えていないため、
-  // 次にlinkWithGoogle/linkWithAppleを呼んでも必ずcredential-already-in-use
-  // になることがわかっている)。
-  const knownLinkedProviders = logState.account.knownLinkedProviders;
-  logState.account = defaultLogState().account;
-  logState.account.knownLinkedProviders = knownLinkedProviders;
-  logState.friends = [];
-  logState.room = null;
-  logState.ui.otherMenuOpen = false;
-  logState.ui.accountModalOpen = false;
-  logState.ui.usernameRequired = false; // ②: 匿名アカウントに戻るため、必須設定モーダルも解除する
-  logState.ui.notifyBanner = 'デバッグ:サインアウトしました。新しい匿名アカウントとして再初期化します。';
-  saveLogState();
-  scheduleRenderApp();
-  // ①: 新しい匿名UIDが確立したら、端末のストア購入状態を新UIDへ同期する。
-  CloudSync.init().then(resyncPurchaseStateAfterReinit); // 新しい匿名アカウントとして再初期化(ensureSignedIn()もこれを待つ)
-}
-
-// ⚠️ 一時的なデバッグ機能。Sandboxテスト環境では「購入履歴をクリア」が
-// App Store Connect上から行えないことがあり、正規の購入フロー(購入ボタン→
-// 決済→反映→プレミアム表示)を何度も検証するために、アプリ側で完結する
-// リセット手段として用意する。本リリース前に削除するか隠すこと
-// (renderOtherModal内の呼び出し元、およびonAppTitleTap/devModeUnlockedの
-// 仕組み自体も合わせて)。
-//
-// ⚠️ Apple/Googleのサーバー側に残っている実際の購入履歴・レシートには
-// 一切影響を与えない。そのため、このリセット後に「購入を復元」を押す、
-// または次回起動時の自動復元(_restorePurchasesOnBoot)が走ると、この
-// Sandboxテスターが既に購入済みであることが再度検出され、isPremiumは
-// 自動的にtrueへ戻る(これは正しい挙動であり、あくまで「アプリ側の
-// ローカル表示・キャッシュを一旦未購入状態に戻す」ためのものであることに
-// 注意)。
-async function debugResetPremiumStatus(){
-  logState.settings.isPremium = false;
-  saveLogState();
-  scheduleRenderApp();
-  // ログイン中であれば、users/{uid}.isPremiumもfalseへ同期する
-  // (syncPremiumStatus()自体が未サインイン/非対応環境ではベストエフォートで
-  // 何もしないため、ここでの追加のガードは不要)。
-  await CloudSync.syncPremiumStatus();
-  try {
-    // cordova-plugin-purchase側がローカルに保持している既知のトランザクション/
-    // レシート情報を、可能な範囲でリセットする。store.reset()はプラグインの
-    // バージョンによっては存在しない、または挙動が異なる可能性があるため、
-    // 存在する場合のみベストエフォートで呼ぶ(無くても致命的ではない。
-    // 次に「購入を復元」を押せばいずれにせよサーバー側の実際の状態で
-    // 上書きされる)。
-    const store = window.CdvPurchase && window.CdvPurchase.store;
-    if (store && typeof store.reset === 'function') await store.reset();
-  } catch (e) {
-    showDebugError('デバッグ:課金状態リセット', e);
-  }
-  logState.ui.notifyBanner = 'デバッグ:課金状態をリセットしました(ローカル・Firestoreのみ。Apple/Google側の購入履歴は変わりません)。';
-  scheduleRenderApp();
-}
-
-// ⚠️ 一時的なデバッグ機能。デバッグメニュー(デバッグ:サインアウト・課金
-// 状態リセット)は、CloudSync.isAvailable()(ストアアプリ内)が真であるだけの
-// 本番のApp Store提出ビルドでも表示されてしまわないよう、アプリタイトルを
-// 短時間に7回連続タップした時だけ表示解除する隠しジェスチャーにしている
-// (#appTitle要素のonclick。renderAppInner()はinnerHTMLだけを書き換えて
-// 要素自体は再作成しないため、この属性は再描画後も保持される)。
-// devModeUnlockedはlogState.ui配下(=保存対象外)のため、アプリを再起動する
-// たびに必ず未解除の状態に戻る。
-let _titleTapCount = 0;
-let _titleTapResetTimer = null;
-function onAppTitleTap(){
-  if (logState.ui.devModeUnlocked) return; // 解除済みなら何もしない(otherMenuOpen経由で毎回見えている)
-  clearTimeout(_titleTapResetTimer);
-  _titleTapCount++;
-  if (_titleTapCount >= 7) {
-    _titleTapCount = 0;
-    logState.ui.devModeUnlocked = true;
-    logState.ui.notifyBanner = 'デバッグメニューを表示しました(このセッション中のみ・再起動で自動的に元に戻ります)。';
-    scheduleRenderApp();
-    return;
-  }
-  // 1.5秒以内に次のタップが来なければ最初からやり直し(誤って部分的に
-  // 連打してしまった場合に、後から急に解除されて驚かないようにするため)。
-  _titleTapResetTimer = setTimeout(() => { _titleTapCount = 0; }, 1500);
-}
 function renderOtherModal(){
   const root = document.getElementById('otherModalRoot');
   if (!root) return;
@@ -7688,14 +7577,6 @@ function renderOtherModal(){
       </div>
     `
   );
-  // ⚠️ 一時的なデバッグ機能(debugSignOut/debugResetPremiumStatus参照)。
-  // CloudSync.isAvailable()に加えてdevModeUnlocked(アプリタイトル7回タップで
-  // 解除、再起動で必ず元に戻る)も真の時だけ表示する二重ガード
-  // (onAppTitleTap参照)。本リリース前に削除すること。
-  const debugToolsHtml = (!CloudSync.isAvailable() || !logState.ui.devModeUnlocked) ? '' : `
-    <button class="debug-signout-btn" onclick="debugSignOut()">デバッグ: サインアウト</button>
-    <button class="debug-signout-btn" onclick="debugResetPremiumStatus()">デバッグ: 課金状態をリセット</button>
-  `;
   root.innerHTML = `
     <div class="history-modal-overlay">
       <div class="history-modal">
@@ -7730,7 +7611,6 @@ function renderOtherModal(){
             </div>
           </div>
           ${deleteAccountHtml}
-          ${debugToolsHtml}
         </div>
       </div>
     </div>`;
@@ -8304,7 +8184,9 @@ function updateBannerState(onLog){
     || logState.ui.loginPromptOpen || logState.ui.friendsListOpen
     || logState.ui.addFriendOpen || logState.ui.helpOpen || logState.ui.otherMenuOpen
     || logState.ui.tiebreakDealerOpen;
-  const shouldShow = Native.isNativeApp() && onLog && !modalOpen && !isPremiumUnlocked();
+  // billingStatusが'checking'の間は、まだ未購入と決まっていないため広告も出さない
+  // (購入済みユーザーの端末で起動直後に一瞬広告が出てしまう不具合の防止)。
+  const shouldShow = Native.isNativeApp() && onLog && !modalOpen && logState.ui.billingStatus === 'free';
   const showSpacer = shouldShow && _bannerAdLoaded;
   document.body.classList.toggle('ad-banner-active', showSpacer);
   const nav = document.getElementById('bottomNav');
