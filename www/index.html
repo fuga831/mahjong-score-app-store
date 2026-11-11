@@ -2818,14 +2818,14 @@ async function _waitForCdvPurchaseStore(){
   return window.CdvPurchase.store;
 }
 let _pendingPurchaseResolvers = [];
-// ②(不具合修正): 起動時に自動実行される_restorePurchasesOnBoot(Native.
-// restorePurchases())と、ユーザーが購入ボタン/「購入を復元」を押した時の
+// ②(不具合修正): 起動時に自動実行される_checkOwnedStatusOnBoot(Native.
+// checkOwnedStatus())と、ユーザーが購入ボタン/「購入を復元」を押した時の
 // 呼び出しが短時間に重なると、それぞれが独立にStoreKit/Play Billing側の
 // ネイティブ認証(Apple ID・Face ID確認等、店頭のlinkWithX()/signInWithX()に
 // 相当する「認証を求める呼び出し」)を要求してしまい、以前linkGoogle/
 // linkAppleで発生していた「2回連続認証」と同種の体験を引き起こしていた。
-// restorePurchases()とpurchasePremium()の、実際にストアの認証UIを
-// 要求しうる区間をこのロックで直列化し、同時に複数のStoreKit操作が
+// checkOwnedStatus()/restorePurchases()とpurchasePremium()の、実際にストアの
+// 認証UIを要求しうる区間をこのロックで直列化し、同時に複数のStoreKit操作が
 // 走らないようにする(ensureSignedIn()がCloudSync._initPromiseを待つのと
 // 同じ考え方)。
 let _billingOpLock = Promise.resolve();
@@ -3102,6 +3102,42 @@ const Native = {
       }
     } catch (e) { showDebugError('課金初期化 (initBilling)', e); }
   },
+  // 戻り値: true(端末のローカルレシートから購入済みと確認できた) /
+  // false(ローカルレシートの読み込みが完了した上で購入なしと確認できた) /
+  // null(判定できなかった＝非ネイティブ環境・ストア未初期化・通信エラー等。
+  // 呼び出し側は既存のisPremium値を維持すること)。
+  //
+  // restorePurchases()と違い、store.restorePurchases()(ストアへの明示的な
+  // 問い合わせ)は呼ばない。store.initialize()(initBilling()内)が完了すれば、
+  // 端末に既に保存されているレシート/トランザクションの情報はローカルに
+  // 読み込まれており、その時点のproduct.ownedを読むだけで足りる。起動時・
+  // アカウント切り替え(ログイン・アカウント削除後の再初期化)直後の自動チェック
+  // に使う(resyncPurchaseStateAfterReinit参照)。実際にストアへ問い合わせる
+  // restorePurchases()は、ユーザーが「購入を復元」ボタンを押した時だけ呼ぶ。
+  async checkOwnedStatus(){
+    if (!this.isNativeApp()) return null;
+    // ②: purchasePremium()の認証区間(prepare+order())と重ならないよう直列化する。
+    return _withBillingLock(async () => {
+      try {
+        // ①: 起動直後はまだ用意できていないことがあるため、即座に諦めず待つ。
+        const store = await _waitForCdvPurchaseStore();
+        if (!store) {
+          showDebugError('購入状態の確認 (checkOwnedStatus)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase})。${WAIT_FOR_STORE_TIMEOUT_MS / 1000}秒待っても利用可能になりませんでした。${cordovaPluginListInfo()}`);
+          return null;
+        }
+        await this.initBilling();
+        const product = store.get(MONETIZATION_CONFIG.billingProductId);
+        return !!(product && product.owned);
+      } catch (e) {
+        showDebugError('購入状態の確認 (checkOwnedStatus)', e);
+        return null;
+      }
+    });
+  },
+  // 「購入を復元」ボタン(restorePurchasesFromMenu)を押した時だけ呼ぶ。
+  // store.restorePurchases()で実際にストアへ問い合わせる、ネットワーク通信を
+  // 伴う操作。起動時・アカウント切り替え直後の自動チェックにはローカルの
+  // レシートを読むだけのcheckOwnedStatus()を使う(上記参照)。
   // 戻り値: true(有効な購入あり) / false(購入なし) / null(判定できなかった＝
   // 非ネイティブ環境か通信エラー等。呼び出し側は既存のisPremium値を維持すること)。
   async restorePurchases(){
@@ -3219,8 +3255,8 @@ const Native = {
 
 // Web版(GitHub Pages)は廃止し、本リポジトリはストアアプリ専用のため、
 // 非ネイティブ環境を特別扱いする分岐は持たない。購入済みかどうかは
-// logState.settings.isPremium(起動時にNative.restorePurchases()の結果で
-// 確定させる値)だけで判定する。
+// logState.settings.isPremium(起動時・アカウント切り替え直後にNative.
+// checkOwnedStatus()の結果で確定させる値)だけで判定する。
 function isPremiumUnlocked(){
   return !!logState.settings.isPremium;
 }
@@ -3553,13 +3589,15 @@ const CloudSync = {
           saveLogState();
           // ②: ログイン成功直後、保存済みユーザーネームの有無を確認する。
           await this._syncUsernameAfterLogin();
-          // ①: uidが確定した直後、起動時(_restorePurchasesOnBoot)やアカウント
-          // 削除後と同じ手順(端末のストア購入状態を再確認し、確定した時点で
-          // users/{この新uid}.isPremiumへ同期)を行う。特にsignInWithX()への
-          // フォールバックで既存アカウントのuidに切り替わった場合、その既存
-          // アカウント側のisPremiumがこの端末の実際の購入状態で上書きされる
-          // ことを保証するため。完了を待たずにログイン自体は確定させる
-          // (起動時・アカウント削除後と同じ fire-and-forget のパターン)。
+          // ①: uidが確定した直後、起動時(_checkOwnedStatusOnBoot)やアカウント
+          // 削除後と同じ手順(端末のローカルレシートから購入状態を再確認し、
+          // 確定した時点でusers/{この新uid}.isPremiumへ同期)を行う。特に
+          // signInWithX()へのフォールバックで既存アカウントのuidに切り替わった
+          // 場合、その既存アカウント側のisPremiumがこの端末の実際の購入状態で
+          // 上書きされることを保証するため。ここでもstore.restorePurchases()
+          // (実際のストアへの問い合わせ)は呼ばない。完了を待たずにログイン
+          // 自体は確定させる(起動時・アカウント削除後と同じ fire-and-forget
+          // のパターン)。
           resyncPurchaseStateAfterReinit();
           return true;
         }
@@ -4276,11 +4314,6 @@ function defaultLogState(){
       billingMsg: null,         // 「購入を復元」結果などの短いメッセージ
       helpOpen: false,          // 「使い方」モーダル
       otherMenuOpen: false,     // 「その他」(利用規約・プライバシーポリシー・バージョン情報)モーダル
-      // 課金状態の確定状況: 'checking'(起動直後、Native.restorePurchases()の
-      // 応答待ち) | 'premium' | 'free'。確定するまでは「✓ プレミアム会員」も
-      // 「💎 課金する」も出さず、「確認中…」の無効ボタンを表示する
-      // (初回起動直後に一瞬プレミアム表示→課金ボタンに切り替わる不具合の対策)。
-      billingStatus: 'checking',
       confirmDeleteAccount: false, // 「アカウントを削除」の誤タップ防止確認中か
       deletingAccount: false,
       deleteAccountErrorMsg: null,
@@ -4405,51 +4438,53 @@ if (logState.hanchans.length > 0) logState.ui.settingsOpen = false;
 saveLogState(); // v1からの移行時などに、v2キーへ即座に書き直しておく
 applyTextSizeClass(); // 保存済みの文字サイズ設定を起動直後から反映する
 
-// 起動時に必ずPlay Billingへ購入履歴を問い合わせて上書きする。ローカル保存の
-// isPremiumだけに頼ると、端末変更・再インストール時に無料枠へ戻ってしまうため。
-// (非ネイティブ環境ではrestorePurchases()がnullを返し、何も上書きしない。)
+// 起動直後は保存済みのisPremium(ローカル値)でそのまま表示し、画面が
+// 切り替わるのを待たせない。裏でNative.checkOwnedStatus()(端末のローカル
+// レシートを読むだけで、ストアへは問い合わせない)を実行し、保存値と食い違う
+// 場合だけ更新する。
 //
-// logState.ui.billingStatus('checking'|'premium'|'free')は、この問い合わせが
-// 確定するまでの間、画面に「✓ プレミアム会員」も「💎 課金する」も出さず
-// 「確認中…」を表示するための状態。restorePurchases()がtrue/falseを返した
-// 時点でそのまま確定させ、null(タイムアウト・通信エラーなど)の場合は
-// 保存済みのisPremiumの値で確定させる(未課金に倒さない)。
-function _settleBillingStatus(restored){
-  if (restored !== null && restored !== logState.settings.isPremium) {
-    logState.settings.isPremium = restored;
+// _applyOwnedStatus(owned)の方針:
+// - owned===true: 未課金だった場合のみtrueに反映する(既存のisPremiumを保つ)。
+// - owned===false: レシートの読み込みが完了した上で「所有なし」と確定した
+//   場合のみ。課金済みの保存値をfalseに戻すのはこのケースだけで、読み込み前や
+//   通信エラー・タイムアウトでは起こらない(次の条件のnullを参照)。
+// - owned===null: 非ネイティブ環境・ストア未初期化・通信エラー等で判定できな
+//   かった場合。保存済みの値をそのまま維持し、絶対に未課金へ倒さない。
+function _applyOwnedStatus(owned){
+  if (owned !== null && owned !== logState.settings.isPremium) {
+    logState.settings.isPremium = owned;
     saveLogState();
+    scheduleRenderApp();
   }
-  logState.ui.billingStatus = logState.settings.isPremium ? 'premium' : 'free';
-  scheduleRenderApp();
 }
 Native.initAds();
-const _restorePurchasesOnBoot = (async () => {
-  const restored = await Native.restorePurchases();
-  _settleBillingStatus(restored);
+const _checkOwnedStatusOnBoot = (async () => {
+  const owned = await Native.checkOwnedStatus();
+  _applyOwnedStatus(owned);
 })();
 // マルチプレイヤー(フレンド・卓)機能の起動処理。匿名認証を確立し、フレンド
 // 一覧を最新化し、前回終了時に進行中の卓があれば再購読する。
 CloudSync.init().then(async () => {
   scheduleRenderApp();
-  // 起動時の購入復元(上記)の結果が出揃うのを待ってから、自分のisPremiumを
-  // users/{uid}へ同期する(サインイン完了=account.uid確定を待つ必要があるため
-  // CloudSync.init()の完了後に行う。フレンドの表示名を金色にする機能・
-  // firestore.rulesの無料枠判定が参照する)。
-  await _restorePurchasesOnBoot;
+  // 起動時の購入状態チェック(上記)の結果が出揃うのを待ってから、自分の
+  // isPremiumをusers/{uid}へ同期する(サインイン完了=account.uid確定を
+  // 待つ必要があるためCloudSync.init()の完了後に行う。フレンドの表示名を
+  // 金色にする機能・firestore.rulesの無料枠判定が参照する)。
+  await _checkOwnedStatusOnBoot;
   CloudSync.syncPremiumStatus();
 });
 
 // ①: 「課金(広告削除・記録し放題)は端末に紐づき、アカウント(ユーザーネーム・
 // フレンド・対局履歴)とは独立して継続する」という設計を、アカウント削除・
-// デバッグサインアウトで新しい匿名UIDに切り替わった直後にも成立させる
-// ためのヘルパー。起動時(_restorePurchasesOnBoot + 上のCloudSync.init().then)
-// と同じ処理を、新しいUIDが確立した後にも行う。これにより、同じ端末で
-// 購入済みである限り、手動で「購入を復元」を押さなくても自動的に
-// 新しいアカウントへ課金特典が反映される。
+// ログインで新しい匿名UIDに切り替わった直後にも成立させるためのヘルパー。
+// 起動時(_checkOwnedStatusOnBoot + 上のCloudSync.init().then)と同じ処理を、
+// 新しいUIDが確立した後にも行う。これにより、同じ端末で購入済みである限り、
+// 手動で「購入を復元」を押さなくても自動的に新しいアカウントへ課金特典が
+// 反映される(こちらもcheckOwnedStatus()のみを使い、store.restorePurchases()
+// は呼ばない)。
 async function resyncPurchaseStateAfterReinit(){
-  logState.ui.billingStatus = 'checking';
-  const restored = await Native.restorePurchases();
-  _settleBillingStatus(restored);
+  const owned = await Native.checkOwnedStatus();
+  _applyOwnedStatus(owned);
   await CloudSync.syncPremiumStatus();
 }
 
@@ -4844,9 +4879,7 @@ function confirmEndMatch(){
   logState.ui.confirmEndMatch = false;
   // 無料枠(FREE_MATCH_LIMIT)を超えて新規保存しようとした場合は、保存フローに進まず
   // ペイウォールを表示する。半荘データ(hanchans)はここでは一切消さない。
-  // billingStatusが'checking'(起動直後の購入復元待ち)の間は、確定するまで
-  // ペイウォールを出さない(保存自体は先に進める)。
-  if (logState.ui.billingStatus === 'free' && logState.matchHistory.length >= FREE_MATCH_LIMIT) {
+  if (!isPremiumUnlocked() && logState.matchHistory.length >= FREE_MATCH_LIMIT) {
     logState.ui.paywallOpen = true;
     logState.ui.paywallSource = 'archive';
     logState.ui.paywallErrorMsg = null;
@@ -7203,15 +7236,13 @@ function shareMatchResult(id){
 // (課金する/使い方/お問い合わせ/その他)。両画面から呼び出す共通コンポーネントとして
 // ここに1箇所だけ実装する。
 function renderHistoryActionBar(){
-  const billingStatus = logState.ui.billingStatus;
+  const premium = isPremiumUnlocked();
   return `
     <div class="history-action-bar">
       ${CloudSync.isAvailable() ? `<button class="history-action-btn" onclick="openAccountModal()">👤 アカウント</button>` : ''}
-      ${billingStatus === 'checking'
-        ? `<button class="history-action-btn" disabled>確認中…</button>`
-        : billingStatus === 'premium'
-          ? `<button class="history-action-btn premium" disabled>✓ プレミアム会員</button>`
-          : `<button class="history-action-btn" onclick="openPaywallFromMenu()">💎 課金する</button>`}
+      ${premium
+        ? `<button class="history-action-btn premium" disabled>✓ プレミアム会員</button>`
+        : `<button class="history-action-btn" onclick="openPaywallFromMenu()">💎 課金する</button>`}
       <button class="history-action-btn" onclick="openHelpModal()">📖 使い方</button>
       <button class="history-action-btn" onclick="shareAppInvite()">🔗 友だちに送る</button>
       <button class="history-action-btn" onclick="openOtherMenu()">⋯ その他</button>
@@ -7249,11 +7280,9 @@ function renderHistoryModal(){
       ${logState.ui.importResultMsg ? `<div class="check-banner ok" style="margin-bottom:10px;">${escapeHtml(logState.ui.importResultMsg)}</div>` : ''}
       ${Native.isNativeApp() ? `
         <div class="premium-status-row">
-          ${logState.ui.billingStatus === 'checking'
-            ? `<span class="premium-badge" style="opacity:.6;">確認中…</span>`
-            : logState.ui.billingStatus === 'premium'
-              ? `<span class="premium-badge">✓ 広告削除・記録し放題 が有効です</span>`
-              : `<button class="mentsu-add" onclick="restorePurchasesFromMenu()">購入を復元</button>`}
+          ${isPremiumUnlocked()
+            ? `<span class="premium-badge">✓ 広告削除・記録し放題 が有効です</span>`
+            : `<button class="mentsu-add" onclick="restorePurchasesFromMenu()">購入を復元</button>`}
         </div>
         ${logState.ui.billingMsg ? `<div class="check-banner ok" style="margin-bottom:10px;">${escapeHtml(logState.ui.billingMsg)}</div>` : ''}
       ` : ''}
@@ -8087,9 +8116,7 @@ function updateBannerState(onLog){
     || logState.ui.loginPromptOpen || logState.ui.friendsListOpen
     || logState.ui.addFriendOpen || logState.ui.helpOpen || logState.ui.otherMenuOpen
     || logState.ui.tiebreakDealerOpen;
-  // billingStatusが'checking'の間は、まだ未購入と決まっていないため広告も出さない
-  // (購入済みユーザーの端末で起動直後に一瞬広告が出てしまう不具合の防止)。
-  const shouldShow = Native.isNativeApp() && onLog && !modalOpen && logState.ui.billingStatus === 'free';
+  const shouldShow = Native.isNativeApp() && onLog && !modalOpen && !isPremiumUnlocked();
   const showSpacer = shouldShow && _bannerAdLoaded;
   document.body.classList.toggle('ad-banner-active', showSpacer);
   const nav = document.getElementById('bottomNav');
