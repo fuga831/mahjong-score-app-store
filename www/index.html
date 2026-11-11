@@ -738,6 +738,31 @@
   .money-chip-sub.plus{color:#9fe0bd;}
   .money-chip-sub.minus{color:var(--red-soft);}
   .total-card .money-chip-sub{margin-top:1px;}
+  /* ---- 場代(ゲーム代金)の内訳行。精算の金額(.pmoney)とは別行で表示する。
+     .money-chip-subと同じ見た目(控えめな小文字)の「場代」行に続けて、
+     精算金額から場代を差し引いた「場代込み合計」を、上段よりは控えめだが
+     内訳行よりは目立つ中間の大きさで表示する。 ---- */
+  .money-fee-sub{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-variant-numeric:tabular-nums;
+    font-size:.62rem;
+    opacity:.75;
+    color:var(--red-soft);
+    white-space:nowrap;
+  }
+  .total-card .money-fee-sub{margin-top:1px;}
+  .money-fee-total{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-variant-numeric:tabular-nums;
+    font-size:.64rem;
+    color:var(--ivory-dim);
+    line-height:1.3;
+    margin-top:3px;
+    padding-top:3px;
+    border-top:1px dashed var(--line);
+  }
 
   /* ---- 演出モード切り替えスイッチ（画面右上） ---- */
   .mode-switch-row{
@@ -1456,6 +1481,10 @@
     font-weight:700;
     color:var(--ivory-dim);
     letter-spacing:.03em;
+  }
+  .game-fee-preview{
+    font-size:.72rem;
+    color:var(--ivory-dim);
   }
   .preset-row{
     display:flex;
@@ -2374,6 +2403,16 @@ function calcTotals(hanchans, chips, settings) {
     money[p] = moneyFromScores[p] + chipMoney[p];
   });
   return { pt: totals, money, chipMoney, chipImbalance: chipSum !== 0, chipSum };
+}
+
+// ゲーム代金(場代)を参加者全員(控えメンバーを含む)で均等割りし、指定の単位
+// (100円/10円/1円)に端数を切り上げた「1人あたり」の金額を返す。
+// totalFee・personCountが0以下、またはどちらかが不正な場合は0を返す
+// (入力欄が空欄・未入力の対局は従来通り場代0円として扱う)。
+function calcGameFeePerPerson(totalFee, roundingUnit, personCount){
+  if (!totalFee || totalFee <= 0 || !personCount || personCount <= 0) return 0;
+  const unit = roundingUnit || 100;
+  return Math.ceil(totalFee / personCount / unit) * unit;
 }
 
 // ④: 半荘のscoreIds(内部の参加者ID。プレイヤーの実アカウントuidとは無関係)を
@@ -4240,6 +4279,7 @@ function defaultLogState(){
       rate: 100,                // 1000点 = ◯◯（換算値。単位は付けない）
       roundingMode: 'gosharokunyuu', // 'gosharokunyuu' | 'roundHalfUp' | 'floor'
       chipUnitYen: 1000,
+      gameFeeRoundingUnit: 100, // ゲーム代金(場代)を1人あたりに割る時の端数切り上げ単位: 100|10|1(円)
       presentationMode: false, // 演出モード: 終局ボタンを押すまで順位・収支を隠す
       isPremium: false, // 広告削除+記録し放題(買い切り課金)が有効か。ストアアプリのみ意味を持つ
       participantLinks: {}, // { プレイヤー名: {uid, username} } 同卓者としてアカウント紐付けされている場合のみ存在
@@ -4294,6 +4334,7 @@ function defaultLogState(){
       revealStep: 0,       // 発表済みの順位グループ数
       revealPeek: false,   // 現在発表中の順位について、タップして名前・得点まで見た状態か
       confirmEndMatch: false,   // 「対局を終了する」の誤タップ防止確認中か
+      endMatchGameFeeInput: '', // 「対局を終了する」確認中に入力中のゲーム代金(合計・円)。空欄なら0円扱い
       tiebreakDealerOpen: false, // 素点同点時の「終局時の親は誰ですか？」確認中か
       pendingHanchanScores: null,   // ↑確定待ちの素点(chooseTiebreakDealerで使う)
       pendingHanchanBusterOf: null, // ↑確定待ちの飛ばした人情報
@@ -4667,6 +4708,11 @@ function formatMoney(n){
   const sign = n > 0 ? '+' : n < 0 ? '-' : '';
   return `${sign}${Math.abs(Math.round(n)).toLocaleString('ja-JP')}`;
 }
+// ゲーム代金(場代)のように符号を持たない、常に0以上の金額の表示用
+// (formatMoneyは収支の+/-符号つき表示のため、場代の金額そのものには使わない)。
+function formatYenPlain(n){
+  return Math.round(n || 0).toLocaleString('ja-JP');
+}
 function formatPt(n){
   const sign = n > 0 ? '+' : n < 0 ? '-' : '';
   return `${sign}${Math.abs(n).toFixed(1)}`;
@@ -4676,11 +4722,20 @@ function formatPt(n){
 // 表示内容は従来通り)。下段はチップ分の内訳(🪙+符号付き金額)のみを、
 // 上段より一回り小さく・控えめな色で添える。チップを使っていない
 // (chipMoneyが0の)対局では下段を出さず、従来通り1段のままにする。
-function moneyStackInnerHtml(amount, chipMoney, mainClass){
+// gameFeePerPerson(対局履歴の詳細画面からのみ渡される。保存済みの対局に
+// ゲーム代金が設定されている場合の1人あたりの金額)がある場合は、さらに
+// 「場代」(精算の金額=amountとは別枠の行として表示)と「場代込み合計」の
+// 2行を追加する(進行中の対局・演出モードの発表カードではこの引数自体を
+// 渡さないため、常に従来通り2段のまま)。
+function moneyStackInnerHtml(amount, chipMoney, mainClass, gameFeePerPerson){
   const chipLine = chipMoney
     ? `<div class="money-chip-sub ${chipMoney>=0?'plus':'minus'}">🪙 ${formatMoney(chipMoney)}</div>`
     : '';
-  return `<div class="${mainClass}">${formatMoney(amount)}</div>${chipLine}`;
+  const feeLine = gameFeePerPerson
+    ? `<div class="money-fee-sub">🏮 場代 ${formatMoney(-gameFeePerPerson)}</div>
+       <div class="money-fee-total">場代込み合計 ${formatMoney(amount - gameFeePerPerson)}</div>`
+    : '';
+  return `<div class="${mainClass}">${formatMoney(amount)}</div>${chipLine}${feeLine}`;
 }
 
 /* ---- tab switching ---- */
@@ -4869,10 +4924,22 @@ function requestEndMatch(){
   if (isRoomViewerOnly()) return; // 対局の終了(確定保存)も代表入力者だけができる
   if (logState.hanchans.length === 0) return;
   logState.ui.confirmEndMatch = true;
+  logState.ui.endMatchGameFeeInput = ''; // 確認ダイアログを開くたびに空欄から始める
   scheduleRenderApp();
 }
 function cancelEndMatch(){
   logState.ui.confirmEndMatch = false;
+  scheduleRenderApp();
+}
+function setEndMatchGameFeeInput(value){
+  logState.ui.endMatchGameFeeInput = value;
+  scheduleRenderApp();
+}
+// 単位(100円/10円/1円)は次回以降の対局終了ダイアログでも引き継ぐ既定値として
+// ルール設定(logState.settings)に保存する(chipUnitYenと同じ扱い)。
+function setGameFeeRoundingUnit(unit){
+  logState.settings.gameFeeRoundingUnit = unit;
+  saveLogState();
   scheduleRenderApp();
 }
 function confirmEndMatch(){
@@ -4895,6 +4962,12 @@ function archiveCurrentMatch(){
   if (isRoomViewerOnly()) return;
   if (logState.hanchans.length === 0) return;
   const participantUids = activeParticipantUids();
+  // ゲーム代金(場代): 割る人数は控えメンバーを含めた参加者全員(withBenchNames)。
+  // 入力が空欄・0以下なら0円として扱う(従来通りの保存フローに進む)。
+  const gameFee = parseInt(logState.ui.endMatchGameFeeInput, 10) || 0;
+  const gameFeeRounding = logState.settings.gameFeeRoundingUnit || 100;
+  const gameFeePersonCount = withBenchNames(activePlayers(), logState.settings).length;
+  const gameFeePerPerson = calcGameFeePerPerson(gameFee, gameFeeRounding, gameFeePersonCount);
   const entry = {
     id: 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
     startedAt: logState.currentMatchStartedAt || new Date().toISOString(),
@@ -4903,6 +4976,7 @@ function archiveCurrentMatch(){
     settingsSnapshot: JSON.parse(JSON.stringify(logState.settings)),
     hanchans: JSON.parse(JSON.stringify(logState.hanchans)),
     chips: JSON.parse(JSON.stringify(logState.chips)),
+    gameFee, gameFeeRounding, gameFeePerPerson,
   };
   if (participantUids.length > 0) {
     entry.participantUids = participantUids;
@@ -4932,6 +5006,7 @@ function archiveCurrentMatch(){
   logState.ui.revealStep = 0;
   logState.ui.revealPeek = false;
   logState.ui.confirmEndMatch = false;
+  logState.ui.endMatchGameFeeInput = '';
   cancelEditHanchan_noRender();
   saveLogState();
   scheduleRenderApp();
@@ -6306,7 +6381,10 @@ function renderHanchanLog(hanchansList, s, opts){
 // そのプレイヤー枠専用の結果受け取りリンクを送れるようにする(openHistoryLinkShare
 // 参照)。ライブ対局中の表示(renderStickyHeader)では渡さないため、既存の見た目・
 // 挙動は変わらない。新しいボタン要素は増やさず、既存のカード自体をタップ対象にする。
-function totalCardsHtml(order, totals, topMoney, participantLinks, shareMatchId){
+// gameFeePerPerson: 対局履歴の詳細画面(renderHistoryDetail)からだけ渡される。
+// 保存済みの対局にゲーム代金が設定されている場合、精算の金額(totals.money)
+// とは別行で「場代」「場代込み合計」を追加表示する(moneyStackInnerHtml参照)。
+function totalCardsHtml(order, totals, topMoney, participantLinks, shareMatchId, gameFeePerPerson){
   return `
     <div class="total-cards">
       ${order.map(p=>{
@@ -6316,7 +6394,7 @@ function totalCardsHtml(order, totals, topMoney, participantLinks, shareMatchId)
         return `
         <div class="total-card ${isTop?'top':''} ${shareable?'shareable':''}" ${shareable?`onclick="openHistoryLinkShare('${escKey(shareMatchId)}','${escKey(p)}')"`:''}>
           <div class="pname${premiumNameClass(p, participantLinks)}">${isTop?'<span class="crown">👑</span>':''}${escapeHtml(p)}${shareable?' <span class="share-hint">🔗</span>':''}</div>
-          ${moneyStackInnerHtml(totals.money[p], totals.chipMoney[p], 'pmoney')}
+          ${moneyStackInnerHtml(totals.money[p], totals.chipMoney[p], 'pmoney', gameFeePerPerson)}
           <div class="ppt">${formatPt(totals.pt[p])}pt</div>
         </div>`;
       }).join('')}
@@ -6397,9 +6475,26 @@ function renderEndMatchControls(isPresentationDone){
   if (isRoomViewerOnly()) return ''; // 対局の終了(確定保存)は代表入力者だけの操作
   if (logState.hanchans.length === 0) return '';
   if (logState.ui.confirmEndMatch) {
+    // 割る人数は、控えメンバーを含めた参加者全員(withBenchNames参照)。
+    const personCount = withBenchNames(activePlayers(), logState.settings).length;
+    const feeInput = logState.ui.endMatchGameFeeInput;
+    const fee = parseInt(feeInput, 10) || 0;
+    const unit = logState.settings.gameFeeRoundingUnit || 100;
+    const perPerson = calcGameFeePerPerson(fee, unit, personCount);
     return `
       <div class="end-match-confirm">
         <span>この対局を終了して履歴に保存しますか？</span>
+        <div class="settings-row">
+          <div class="lbl">ゲーム代金(合計・任意)</div>
+          <input class="num-input" type="number" step="100" inputmode="numeric" placeholder="例: 5000（空欄なら0円）"
+            value="${escapeHtml(feeInput)}" oninput="setEndMatchGameFeeInput(this.value)">
+          <div class="preset-row">
+            <button class="preset-btn ${unit===100?'active':''}" onclick="setGameFeeRoundingUnit(100)">100円単位</button>
+            <button class="preset-btn ${unit===10?'active':''}" onclick="setGameFeeRoundingUnit(10)">10円単位</button>
+            <button class="preset-btn ${unit===1?'active':''}" onclick="setGameFeeRoundingUnit(1)">1円単位</button>
+          </div>
+          ${fee > 0 ? `<div class="game-fee-preview">1人あたり ${formatYenPlain(perPerson)}円（${personCount}人で割り端数切り上げ）</div>` : ''}
+        </div>
         <div class="end-match-confirm-btns">
           <button class="preset-btn" onclick="cancelEndMatch()">キャンセル</button>
           <button class="preset-btn danger" onclick="confirmEndMatch()">終了して保存</button>
@@ -6623,6 +6718,26 @@ function renderHistoryDetail(id){
   const chipPlayers = withBenchNames(players, s);
   const chipSum = chipPlayers.reduce((sum,p)=> sum + (m.chips[p]||0), 0);
 
+  // ゲーム代金(場代)。既存の対局データ(この3項目が無い)は0円として扱う。
+  // 割る人数は、この対局終了時点の控えメンバーを含めた参加者全員
+  // (settingsSnapshot基準。archiveCurrentMatch時点の計算と揃える)。
+  const gameFee = m.gameFee || 0;
+  const gameFeeRounding = m.gameFeeRounding || 100;
+  const gameFeePerPerson = m.gameFeePerPerson || 0;
+  const gameFeePersonCount = withBenchNames(s.playerNames.slice(0, s.playerCount), s).length;
+  const gameFeeHtml = `
+    <div class="settings-row" style="margin-top:10px;">
+      <div class="lbl">ゲーム代金(合計)</div>
+      <input class="num-input" type="number" step="100" inputmode="numeric" placeholder="例: 5000（空欄なら0円）"
+        value="${gameFee || ''}" onchange="setArchiveGameFee('${escKey(id)}', this.value)">
+      <div class="preset-row">
+        <button class="preset-btn ${gameFeeRounding===100?'active':''}" onclick="setArchiveGameFeeRounding('${escKey(id)}', 100)">100円単位</button>
+        <button class="preset-btn ${gameFeeRounding===10?'active':''}" onclick="setArchiveGameFeeRounding('${escKey(id)}', 10)">10円単位</button>
+        <button class="preset-btn ${gameFeeRounding===1?'active':''}" onclick="setArchiveGameFeeRounding('${escKey(id)}', 1)">1円単位</button>
+      </div>
+      ${gameFeePerPerson > 0 ? `<div class="game-fee-preview">1人あたり ${formatYenPlain(gameFeePerPerson)}円（${gameFeePersonCount}人で割り端数切り上げ）</div>` : ''}
+    </div>`;
+
   const titleHtml = editingTitle
     ? `<input class="text-input" id="archiveTitleInput" value="${escapeHtml(m.title||'')}" placeholder="対局メモ・タイトル（例: 〇〇杯 第3戦）" onchange="saveArchiveTitle('${escKey(id)}', this.value)" onblur="saveArchiveTitle('${escKey(id)}', this.value)">`
     : `<div class="history-detail-title" onclick="startEditArchiveTitle('${escKey(id)}')">${m.title ? escapeHtml(m.title) : '📝 タイトル・メモを追加'}</div>`;
@@ -6641,9 +6756,10 @@ function renderHistoryDetail(id){
     <div class="history-detail">
       <div class="history-detail-title-row">${titleHtml}</div>
       <div class="history-detail-meta">${formatMatchDate(m.startedAt, m.endedAt)}・${players.map(p=>`<span class="${premiumNameClass(p, s.participantLinks).trim()}">${escapeHtml(p)}</span>`).join('・')}</div>
-      ${totalCardsHtml(order, totals, topMoney, s.participantLinks, CloudSync.isAvailable() ? id : null)}
+      ${totalCardsHtml(order, totals, topMoney, s.participantLinks, CloudSync.isAvailable() ? id : null, gameFeePerPerson)}
       ${CloudSync.isAvailable() && order.some(p => !s.participantLinks[p]) ? `<div class="history-reminder">💡 ゲストのプレイヤー名をタップすると、結果受け取りリンクを送れます</div>` : ''}
       ${chipSum !== 0 ? `<div class="check-banner bad" style="margin-top:8px;">⚠ チップ合計 ${chipSum>0?'+':''}${chipSum}枚（ゼロサムになっていません）</div>` : ''}
+      ${gameFeeHtml}
       ${renderHanchanLog(m.hanchans, settingsForCalc, { readOnly: true })}
       <div class="history-detail-actions">
         <button class="mentsu-add" onclick="shareMatchResult('${escKey(id)}')">📤 結果をシェア</button>
@@ -6664,6 +6780,31 @@ function saveArchiveTitle(id, value){
   const m = logState.matchHistory.find(x => x.id === id);
   if (m) m.title = (value || '').trim();
   logState.ui.editingArchiveTitleId = null;
+  saveLogState();
+  scheduleRenderApp();
+}
+// 保存済みの対局のゲーム代金(場代)を後から編集する。割る人数はこの対局
+// 終了時点のロースター+控え(settingsSnapshot基準、archiveCurrentMatch時点の
+// 計算と揃える)で固定し、現在の人数設定が変わっていても影響されない。
+function _recomputeArchiveGameFeePerPerson(m){
+  const s = m.settingsSnapshot;
+  const personCount = withBenchNames(s.playerNames.slice(0, s.playerCount), s).length;
+  m.gameFeePerPerson = calcGameFeePerPerson(m.gameFee || 0, m.gameFeeRounding || 100, personCount);
+}
+function setArchiveGameFee(id, value){
+  const m = logState.matchHistory.find(x => x.id === id);
+  if (!m) return;
+  const fee = parseInt(value, 10);
+  m.gameFee = (!fee || fee <= 0) ? 0 : fee;
+  _recomputeArchiveGameFeePerPerson(m);
+  saveLogState();
+  scheduleRenderApp();
+}
+function setArchiveGameFeeRounding(id, unit){
+  const m = logState.matchHistory.find(x => x.id === id);
+  if (!m) return;
+  m.gameFeeRounding = unit;
+  _recomputeArchiveGameFeePerPerson(m);
   saveLogState();
   scheduleRenderApp();
 }
@@ -6704,6 +6845,7 @@ function calcCareerStats(matchHistory, personKey){
   if (relevant.length === 0) return null;
 
   let games = 0, rankSum = 0, top1 = 0, top2 = 0, last = 0, tobiCount = 0, moneySum = 0, maxScore = -Infinity;
+  let gameFeeSum = 0; // 場代は半荘ごとではなく対局1件につき1人あたりの金額(gameFeePerPerson)を1回だけ加算する
   relevant.forEach(m => {
     const s = m.settingsSnapshot;
     const links = s.participantLinks;
@@ -6741,6 +6883,9 @@ function calcCareerStats(matchHistory, personKey){
     // (理論上ありうる)対局内改名のケースも含め、該当した全ての名前分を
     // 合算する(通常はmatchNamesの要素は高々1つ)。
     matchNames.forEach(n => { moneySum += ((m.chips && m.chips[n]) || 0) * s.chipUnitYen; });
+    // 場代はこの対局に参加していれば(matchNamesが非空なら)1対局につき1回だけ、
+    // 1人あたりの金額(gameFeePerPerson。無ければ0円=既存データ)を加算する。
+    if (matchNames.size > 0) gameFeeSum += m.gameFeePerPerson || 0;
   });
   if (games === 0) return null;
 
@@ -6754,6 +6899,8 @@ function calcCareerStats(matchHistory, personKey){
     maxScore: maxScore === -Infinity ? 0 : maxScore,
     avgMoneyPerHanchan: moneySum / games,
     totalMoney: moneySum,
+    totalGameFee: gameFeeSum,
+    totalMoneyWithFee: moneySum - gameFeeSum,
     tobiCount,
   };
 }
@@ -6780,6 +6927,9 @@ function renderCareerStatCard(name, st, playerCount){
       <div class="stat-row">飛んだ回数 <b>${st.tobiCount}回</b></div>
       <div class="stat-row">平均収支(半荘あたり) <b style="color:${moneyColor(st.avgMoneyPerHanchan)}">${formatMoney(st.avgMoneyPerHanchan)}</b></div>
       <div class="stat-row">通算収支 <b style="color:${moneyColor(st.totalMoney)}">${formatMoney(st.totalMoney)}</b></div>
+      ${st.totalGameFee > 0 ? `
+      <div class="stat-row">累計場代 <b style="color:var(--red-soft)">${formatMoney(-st.totalGameFee)}</b></div>
+      <div class="stat-row">場代込み累計収支 <b style="color:${moneyColor(st.totalMoneyWithFee)}">${formatMoney(st.totalMoneyWithFee)}</b></div>` : ''}
     </div>`;
 }
 // 選んだ人が参加した対局の中で最も多い卓の人数(3人打ち/4人打ち)を返す。

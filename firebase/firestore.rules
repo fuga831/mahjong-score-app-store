@@ -36,7 +36,8 @@
 //   usernames/{normalizedUsername}      -> { uid }
 //   users/{uid}                          -> { username, matchCount, pushToken, isPremium, ... }
 //   users/{uid}/friends/{friendUid}      -> { uid, username, addedAt }
-//   users/{uid}/matchHistory/{matchId}   -> { ...対局データ, participantUids, recordedBy }
+//   users/{uid}/matchHistory/{matchId}   -> { ...対局データ, participantUids, recordedBy,
+//                                              gameFee, gameFeeRounding, gameFeePerPerson }
 //   rooms/{roomId}                       -> { hostUid, participants, participantUids, status, hanchans, chips, ... }
 //   claimTokens/{token}                  -> { matchId, playerSlot, hostUid, token, createdAt,
 //                                              expiresAt, used, usedBy, matchData }
@@ -148,6 +149,14 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/claimTokens/$(request.resource.data.claimToken)).data.expiresAt > request.time.toMillis();
 
         // 確定済みの記録は変更不可(過去の記録を後から書き換えられないように)。
+        // ⚠️ gameFee/gameFeeRounding/gameFeePerPerson(ゲーム代金・場代)を
+        // 対局履歴から後から編集する機能(setArchiveGameFee/
+        // setArchiveGameFeeRounding)は、タイトル・メモの編集(saveArchiveTitle)
+        // と同じくローカル保存(saveLogState)のみで完結させており、Firestore
+        // 側のこのドキュメントへは書き戻さない設計にしている(そのため上の
+        // update:falseはこの編集機能と矛盾しない)。将来、編集結果を
+        // Firestore側・同卓者へも同期したくなった場合は、この3フィールド
+        // だけに限定したupdateルールを別途追加すること。
         allow update: if false;
         // 自分の記録は自分で削除できる(対局履歴モーダルの削除機能)。
         allow delete: if isSelf(uid);
