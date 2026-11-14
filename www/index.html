@@ -56,6 +56,13 @@
     -webkit-font-smoothing:antialiased;
   }
 
+  /* ①(不具合修正): --header-height/--bottom-nav-heightは_observeChromeHeights()
+     (ResizeObserver)が.title-row/#bottomNavの実測の高さ(どちらも自身の
+     paddingにenv(safe-area-inset-*)を含むため、実測値自体がセーフエリア込み)
+     で随時上書きする。ここでの値は、JSが実行されるまでの一瞬・ResizeObserver
+     非対応環境向けのフォールバック(デフォルトの文字サイズ「大」における
+     実測値の目安。実機未確認)。 */
+  :root{ --header-height:65px; --bottom-nav-height:77px; }
   .stage{
     max-width:460px;
     margin:0 auto;
@@ -65,11 +72,15 @@
        付けている(自動調整とCSSのposition:fixed/env()が競合し、上部は
        ステータスバーの裏にコンテンツが潜り込み、下部は固定バーが
        画面端に密着しない不具合の原因になっていたため)。
-       padding-topは position:fixed の .title-row(ヘッダーバー)の実測の
-       高さぶん(地の高さ64px)+ヘッダー自身にも足しているセーフエリア分を
-       同じ式で二重に確保している(ヘッダー側の高さが安全域ぶん伸びるため、
-       コンテンツ側もその伸びた分だけ余分にpadding-topを確保する必要がある)。 */
-    padding:calc(64px + env(safe-area-inset-top, 0px)) 14px calc(70px + env(safe-area-inset-bottom, 0px));
+       ①(不具合修正): 以前はpadding-top/bottomを固定px(64px/70px)+
+       env(safe-area-inset-*)の二重計算で近似していたが、.title-row/
+       #bottomNavの実際の高さは文字サイズ設定(html.text-size-large/xlarge)
+       によって伸び縮みするため、デフォルトの「大」でも最下部が、「特大」では
+       上下とも隠れてしまっていた。--header-height/--bottom-nav-height
+       (_observeChromeHeights参照。どちらも実測値自体にセーフエリア込み)を
+       使い、どの文字サイズでも実際の高さに追従させる。+14pxは最後の要素と
+       ナビ・最初の要素とヘッダーの間に確保する余白(指定の12px以上を満たす)。 */
+    padding:calc(var(--header-height, 65px) + 14px) 14px calc(var(--bottom-nav-height, 77px) + 14px);
     display:flex;
     flex-direction:column;
     gap:14px;
@@ -638,8 +649,11 @@
     bottom:calc(env(safe-area-inset-bottom, 0px) + var(--ad-banner-height, 60px));
     transition:bottom .2s ease;
   }
+  /* ②(不具合修正): バナー表示中は、下部ナビがさらに上(--ad-banner-height分)
+     に逃げるため、.stageのpadding-bottomにも同じ--ad-banner-height分を
+     追加で確保する(基準になる--bottom-nav-height+14pxは通常時と共通)。 */
   body.ad-banner-active .stage{
-    padding-bottom:calc(70px + env(safe-area-inset-bottom, 0px) + var(--ad-banner-height, 60px));
+    padding-bottom:calc(var(--bottom-nav-height, 77px) + 14px + var(--ad-banner-height, 60px));
     transition:padding-bottom .2s ease;
   }
   /* ①(不具合修正): バナー広告はネイティブのオーバーレイビューとしてDOM外に
@@ -4509,6 +4523,7 @@ const logState = loadLogState();
 if (logState.hanchans.length > 0) logState.ui.settingsOpen = false;
 saveLogState(); // v1からの移行時などに、v2キーへ即座に書き直しておく
 applyTextSizeClass(); // 保存済みの文字サイズ設定を起動直後から反映する
+_observeChromeHeights(); // ヘッダー・下部ナビの実際の高さを計測し続ける(.stageのpadding用)
 
 // 起動直後は保存済みのisPremium(ローカル値)でそのまま表示し、画面が
 // 切り替わるのを待たせない。裏でNative.checkOwnedStatus()(端末のローカル
@@ -6096,6 +6111,31 @@ function setTextSize(size){
   saveLogState();
   applyTextSizeClass();
   scheduleRenderApp();
+}
+// ①(不具合修正): .title-row(ヘッダー)・#bottomNav(下部ナビ)の実際の高さは、
+// 文字サイズ設定(html.text-size-large/xlarge、rem基準でフォントサイズを
+// 125%/150%に拡大)によって伸び縮みする(ナビ: 標準68/大77/特大86px、
+// ヘッダー: 56/65/74px、実機未確認のため目安)。.stageのpadding-top/bottomを
+// 固定pxで確保していると、デフォルトの「大」でも画面最下部が隠れ、「特大」
+// ではさらに上部・下部とも大きく隠れてしまっていた。ResizeObserverで両要素の
+// 実際の高さ(どちらも自身のpaddingにenv(safe-area-inset-*)を含むため、
+// getBoundingClientRect().heightがそのままセーフエリア込みの高さになる)を
+// 測り、CSSカスタムプロパティ(--header-height/--bottom-nav-height)へ反映する
+// ことで、文字サイズの変更・画面回転のどちらでも.stageのpaddingが常に
+// 実際の高さに追従するようにする(.stage側は--header-height/
+// --bottom-nav-heightを参照する形に変更済み)。
+function _observeChromeHeights(){
+  const header = document.querySelector('.title-row');
+  const nav = document.getElementById('bottomNav');
+  if (!header || !nav || typeof ResizeObserver === 'undefined') return;
+  const ro = new ResizeObserver(() => {
+    const headerH = Math.ceil(header.getBoundingClientRect().height);
+    const navH = Math.ceil(nav.getBoundingClientRect().height);
+    if (headerH > 0) document.documentElement.style.setProperty('--header-height', `${headerH}px`);
+    if (navH > 0) document.documentElement.style.setProperty('--bottom-nav-height', `${navH}px`);
+  });
+  ro.observe(header);
+  ro.observe(nav);
 }
 function dismissNotifyBanner(){
   logState.ui.notifyBanner = null;
