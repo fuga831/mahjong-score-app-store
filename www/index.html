@@ -626,19 +626,41 @@
      アプリ自身の下部ナビを広告の高さぶん上に逃がし、誤クリックを防ぐための
      余白も確保する。広告そのものはDOM外(ネイティブ側)に描画される。
      --ad-banner-heightはNative.initAds()内のbannerAdSizeChangedリスナーが
-     実測値で上書きする(未取得の間はadSize:'BANNER'の規定サイズ50pxを
-     フォールバックとして使う)。ネイティブ側のバナーはrootViewControllerの
-     safeAreaLayoutGuide.bottomを基準に配置されるため、画面下端からの
-     オフセットはenv(safe-area-inset-bottom)とバナー高さの合計にする必要が
-     あり、どちらか一方だけでは実際のバナー位置とズレて重なってしまう。 */
-  :root{ --ad-banner-height:50px; }
+     実測値で上書きする(未取得の間はadSize:'ADAPTIVE_BANNER'の一般的な高さに
+     合わせたフォールバック60pxを使う。固定の'BANNER'(320x50)と違い端末幅で
+     実際の高さが変わるため、あくまで実測値が届くまでの目安)。ネイティブ側の
+     バナーはrootViewControllerのsafeAreaLayoutGuide.bottomを基準に配置される
+     ため、画面下端からのオフセットはenv(safe-area-inset-bottom)とバナー高さの
+     合計にする必要があり、どちらか一方だけでは実際のバナー位置とズレて
+     重なってしまう。 */
+  :root{ --ad-banner-height:60px; }
   .bottom-nav.with-ad-banner{
-    bottom:calc(env(safe-area-inset-bottom, 0px) + var(--ad-banner-height, 50px));
+    bottom:calc(env(safe-area-inset-bottom, 0px) + var(--ad-banner-height, 60px));
     transition:bottom .2s ease;
   }
   body.ad-banner-active .stage{
-    padding-bottom:calc(70px + env(safe-area-inset-bottom, 0px) + var(--ad-banner-height, 50px));
+    padding-bottom:calc(70px + env(safe-area-inset-bottom, 0px) + var(--ad-banner-height, 60px));
     transition:padding-bottom .2s ease;
+  }
+  /* ①(不具合修正): バナー広告はネイティブのオーバーレイビューとしてDOM外に
+     描画されるため、配信されたクリエイティブ自体に余白がある(縦長の画像
+     広告が枠の中央に小さく表示される等)場合、その透明な余白からアプリの
+     WebView画面がそのまま透けて見えてしまっていた。バナーの表示中だけ、
+     画面最下部に「バナー高さ+セーフエリア」分の不透明な帯(アプリの背景色、
+     上端に.bottom-navと同じ区切り線)をWebView側に敷いて、後ろが透けない
+     ようにする。body.ad-banner-activeが付いている間だけ表示されるため、
+     読み込み失敗時・課金済みの時(updateBannerState参照、このクラス自体が
+     付かない)は帯も出ない。クリックを奪わないようpointer-events:noneにする
+     (広告自体はこの帯よりネイティブ側で手前に描画されるため操作には影響しない)。 */
+  body.ad-banner-active::after{
+    content:'';
+    position:fixed;
+    left:0; right:0; bottom:0;
+    height:calc(env(safe-area-inset-bottom, 0px) + var(--ad-banner-height, 60px));
+    background:var(--felt-0);
+    border-top:1px solid var(--line);
+    z-index:15;
+    pointer-events:none;
   }
   .bottom-nav button{
     flex:1;
@@ -2993,9 +3015,11 @@ const Native = {
         // env(safe-area-inset-bottom)を含めずバナー高さだけをbottomに
         // 足すと、セーフエリア分だけトグルバーとバナーが重なってしまう
         // (ホームインジケーターが無い旧機種では気づきにくいが、ある機種
-        // では必ず重なる)。adSize:'BANNER'固定(320x50)なので通常は
-        // 高さ50で決め打ちでも大きくは外れないが、実測値が取れる時は
-        // 実測値を優先して使う。
+        // では必ず重なる)。①: adSize:'ADAPTIVE_BANNER'は端末幅に応じて
+        // 高さが変わる(固定の50pxでは決め打ちできない)ため、実測値が
+        // 取れるまでの間は--ad-banner-heightの既定値(アダプティブバナーの
+        // 一般的な高さに合わせたフォールバック。実機確認はできていないため
+        // 大まかな目安)を使い、取得でき次第この実測値で上書きする。
         AdMob.addListener('bannerAdSizeChanged', (info) => {
           const h = info && info.height;
           if (h > 0) document.documentElement.style.setProperty('--ad-banner-height', `${h}px`);
@@ -3008,9 +3032,16 @@ const Native = {
     try {
       const AdMob = window.Capacitor.Plugins && window.Capacitor.Plugins.AdMob;
       if (AdMob && AdMob.showBanner) {
+        // ①(不具合修正): 固定サイズのadSize:'BANNER'(320x50)だと、ストア側が
+        // 縦長のクリエイティブを配信してきた場合にその広告が320x50の枠の中央に
+        // 小さく縮小表示され、残りの余白が透明なままアプリ画面が透けて見える
+        // 不具合があった。ADAPTIVE_BANNERは端末の横幅に合わせてストア側が
+        // 適切な比率のクリエイティブを選んで配信するため、この余白自体が
+        // 生まれにくくなる。高さは端末によって変わるため、実測値は
+        // 引き続きbannerAdSizeChangedリスナー(initAds参照)で取得する。
         await AdMob.showBanner({
           adId: admobConfigForPlatform().bannerUnitId,
-          adSize: 'BANNER',
+          adSize: 'ADAPTIVE_BANNER',
           position: 'BOTTOM_CENTER',
           margin: 0,
         });
