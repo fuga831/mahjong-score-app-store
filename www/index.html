@@ -3014,7 +3014,21 @@ const Native = {
       if (AdMob.addListener) {
         AdMob.addListener('bannerAdLoaded', () => {
           _bannerAdLoaded = true;
-          scheduleRenderApp();
+          // ②(不具合修正): showBanner()は非同期のため、呼び出した直後にモーダルを
+          // 開く等でupdateBannerState()がhideBanner()を呼んでも、その時点では
+          // まだネイティブ側にバナーが実際には生成されておらずhideBanner()が
+          // 実質的に無視(no-op)されることがある。その後に遅れてこのイベントで
+          // 読み込み完了が届くと、JS側の状態(モーダル表示中などで非表示のはず)
+          // とは裏腹にネイティブのバナーだけが画面に残り、対局履歴などのモーダルを
+          // 最下部までスクロールした時に重なって見える不具合が実機で確認された。
+          // 読み込み完了のこの時点で改めて「表示すべきでない」状態かどうかを
+          // 判定し、該当するなら次の再描画を待たずに即座に隠す
+          // (showBanner()側のawait完了後の後始末はNative.showBanner()参照)。
+          if (_bannerShouldShow(logState._activeTab === 'log')) {
+            scheduleRenderApp();
+          } else {
+            Native.hideBanner();
+          }
         });
         AdMob.addListener('bannerAdFailedToLoad', () => {
           _bannerAdLoaded = false;
@@ -3059,6 +3073,13 @@ const Native = {
           position: 'BOTTOM_CENTER',
           margin: 0,
         });
+        // ②(不具合修正): このawaitが完了するまでの間に(モーダルが開く等で)
+        // updateBannerState()が既にhideBanner()を呼んでいた場合、_bannerShownは
+        // この時点で既にfalseに戻っている。その時点ではまだネイティブ側に
+        // バナーが実際には生成されておらずhideBanner()が実質的に無視
+        // (no-op)されていた可能性があるため、show自体が完了した今、
+        // 改めてhideBanner()を呼び直して確実に隠す。
+        if (!_bannerShown) await this.hideBanner();
       }
     } catch (e) { /* オフライン等での読み込み失敗は握りつぶし、通常の操作を妨げない */ }
   },
@@ -8331,13 +8352,20 @@ let _bannerShown = false;       // Native.showBanner()を呼んで表示を試�
 // CSS側だけ余白を確保すると、その余白に何も表示されない「隙間」が
 // トグルバーの下にできてしまうため。
 let _bannerAdLoaded = false;
-function updateBannerState(onLog){
+// ②(不具合修正): 「表示すべきでないか」の判定をupdateBannerState()と
+// bannerAdLoadedリスナー(initAds参照。読み込み完了時点で即座に同じ判定を
+// 行い、該当するならその場でhideBanner()する)の両方から同じロジックで
+// 呼べるよう、1箇所にまとめる。
+function _bannerShouldShow(onLog){
   const modalOpen = logState.ui.historyOpen || logState.ui.paywallOpen
     || logState.ui.accountModalOpen || logState.ui.friendPickerOpen
     || logState.ui.loginPromptOpen || logState.ui.friendsListOpen
     || logState.ui.addFriendOpen || logState.ui.helpOpen || logState.ui.otherMenuOpen
     || logState.ui.tiebreakDealerOpen;
-  const shouldShow = Native.isNativeApp() && onLog && !modalOpen && !isPremiumUnlocked();
+  return Native.isNativeApp() && onLog && !modalOpen && !isPremiumUnlocked();
+}
+function updateBannerState(onLog){
+  const shouldShow = _bannerShouldShow(onLog);
   const showSpacer = shouldShow && _bannerAdLoaded;
   document.body.classList.toggle('ad-banner-active', showSpacer);
   const nav = document.getElementById('bottomNav');
