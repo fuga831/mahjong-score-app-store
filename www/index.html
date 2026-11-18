@@ -56,6 +56,13 @@
     -webkit-font-smoothing:antialiased;
   }
 
+  /* ①(不具合修正): --header-height/--bottom-nav-heightは_observeChromeHeights()
+     (ResizeObserver)が.title-row/#bottomNavの実測の高さ(どちらも自身の
+     paddingにenv(safe-area-inset-*)を含むため、実測値自体がセーフエリア込み)
+     で随時上書きする。ここでの値は、JSが実行されるまでの一瞬・ResizeObserver
+     非対応環境向けのフォールバック(デフォルトの文字サイズ「大」における
+     実測値の目安。実機未確認)。 */
+  :root{ --header-height:65px; --bottom-nav-height:77px; }
   .stage{
     max-width:460px;
     margin:0 auto;
@@ -65,11 +72,15 @@
        付けている(自動調整とCSSのposition:fixed/env()が競合し、上部は
        ステータスバーの裏にコンテンツが潜り込み、下部は固定バーが
        画面端に密着しない不具合の原因になっていたため)。
-       padding-topは position:fixed の .title-row(ヘッダーバー)の実測の
-       高さぶん(地の高さ64px)+ヘッダー自身にも足しているセーフエリア分を
-       同じ式で二重に確保している(ヘッダー側の高さが安全域ぶん伸びるため、
-       コンテンツ側もその伸びた分だけ余分にpadding-topを確保する必要がある)。 */
-    padding:calc(64px + env(safe-area-inset-top, 0px)) 14px calc(70px + env(safe-area-inset-bottom, 0px));
+       ①(不具合修正): 以前はpadding-top/bottomを固定px(64px/70px)+
+       env(safe-area-inset-*)の二重計算で近似していたが、.title-row/
+       #bottomNavの実際の高さは文字サイズ設定(html.text-size-large/xlarge)
+       によって伸び縮みするため、デフォルトの「大」でも最下部が、「特大」では
+       上下とも隠れてしまっていた。--header-height/--bottom-nav-height
+       (_observeChromeHeights参照。どちらも実測値自体にセーフエリア込み)を
+       使い、どの文字サイズでも実際の高さに追従させる。+14pxは最後の要素と
+       ナビ・最初の要素とヘッダーの間に確保する余白(指定の12px以上を満たす)。 */
+    padding:calc(var(--header-height, 65px) + 14px) 14px calc(var(--bottom-nav-height, 77px) + 14px);
     display:flex;
     flex-direction:column;
     gap:14px;
@@ -374,7 +385,7 @@
   .term-tip-btn:active{background:var(--felt-1);color:var(--ivory);}
   .term-tip-popover{
     position:fixed;
-    z-index:60; /* .history-modal-overlay(モーダル本体)より手前、.debug-error-bannerより背面 */
+    z-index:60; /* .history-modal-overlay(モーダル本体)より手前 */
     max-width:min(78vw, 260px);
     background:var(--felt-1);
     border:1px solid var(--gold);
@@ -626,19 +637,44 @@
      アプリ自身の下部ナビを広告の高さぶん上に逃がし、誤クリックを防ぐための
      余白も確保する。広告そのものはDOM外(ネイティブ側)に描画される。
      --ad-banner-heightはNative.initAds()内のbannerAdSizeChangedリスナーが
-     実測値で上書きする(未取得の間はadSize:'BANNER'の規定サイズ50pxを
-     フォールバックとして使う)。ネイティブ側のバナーはrootViewControllerの
-     safeAreaLayoutGuide.bottomを基準に配置されるため、画面下端からの
-     オフセットはenv(safe-area-inset-bottom)とバナー高さの合計にする必要が
-     あり、どちらか一方だけでは実際のバナー位置とズレて重なってしまう。 */
-  :root{ --ad-banner-height:50px; }
+     実測値で上書きする(未取得の間はadSize:'ADAPTIVE_BANNER'の一般的な高さに
+     合わせたフォールバック60pxを使う。固定の'BANNER'(320x50)と違い端末幅で
+     実際の高さが変わるため、あくまで実測値が届くまでの目安)。ネイティブ側の
+     バナーはrootViewControllerのsafeAreaLayoutGuide.bottomを基準に配置される
+     ため、画面下端からのオフセットはenv(safe-area-inset-bottom)とバナー高さの
+     合計にする必要があり、どちらか一方だけでは実際のバナー位置とズレて
+     重なってしまう。 */
+  :root{ --ad-banner-height:60px; }
   .bottom-nav.with-ad-banner{
-    bottom:calc(env(safe-area-inset-bottom, 0px) + var(--ad-banner-height, 50px));
+    bottom:calc(env(safe-area-inset-bottom, 0px) + var(--ad-banner-height, 60px));
     transition:bottom .2s ease;
   }
+  /* ②(不具合修正): バナー表示中は、下部ナビがさらに上(--ad-banner-height分)
+     に逃げるため、.stageのpadding-bottomにも同じ--ad-banner-height分を
+     追加で確保する(基準になる--bottom-nav-height+14pxは通常時と共通)。 */
   body.ad-banner-active .stage{
-    padding-bottom:calc(70px + env(safe-area-inset-bottom, 0px) + var(--ad-banner-height, 50px));
+    padding-bottom:calc(var(--bottom-nav-height, 77px) + 14px + var(--ad-banner-height, 60px));
     transition:padding-bottom .2s ease;
+  }
+  /* ①(不具合修正): バナー広告はネイティブのオーバーレイビューとしてDOM外に
+     描画されるため、配信されたクリエイティブ自体に余白がある(縦長の画像
+     広告が枠の中央に小さく表示される等)場合、その透明な余白からアプリの
+     WebView画面がそのまま透けて見えてしまっていた。バナーの表示中だけ、
+     画面最下部に「バナー高さ+セーフエリア」分の不透明な帯(アプリの背景色、
+     上端に.bottom-navと同じ区切り線)をWebView側に敷いて、後ろが透けない
+     ようにする。body.ad-banner-activeが付いている間だけ表示されるため、
+     読み込み失敗時・課金済みの時(updateBannerState参照、このクラス自体が
+     付かない)は帯も出ない。クリックを奪わないようpointer-events:noneにする
+     (広告自体はこの帯よりネイティブ側で手前に描画されるため操作には影響しない)。 */
+  body.ad-banner-active::after{
+    content:'';
+    position:fixed;
+    left:0; right:0; bottom:0;
+    height:calc(env(safe-area-inset-bottom, 0px) + var(--ad-banner-height, 60px));
+    background:var(--felt-0);
+    border-top:1px solid var(--line);
+    z-index:15;
+    pointer-events:none;
   }
   .bottom-nav button{
     flex:1;
@@ -738,6 +774,31 @@
   .money-chip-sub.plus{color:#9fe0bd;}
   .money-chip-sub.minus{color:var(--red-soft);}
   .total-card .money-chip-sub{margin-top:1px;}
+  /* ---- 場代(ゲーム代金)の内訳行。精算の金額(.pmoney)とは別行で表示する。
+     .money-chip-subと同じ見た目(控えめな小文字)の「場代」行に続けて、
+     精算金額から場代を差し引いた「場代込み合計」を、上段よりは控えめだが
+     内訳行よりは目立つ中間の大きさで表示する。 ---- */
+  .money-fee-sub{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-variant-numeric:tabular-nums;
+    font-size:.62rem;
+    opacity:.75;
+    color:var(--red-soft);
+    white-space:nowrap;
+  }
+  .total-card .money-fee-sub{margin-top:1px;}
+  .money-fee-total{
+    font-family:"Zen Maru Gothic",sans-serif;
+    font-weight:700;
+    font-variant-numeric:tabular-nums;
+    font-size:.64rem;
+    color:var(--ivory-dim);
+    line-height:1.3;
+    margin-top:3px;
+    padding-top:3px;
+    border-top:1px dashed var(--line);
+  }
 
   /* ---- 演出モード切り替えスイッチ（画面右上） ---- */
   .mode-switch-row{
@@ -951,14 +1012,6 @@
     position:fixed;
     inset:0;
     background:rgba(5,16,12,.72);
-    /* ③(不具合修正・再修正): 一時的にz-index:75へ引き上げ、.debug-error-banner
-       (70)より手前に出していたが、これだとデバッグバナーが表示されている間
-       バナー自体の×(dismissDebugError)がモーダルの全画面バックドロップに
-       覆われてクリックできなくなる、逆方向の不具合を引き起こしていた
-       (バナーは常にモーダルより手前で、押せば消えなければならない)。
-       .debug-error-banner(z-index:70)より背面のz-index:50に戻す。両者が
-       同時に表示された場合は、直近に表示された(=より手前にある)デバッグ
-       バナーを先に閉じてから、その下のモーダルを操作する。 */
     z-index:50;
     display:flex;
     align-items:flex-end;
@@ -1230,53 +1283,10 @@
     word-break:break-all;
   }
 
-  /* ---- 画面上デバッグ表示(Xcode/Macが無い環境向け) ----
-     実際のエラー内容(code/message)をconsole.errorだけでなく画面にも出す
-     ための共通の仕組み。showDebugError(context, err)から呼ぶ。タップでは
-     消えず、明示的に閉じるかコピーするまで残る(内容を読む・報告する時間を
-     確保するため、他のトースト類と違って自動では消さない)。 */
-  .debug-error-banner{
-    position:fixed;
-    left:10px; right:10px;
-    top:calc(64px + env(safe-area-inset-top, 0px) + 8px);
-    z-index:70;
-    background:#3a1414;
-    border:1.5px solid var(--red);
-    border-radius:12px;
-    padding:10px 12px;
-    box-shadow:var(--shadow);
-    max-height:44vh;
-    overflow-y:auto;
-  }
-  .debug-error-head{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    gap:8px;
-    font-family:"Zen Maru Gothic",sans-serif;
-    font-weight:700;
-    font-size:.76rem;
-    color:var(--red-soft);
-    margin-bottom:5px;
-  }
-  .debug-error-detail{
-    white-space:pre-wrap;
-    word-break:break-word;
-    font-size:.72rem;
-    line-height:1.5;
-    color:var(--ivory);
-  }
-  .debug-error-actions{
-    display:flex;
-    gap:8px;
-    margin-top:8px;
-  }
-
   /* ---- renderApp()が致命的にクラッシュした際の最終フォールバック表示 ----
-     通常のモーダル・デバッグバナーの描画経路(renderApp()経由)自体が
-     壊れている可能性があるため、このオーバーレイはrenderApp()を一切
-     経由せず直接DOM操作で表示する(renderFatalErrorFallback参照)。
-     debug-error-banner(z-index:70)よりさらに手前に出す。 ---- */
+     通常のモーダルの描画経路(renderApp()経由)自体が壊れている可能性が
+     あるため、このオーバーレイはrenderApp()を一切経由せず直接DOM操作で
+     表示する(renderFatalErrorFallback参照)。 ---- */
   .fatal-error-overlay{
     position:fixed;
     inset:0;
@@ -1455,25 +1465,6 @@
   .other-menu-item:active{background:var(--felt-2);}
   .other-menu-item .arrow{color:var(--ink-soft);font-size:.76rem;}
 
-  /* ⚠️ debugSignOut()用の一時的なデバッグボタン。本リリース前に削除すること。
-     赤い画面上デバッグバナー(.debug-error-banner)とも「アカウントを削除」の
-     危険ボタン(.danger-text)とも見分けがつくよう、アンバー系の破線にしている。 */
-  .debug-signout-btn{
-    display:block;
-    width:100%;
-    margin-top:10px;
-    font-family:"Noto Sans JP",sans-serif;
-    font-weight:700;
-    font-size:.8rem;
-    color:#e0a848;
-    background:transparent;
-    border:1.5px dashed #e0a848;
-    border-radius:10px;
-    padding:11px;
-    cursor:pointer;
-  }
-  .debug-signout-btn:active{background:rgba(224,168,72,.12);}
-
   /* ---- accordion ---- */
   .accordion{
     background:var(--felt-1);
@@ -1526,6 +1517,10 @@
     font-weight:700;
     color:var(--ivory-dim);
     letter-spacing:.03em;
+  }
+  .game-fee-preview{
+    font-size:.72rem;
+    color:var(--ivory-dim);
   }
   .preset-row{
     display:flex;
@@ -1843,7 +1838,7 @@
 
 <div class="stage">
   <div class="title-row">
-    <h1 id="appTitle" onclick="onAppTitleTap()"><span class="tile">🀄</span>麻雀点数電卓</h1>
+    <h1 id="appTitle"><span class="tile">🀄</span>麻雀点数電卓</h1>
     <button class="hamburger-btn" id="historyMenuBtn" onclick="openHistoryModal()" title="対局履歴" style="display:none;">☰</button>
   </div>
 
@@ -1855,6 +1850,33 @@
         <span class="switch" id="kiriageSwitch"></span>
       </div>
     </div>
+
+    <div class="toprow" style="margin-top:8px;">
+      <div class="kiriage" id="sanmaToggle" onclick="toggleSanma()">
+        <span class="label">三人麻雀</span>
+        <span class="switch" id="sanmaSwitch"></span>
+      </div>
+    </div>
+    <section id="sanmaOptionsSection" style="display:none;">
+      <div class="toprow" style="margin-top:8px;">
+        <div class="kiriage" id="sanmaTsumoLossToggle" onclick="toggleSanmaTsumoLoss()">
+          <span class="label"></span>
+          <span class="switch" id="sanmaTsumoLossSwitch"></span>
+        </div>
+        <div class="kiriage" id="sanmaFuCalcToggle" onclick="toggleSanmaFuCalc()">
+          <span class="label"></span>
+          <span class="switch" id="sanmaFuCalcSwitch"></span>
+        </div>
+      </div>
+      <div class="chip-input-row" style="margin-top:8px;">
+        <span class="pname">抜きドラ</span>
+        <div class="chip-stepper">
+          <button onclick="nukidoraStep(-1)">−</button>
+          <span class="val" id="nukidoraVal"></span>
+          <button onclick="nukidoraStep(1)">＋</button>
+        </div>
+      </div>
+    </section>
 
     <div class="result" id="resultPanel"></div>
 
@@ -1911,7 +1933,6 @@
 <div id="substituteModalRoot"></div>
 <div id="notifyBannerRoot"></div>
 <div id="termTipRoot"></div>
-<div id="debugErrorRoot"></div>
 <div id="fatalErrorRoot"></div>
 <input type="file" id="importFileInput" accept="application/json,.json" style="display:none;" onchange="handleImportFile(this.files)">
 
@@ -2133,6 +2154,77 @@ function calcScore(isDealer, han, fuRon, fuTsumo, isKiriageMangan){
 }
 
 /* =========================================================================
+   三人麻雀(北家が存在しない)モード。
+   ロンは4人麻雀と完全に同じ(calcScoreをそのまま使う)。
+   ツモだけ、本来北家が支払うはずだった分を「ツモ損アリ」なら単に除き、
+   「ツモ損ナシ」ならその半分(100点単位で切り上げ)を残り2人の支払いに
+   均等に上乗せして、ツモった人の取り分が4人麻雀と同額になるよう埋め合わせる。
+   符計算ナシの場合は、符を使わず翻数だけで決まる固定表を直接参照する
+   (値はいずれもユーザー提示の仕様どおりの固定値で、式からの逆算ではない)。
+   ========================================================================= */
+
+// 符計算アリ: calcScore()の4人麻雀用ツモ結果に対し、ツモ損の有無に応じた
+// 補正を後から適用するだけ(ロンには一切手を加えない)。
+function sanmaAdjustTsumo(tsumo, tsumoLossOn){
+  if (tsumoLossOn) return tsumo; // 北家の支払い分を除くだけ(=残り2人の金額は4人麻雀と同じ)
+  if (tsumo.all !== undefined) {
+    const add = roundUpTo(tsumo.all / 2, 100); // 北家分(=tsumo.allと同額)の半分を切り上げて上乗せ
+    return { all: tsumo.all + add };
+  }
+  const add = roundUpTo(tsumo.fromNonDealer / 2, 100); // 北家分(=子の支払い額と同額)の半分を切り上げて上乗せ
+  return { fromDealer: tsumo.fromDealer + add, fromNonDealer: tsumo.fromNonDealer + add };
+}
+
+// 符計算ナシ: 翻数だけで決まる固定表(ユーザー提示の仕様値そのまま)。
+function sanmaFixedTierKey(han){
+  if (han <= 3) return String(han);
+  if (han <= 5) return '4-5';
+  if (han <= 7) return '6-7';
+  if (han <= 10) return '8-10';
+  if (han <= 12) return '11-12';
+  return '13+';
+}
+const SANMA_FIXED_RON = {
+  '1': { dealer: 2000, nonDealer: 1000 }, '2': { dealer: 3000, nonDealer: 2000 },
+  '3': { dealer: 6000, nonDealer: 4000 }, '4-5': { dealer: 12000, nonDealer: 8000 },
+  '6-7': { dealer: 18000, nonDealer: 12000 }, '8-10': { dealer: 24000, nonDealer: 16000 },
+  '11-12': { dealer: 36000, nonDealer: 24000 }, '13+': { dealer: 48000, nonDealer: 32000 },
+};
+const SANMA_FIXED_TSUMO = {
+  // ツモ損アリ: { 親ツモALL, 子ツモ(親払い), 子ツモ(子払い) }
+  on: {
+    '1': [1000, 1000, 1000], '2': [1000, 1000, 1000], '3': [2000, 2000, 1000],
+    '4-5': [4000, 4000, 2000], '6-7': [6000, 6000, 3000], '8-10': [8000, 8000, 4000],
+    '11-12': [12000, 12000, 6000], '13+': [16000, 16000, 8000],
+  },
+  // ツモ損ナシ
+  off: {
+    '1': [1000, 1000, 1000], '2': [2000, 1000, 1000], '3': [3000, 3000, 1000],
+    '4-5': [6000, 5000, 3000], '6-7': [9000, 8000, 4000], '8-10': [12000, 10000, 6000],
+    '11-12': [18000, 16000, 8000], '13+': [24000, 20000, 12000],
+  },
+};
+function calcSanmaFixedScore(isDealer, han, tsumoLossOn){
+  const key = sanmaFixedTierKey(han);
+  const ronRow = SANMA_FIXED_RON[key];
+  const [dealerAll, fromDealer, fromNonDealer] = SANMA_FIXED_TSUMO[tsumoLossOn ? 'on' : 'off'][key];
+  return {
+    ron: isDealer ? ronRow.dealer : ronRow.nonDealer,
+    tsumo: isDealer ? { all: dealerAll } : { fromDealer, fromNonDealer },
+    ronCapped: false, tsumoCapped: false,
+  };
+}
+
+// calcScoreSanma(isDealer, han, fuRon, fuTsumo, isKiriageMangan, tsumoLossOn, fuCalcOn)
+// -> calcScore()と同じ戻り値の形。fuCalcOnがfalseならfuRon/fuTsumoは無視して
+// 固定表を直接使う。
+function calcScoreSanma(isDealer, han, fuRon, fuTsumo, isKiriageMangan, tsumoLossOn, fuCalcOn){
+  if (!fuCalcOn) return calcSanmaFixedScore(isDealer, han, tsumoLossOn);
+  const r = calcScore(isDealer, han, fuRon, fuTsumo, isKiriageMangan);
+  return { ...r, tsumo: sanmaAdjustTsumo(r.tsumo, tsumoLossOn) };
+}
+
+/* =========================================================================
    ScoreSheet module — pure settlement logic for the 得点記録票 tab.
    (Would live in utils/scoreSheet.ts alongside mahjongScore.ts.)
    ========================================================================= */
@@ -2349,6 +2441,16 @@ function calcTotals(hanchans, chips, settings) {
   return { pt: totals, money, chipMoney, chipImbalance: chipSum !== 0, chipSum };
 }
 
+// ゲーム代金(場代)を参加者全員(控えメンバーを含む)で均等割りし、指定の単位
+// (100円/10円/1円)に端数を切り上げた「1人あたり」の金額を返す。
+// totalFee・personCountが0以下、またはどちらかが不正な場合は0を返す
+// (入力欄が空欄・未入力の対局は従来通り場代0円として扱う)。
+function calcGameFeePerPerson(totalFee, roundingUnit, personCount){
+  if (!totalFee || totalFee <= 0 || !personCount || personCount <= 0) return 0;
+  const unit = roundingUnit || 100;
+  return Math.ceil(totalFee / personCount / unit) * unit;
+}
+
 // ④: 半荘のscoreIds(内部の参加者ID。プレイヤーの実アカウントuidとは無関係)を
 // 手がかりに、この対局(hanchans配列)で実際に記録されたことがある「別人」を、
 // 名前の文字列ではなくIDの個数で数え上げる。改名(setPlayerName)は同じIDの
@@ -2385,6 +2487,10 @@ function participantNamesFor(hanchans, fallbackNames){
 const state = {
   isDealer: false,
   kiriageMangan: true,
+  sanma: false,          // 三人麻雀モード
+  sanmaTsumoLoss: true,  // 三人麻雀: ツモ損 アリ(true)/ナシ(false)。デフォルトはアリ
+  sanmaFuCalc: true,     // 三人麻雀: 符計算 アリ(true)/ナシ(false)。デフォルトはアリ
+  nukidora: 0,           // 三人麻雀: 抜きドラの枚数(1枚=1翻、ドラと同じ扱いで翻数に加算)
   hanTier: 3,      // 1 | 2 | 3 | 4 | 'mangan' | 'haneman' | 'baiman' | 'sanbaiman' | 'yakuman'
   keitai: 'menzen', // 'menzen' | 'naki' | 'pinfu' | 'chiitoitsu'
   machi: 'ryanmen', // 'ryanmen' | 'bad' | 'shanpon'
@@ -2395,6 +2501,29 @@ const state = {
   manualFu: 30,
 };
 let mentsuSeq = 1;
+
+// 三人麻雀トグル(sanma/sanmaTsumoLoss/sanmaFuCalc)だけを保存し、次回起動時も
+// 引き継ぐ。抜きドラの枚数は素点入力中の翻数・符数などと同じく半荘ごとの
+// 一時的な値のため、こちらは保存対象にしない。
+const CALC_STORAGE_KEY = 'mahjong-calc-v1';
+function loadCalcState(){
+  try {
+    const raw = localStorage.getItem(CALC_STORAGE_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (typeof saved.sanma === 'boolean') state.sanma = saved.sanma;
+    if (typeof saved.sanmaTsumoLoss === 'boolean') state.sanmaTsumoLoss = saved.sanmaTsumoLoss;
+    if (typeof saved.sanmaFuCalc === 'boolean') state.sanmaFuCalc = saved.sanmaFuCalc;
+  } catch (e) { /* 壊れたデータは無視し、デフォルト値のまま続行 */ }
+}
+function saveCalcState(){
+  try {
+    localStorage.setItem(CALC_STORAGE_KEY, JSON.stringify({
+      sanma: state.sanma, sanmaTsumoLoss: state.sanmaTsumoLoss, sanmaFuCalc: state.sanmaFuCalc,
+    }));
+  } catch (e) { /* 保存できない環境ではメモリ上のみで継続 */ }
+}
+loadCalcState();
 
 // 別のボタンへのタップが、テキスト入力のonchange(blur)によるDOM作り直しと
 // 同じ一連の操作の中で競合して消えてしまうのを防ぐため、render()も
@@ -2410,6 +2539,10 @@ function setDealer(v){ state.isDealer = v; scheduleRender(); }
 function toggleKiriage(){ state.kiriageMangan = !state.kiriageMangan; scheduleRender(); }
 function toggleFuDirectMode(){ state.fuDirectMode = !state.fuDirectMode; scheduleRender(); }
 function setManualFu(v){ state.manualFu = Math.max(0, v); scheduleRender(); }
+function toggleSanma(){ state.sanma = !state.sanma; saveCalcState(); scheduleRender(); }
+function toggleSanmaTsumoLoss(){ state.sanmaTsumoLoss = !state.sanmaTsumoLoss; saveCalcState(); scheduleRender(); }
+function toggleSanmaFuCalc(){ state.sanmaFuCalc = !state.sanmaFuCalc; saveCalcState(); scheduleRender(); }
+function nukidoraStep(delta){ state.nukidora = Math.max(0, state.nukidora + delta); scheduleRender(); }
 // 符は常に10の位に切り上げ（七対子の25符だけ例外）というルールを、
 // 直接入力された値にも適用する。
 function normalizeManualFu(v){ return v === 25 ? 25 : roundUpTo(v, 10); }
@@ -2463,6 +2596,19 @@ function render(){
   const sw = document.getElementById('kiriageSwitch');
   sw.className = 'switch' + (state.kiriageMangan ? ' on' : '');
 
+  // 三人麻雀トグル・サブトグル(ツモ損・符計算)・抜きドラ入力
+  document.getElementById('sanmaSwitch').className = 'switch' + (state.sanma ? ' on' : '');
+  document.getElementById('sanmaOptionsSection').style.display = state.sanma ? '' : 'none';
+  if (state.sanma) {
+    document.getElementById('sanmaTsumoLossToggle').querySelector('.label').innerHTML =
+      `ツモ損<br><b>${state.sanmaTsumoLoss ? 'アリ' : 'ナシ'}</b>`;
+    document.getElementById('sanmaTsumoLossSwitch').className = 'switch' + (state.sanmaTsumoLoss ? ' on' : '');
+    document.getElementById('sanmaFuCalcToggle').querySelector('.label').innerHTML =
+      `符計算<br><b>${state.sanmaFuCalc ? 'アリ' : 'ナシ'}</b>`;
+    document.getElementById('sanmaFuCalcSwitch').className = 'switch' + (state.sanmaFuCalc ? ' on' : '');
+    document.getElementById('nukidoraVal').textContent = `${state.nukidora}枚`;
+  }
+
   // han grids
   const hanRow1 = [1,2,3,4].map(h=>{
     const disabled = h===1 && state.keitai==='chiitoitsu';
@@ -2480,17 +2626,22 @@ function render(){
 
   // 符数を直接入力するモード（中級者・上級者向け）への切り替えリンク
   const keitaiActive = isTierHan(state.hanTier);
+  // 三人麻雀の「符計算ナシ」は符を一切使わない固定表のみで点数が決まるため、
+  // 符計算に関わるUI(アガリの形・待ちの形・刻子槓・符数直接入力)は、
+  // 満貫以上を選んだ時と同じ「触っても意味が無い」扱い(disabledで表示)にする。
+  const fixedTableMode = state.sanma && !state.sanmaFuCalc;
+  const fuApplicable = keitaiActive && !fixedTableMode;
   document.getElementById('fuModeHint').textContent = state.fuDirectMode ? '← ガイドで選ぶ' : '符数を直接入力 →';
-  document.getElementById('keitaiSection').style.display = (keitaiActive && state.fuDirectMode) ? 'none' : '';
-  document.getElementById('fuSection').style.display = (keitaiActive && state.fuDirectMode) ? 'none' : '';
-  document.getElementById('fuDirectSection').style.display = (keitaiActive && state.fuDirectMode) ? '' : 'none';
-  if (keitaiActive && state.fuDirectMode) {
+  document.getElementById('keitaiSection').style.display = (fuApplicable && state.fuDirectMode) ? 'none' : '';
+  document.getElementById('fuSection').style.display = (fuApplicable && state.fuDirectMode) ? 'none' : '';
+  document.getElementById('fuDirectSection').style.display = (fuApplicable && state.fuDirectMode) ? '' : 'none';
+  if (fuApplicable && state.fuDirectMode) {
     document.getElementById('manualFuInput').value = state.manualFu;
   }
 
   // keitai section
-  document.getElementById('keitaiSection').classList.toggle('disabled', !keitaiActive);
-  document.getElementById('keitaiHint').textContent = keitaiActive ? '' : '（満貫以上は不要）';
+  document.getElementById('keitaiSection').classList.toggle('disabled', !fuApplicable);
+  document.getElementById('keitaiHint').textContent = fuApplicable ? '' : (fixedTableMode ? '（符計算ナシのため不要）' : '（満貫以上は不要）');
   const keitaiOptions = [
     ['menzen','門前','ポン・チーなし'],
     ['naki','鳴き','ポン・チーあり'],
@@ -2505,7 +2656,7 @@ function render(){
 
   // fu section
   const fuLocked = state.keitai==='chiitoitsu' || state.keitai==='pinfu' || !state.keitai;
-  document.getElementById('fuSection').classList.toggle('disabled', !keitaiActive || fuLocked);
+  document.getElementById('fuSection').classList.toggle('disabled', !fuApplicable || fuLocked);
 
   // 待ちの形（良形・悪形・シャンポン）
   const machiOptions = [
@@ -2565,11 +2716,17 @@ function render(){
   document.getElementById('mentsuAddBtn').classList.toggle('disabled', state.mentsuList.length >= MAX_MENTSU);
 
   // ---- result ----
+  // 三人麻雀の抜きドラは、ドラと同じ扱いでそのまま翻数に加算する(符には影響しない)。
+  const nukidoraHan = state.sanma ? state.nukidora : 0;
   const panel = document.getElementById('resultPanel');
-  if (!keitaiActive) {
-    const info = HAN_TIER_INFO[state.hanTier];
-    const r = calcScore(state.isDealer, info.minHan, 0, 0, state.kiriageMangan);
-    panel.innerHTML = resultHtml(`${info.name}（${info.sub}）`, null, null, r);
+  if (!fuApplicable) {
+    const baseHan = keitaiActive ? state.hanTier : HAN_TIER_INFO[state.hanTier].minHan;
+    const effectiveHan = baseHan + nukidoraHan;
+    const r = state.sanma
+      ? calcScoreSanma(state.isDealer, effectiveHan, 0, 0, state.kiriageMangan, state.sanmaTsumoLoss, false)
+      : calcScore(state.isDealer, effectiveHan, 0, 0, state.kiriageMangan);
+    const baseLabel = keitaiActive ? `${state.hanTier}翻` : `${HAN_TIER_INFO[state.hanTier].name}（${HAN_TIER_INFO[state.hanTier].sub}）`;
+    panel.innerHTML = resultHtml(nukidoraLabel(baseLabel, baseHan, nukidoraHan), null, null, r);
   } else {
     // 符数直接入力モードでは計算過程自体が存在しない(手入力値をそのまま使う)ため
     // 内訳(breakdown)はnullのままにし、resultHtml側で内訳表示を省略する。
@@ -2577,11 +2734,20 @@ function render(){
     const { fuRon, fuTsumo } = state.fuDirectMode
       ? (() => { const f = normalizeManualFu(state.manualFu); return { fuRon: f, fuTsumo: f }; })()
       : breakdown;
-    const r = calcScore(state.isDealer, state.hanTier, fuRon, fuTsumo, state.kiriageMangan);
+    const effectiveHan = state.hanTier + nukidoraHan;
+    const r = state.sanma
+      ? calcScoreSanma(state.isDealer, effectiveHan, fuRon, fuTsumo, state.kiriageMangan, state.sanmaTsumoLoss, true)
+      : calcScore(state.isDealer, effectiveHan, fuRon, fuTsumo, state.kiriageMangan);
     const ronFuLabel = r.ronCapped ? `${fuRon}符→満貫` : `${fuRon}符`;
     const tsumoFuLabel = r.tsumoCapped ? `${fuTsumo}符→満貫` : `${fuTsumo}符`;
-    panel.innerHTML = resultHtml(`${state.hanTier}翻`, ronFuLabel, tsumoFuLabel, r, breakdown);
+    panel.innerHTML = resultHtml(nukidoraLabel(`${state.hanTier}翻`, state.hanTier, nukidoraHan), ronFuLabel, tsumoFuLabel, r, breakdown);
   }
+}
+
+// 抜きドラがある場合だけ、合計翻数が分かるよう表示ラベルに追記する。
+function nukidoraLabel(baseLabel, baseHan, nukidora){
+  if (!nukidora) return baseLabel;
+  return `${baseLabel}+抜き${nukidora}翻=${baseHan + nukidora}翻`;
 }
 
 // 符計算の内訳1本分(ron側 or tsumo側)を「項目1a + 項目b = 小計符 → 切り上げ後符」
@@ -2675,7 +2841,7 @@ const MONETIZATION_CONFIG = {
   // ▲▲▲ ここまで ▲▲▲
 };
 
-const APP_VERSION = '1.0.0'; // package.jsonのversionと合わせて手動更新(ビルド時の自動注入は未実装)
+const APP_VERSION = '1.0.2'; // package.jsonのversionと合わせて手動更新(ビルド時の自動注入は未実装)
 
 // ハンバーガーメニュー配下の「その他」・購入導線に表示する法務・問い合わせリンク。
 const LEGAL_CONFIG = {
@@ -2727,14 +2893,14 @@ async function _waitForCdvPurchaseStore(){
   return window.CdvPurchase.store;
 }
 let _pendingPurchaseResolvers = [];
-// ②(不具合修正): 起動時に自動実行される_restorePurchasesOnBoot(Native.
-// restorePurchases())と、ユーザーが購入ボタン/「購入を復元」を押した時の
+// ②(不具合修正): 起動時に自動実行される_checkOwnedStatusOnBoot(Native.
+// checkOwnedStatus())と、ユーザーが購入ボタン/「購入を復元」を押した時の
 // 呼び出しが短時間に重なると、それぞれが独立にStoreKit/Play Billing側の
 // ネイティブ認証(Apple ID・Face ID確認等、店頭のlinkWithX()/signInWithX()に
 // 相当する「認証を求める呼び出し」)を要求してしまい、以前linkGoogle/
 // linkAppleで発生していた「2回連続認証」と同種の体験を引き起こしていた。
-// restorePurchases()とpurchasePremium()の、実際にストアの認証UIを
-// 要求しうる区間をこのロックで直列化し、同時に複数のStoreKit操作が
+// checkOwnedStatus()/restorePurchases()とpurchasePremium()の、実際にストアの
+// 認証UIを要求しうる区間をこのロックで直列化し、同時に複数のStoreKit操作が
 // 走らないようにする(ensureSignedIn()がCloudSync._initPromiseを待つのと
 // 同じ考え方)。
 let _billingOpLock = Promise.resolve();
@@ -2848,7 +3014,21 @@ const Native = {
       if (AdMob.addListener) {
         AdMob.addListener('bannerAdLoaded', () => {
           _bannerAdLoaded = true;
-          scheduleRenderApp();
+          // ②(不具合修正): showBanner()は非同期のため、呼び出した直後にモーダルを
+          // 開く等でupdateBannerState()がhideBanner()を呼んでも、その時点では
+          // まだネイティブ側にバナーが実際には生成されておらずhideBanner()が
+          // 実質的に無視(no-op)されることがある。その後に遅れてこのイベントで
+          // 読み込み完了が届くと、JS側の状態(モーダル表示中などで非表示のはず)
+          // とは裏腹にネイティブのバナーだけが画面に残り、対局履歴などのモーダルを
+          // 最下部までスクロールした時に重なって見える不具合が実機で確認された。
+          // 読み込み完了のこの時点で改めて「表示すべきでない」状態かどうかを
+          // 判定し、該当するなら次の再描画を待たずに即座に隠す
+          // (showBanner()側のawait完了後の後始末はNative.showBanner()参照)。
+          if (_bannerShouldShow(logState._activeTab === 'log')) {
+            scheduleRenderApp();
+          } else {
+            Native.hideBanner();
+          }
         });
         AdMob.addListener('bannerAdFailedToLoad', () => {
           _bannerAdLoaded = false;
@@ -2863,9 +3043,11 @@ const Native = {
         // env(safe-area-inset-bottom)を含めずバナー高さだけをbottomに
         // 足すと、セーフエリア分だけトグルバーとバナーが重なってしまう
         // (ホームインジケーターが無い旧機種では気づきにくいが、ある機種
-        // では必ず重なる)。adSize:'BANNER'固定(320x50)なので通常は
-        // 高さ50で決め打ちでも大きくは外れないが、実測値が取れる時は
-        // 実測値を優先して使う。
+        // では必ず重なる)。①: adSize:'ADAPTIVE_BANNER'は端末幅に応じて
+        // 高さが変わる(固定の50pxでは決め打ちできない)ため、実測値が
+        // 取れるまでの間は--ad-banner-heightの既定値(アダプティブバナーの
+        // 一般的な高さに合わせたフォールバック。実機確認はできていないため
+        // 大まかな目安)を使い、取得でき次第この実測値で上書きする。
         AdMob.addListener('bannerAdSizeChanged', (info) => {
           const h = info && info.height;
           if (h > 0) document.documentElement.style.setProperty('--ad-banner-height', `${h}px`);
@@ -2878,12 +3060,26 @@ const Native = {
     try {
       const AdMob = window.Capacitor.Plugins && window.Capacitor.Plugins.AdMob;
       if (AdMob && AdMob.showBanner) {
+        // ①(不具合修正): 固定サイズのadSize:'BANNER'(320x50)だと、ストア側が
+        // 縦長のクリエイティブを配信してきた場合にその広告が320x50の枠の中央に
+        // 小さく縮小表示され、残りの余白が透明なままアプリ画面が透けて見える
+        // 不具合があった。ADAPTIVE_BANNERは端末の横幅に合わせてストア側が
+        // 適切な比率のクリエイティブを選んで配信するため、この余白自体が
+        // 生まれにくくなる。高さは端末によって変わるため、実測値は
+        // 引き続きbannerAdSizeChangedリスナー(initAds参照)で取得する。
         await AdMob.showBanner({
           adId: admobConfigForPlatform().bannerUnitId,
-          adSize: 'BANNER',
+          adSize: 'ADAPTIVE_BANNER',
           position: 'BOTTOM_CENTER',
           margin: 0,
         });
+        // ②(不具合修正): このawaitが完了するまでの間に(モーダルが開く等で)
+        // updateBannerState()が既にhideBanner()を呼んでいた場合、_bannerShownは
+        // この時点で既にfalseに戻っている。その時点ではまだネイティブ側に
+        // バナーが実際には生成されておらずhideBanner()が実質的に無視
+        // (no-op)されていた可能性があるため、show自体が完了した今、
+        // 改めてhideBanner()を呼び直して確実に隠す。
+        if (!_bannerShown) await this.hideBanner();
       }
     } catch (e) { /* オフライン等での読み込み失敗は握りつぶし、通常の操作を妨げない */ }
   },
@@ -3011,6 +3207,42 @@ const Native = {
       }
     } catch (e) { showDebugError('課金初期化 (initBilling)', e); }
   },
+  // 戻り値: true(端末のローカルレシートから購入済みと確認できた) /
+  // false(ローカルレシートの読み込みが完了した上で購入なしと確認できた) /
+  // null(判定できなかった＝非ネイティブ環境・ストア未初期化・通信エラー等。
+  // 呼び出し側は既存のisPremium値を維持すること)。
+  //
+  // restorePurchases()と違い、store.restorePurchases()(ストアへの明示的な
+  // 問い合わせ)は呼ばない。store.initialize()(initBilling()内)が完了すれば、
+  // 端末に既に保存されているレシート/トランザクションの情報はローカルに
+  // 読み込まれており、その時点のproduct.ownedを読むだけで足りる。起動時・
+  // アカウント切り替え(ログイン・アカウント削除後の再初期化)直後の自動チェック
+  // に使う(resyncPurchaseStateAfterReinit参照)。実際にストアへ問い合わせる
+  // restorePurchases()は、ユーザーが「購入を復元」ボタンを押した時だけ呼ぶ。
+  async checkOwnedStatus(){
+    if (!this.isNativeApp()) return null;
+    // ②: purchasePremium()の認証区間(prepare+order())と重ならないよう直列化する。
+    return _withBillingLock(async () => {
+      try {
+        // ①: 起動直後はまだ用意できていないことがあるため、即座に諦めず待つ。
+        const store = await _waitForCdvPurchaseStore();
+        if (!store) {
+          showDebugError('購入状態の確認 (checkOwnedStatus)', `window.CdvPurchase.storeが見つかりません(window.CdvPurchase=${!!window.CdvPurchase})。${WAIT_FOR_STORE_TIMEOUT_MS / 1000}秒待っても利用可能になりませんでした。${cordovaPluginListInfo()}`);
+          return null;
+        }
+        await this.initBilling();
+        const product = store.get(MONETIZATION_CONFIG.billingProductId);
+        return !!(product && product.owned);
+      } catch (e) {
+        showDebugError('購入状態の確認 (checkOwnedStatus)', e);
+        return null;
+      }
+    });
+  },
+  // 「購入を復元」ボタン(restorePurchasesFromMenu)を押した時だけ呼ぶ。
+  // store.restorePurchases()で実際にストアへ問い合わせる、ネットワーク通信を
+  // 伴う操作。起動時・アカウント切り替え直後の自動チェックにはローカルの
+  // レシートを読むだけのcheckOwnedStatus()を使う(上記参照)。
   // 戻り値: true(有効な購入あり) / false(購入なし) / null(判定できなかった＝
   // 非ネイティブ環境か通信エラー等。呼び出し側は既存のisPremium値を維持すること)。
   async restorePurchases(){
@@ -3126,18 +3358,17 @@ const Native = {
   },
 };
 
-// ストアアプリ以外(このプレビューや素のブラウザ・GitHub Pages版)では常にtrue、
-// つまり「常に無制限・広告なし」を返す。ユーザーの指示により、広告/課金/対局数
-// 制限はCapacitorでラップしたストア配信版アプリの中だけに適用するため。
+// Web版(GitHub Pages)は廃止し、本リポジトリはストアアプリ専用のため、
+// 非ネイティブ環境を特別扱いする分岐は持たない。購入済みかどうかは
+// logState.settings.isPremium(起動時・アカウント切り替え直後にNative.
+// checkOwnedStatus()の結果で確定させる値)だけで判定する。
 function isPremiumUnlocked(){
-  if (!Native.isNativeApp()) return true;
   return !!logState.settings.isPremium;
 }
 
 // プレイヤー名の表示を金色にするかどうかの判定。ゲスト(participantLinksに
 // 紐付けが無い=ユーザーネームを指定していない)は対象外。自分自身は
-// logState.settings.isPremium(実際の購入フラグ。isPremiumUnlocked()は
-// 非ネイティブ環境で常にtrueを返してしまうため、ここでは使わない)を、
+// logState.settings.isPremium(実際の購入フラグ)を、
 // フレンドはrefreshFriends()で同期済みのfriends[].isPremiumキャッシュを見る。
 // participantLinksを省略した場合は現在編集中の対局(logState.settings)を見るが、
 // 対局履歴の表示では、その対局が終了した時点のsettingsSnapshot.participantLinks
@@ -3463,6 +3694,16 @@ const CloudSync = {
           saveLogState();
           // ②: ログイン成功直後、保存済みユーザーネームの有無を確認する。
           await this._syncUsernameAfterLogin();
+          // ①: uidが確定した直後、起動時(_checkOwnedStatusOnBoot)やアカウント
+          // 削除後と同じ手順(端末のローカルレシートから購入状態を再確認し、
+          // 確定した時点でusers/{この新uid}.isPremiumへ同期)を行う。特に
+          // signInWithX()へのフォールバックで既存アカウントのuidに切り替わった
+          // 場合、その既存アカウント側のisPremiumがこの端末の実際の購入状態で
+          // 上書きされることを保証するため。ここでもstore.restorePurchases()
+          // (実際のストアへの問い合わせ)は呼ばない。完了を待たずにログイン
+          // 自体は確定させる(起動時・アカウント削除後と同じ fire-and-forget
+          // のパターン)。
+          resyncPurchaseStateAfterReinit();
           return true;
         }
         showDebugError(label, `${linkMethod}()は例外を投げずに完了しましたが、result.userがありません: ${JSON.stringify(result)}`);
@@ -3655,14 +3896,22 @@ const CloudSync = {
   // (get(users/{uid}).data.isPremium、archiveMatchFanout参照)や、フレンドの
   // 表示名を金色にする機能(refreshFriends参照)から参照できるようにするため。
   // 失敗しても致命的ではないのでベストエフォート(次回同期のタイミングで揃う)。
+  //
+  // ②(不具合修正): この端末でisPremium===trueが確認できた時だけ書き込み、
+  // falseでは上書きしない(=既に課金済みのusers/{uid}ドキュメントに対して、
+  // 未課金の別端末から同じアカウントへログインしてもisPremiumをfalseに
+  // 消してしまわないようにするため。課金は「どの端末かに紐づく」ものであり、
+  // 複数端末で同じアカウントを使う場合、1台でも購入済みならそのアカウントは
+  // プレミアムのままであるべき)。
   async syncPremiumStatus(){
     if (!this.isAvailable() || !logState.account.uid) return;
+    if (!logState.settings.isPremium) return;
     try {
       const Firestore = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseFirestore;
       if (!Firestore) return;
       await Firestore.setDocument({
         reference: `users/${logState.account.uid}`,
-        data: { isPremium: !!logState.settings.isPremium },
+        data: { isPremium: true },
         merge: true,
       });
     } catch (e) { /* オフライン等は無視 */ }
@@ -4096,6 +4345,7 @@ function defaultLogState(){
       rate: 100,                // 1000点 = ◯◯（換算値。単位は付けない）
       roundingMode: 'gosharokunyuu', // 'gosharokunyuu' | 'roundHalfUp' | 'floor'
       chipUnitYen: 1000,
+      gameFeeRoundingUnit: 100, // ゲーム代金(場代)を1人あたりに割る時の端数切り上げ単位: 100|10|1(円)
       presentationMode: false, // 演出モード: 終局ボタンを押すまで順位・収支を隠す
       isPremium: false, // 広告削除+記録し放題(買い切り課金)が有効か。ストアアプリのみ意味を持つ
       participantLinks: {}, // { プレイヤー名: {uid, username} } 同卓者としてアカウント紐付けされている場合のみ存在
@@ -4122,7 +4372,8 @@ function defaultLogState(){
       usernameChangeCount: 0,
       linkedProviders: { google: false, apple: false },
       // ③: 「この端末でこのプロバイダをリンクした実績があるか」の記憶。
-      // linkedProvidersと違い、debugSignOut()でサインアウトしてもクリアしない
+      // linkedProvidersと違い、サインアウト相当の再初期化(アカウント削除後の
+      // 新しい匿名UIDへの切り替えなど)でもクリアしない
       // (linkGoogle/linkApple参照。実績があれば2回目以降は2段階認証などを
       // 含む認証UIを1回で済ませるため、signInWithX()を直接呼ぶ判断に使う)。
       knownLinkedProviders: { google: false, apple: false },
@@ -4149,6 +4400,7 @@ function defaultLogState(){
       revealStep: 0,       // 発表済みの順位グループ数
       revealPeek: false,   // 現在発表中の順位について、タップして名前・得点まで見た状態か
       confirmEndMatch: false,   // 「対局を終了する」の誤タップ防止確認中か
+      endMatchGameFeeInput: '', // 「対局を終了する」確認中に入力中のゲーム代金(合計・円)。空欄なら0円扱い
       tiebreakDealerOpen: false, // 素点同点時の「終局時の親は誰ですか？」確認中か
       pendingHanchanScores: null,   // ↑確定待ちの素点(chooseTiebreakDealerで使う)
       pendingHanchanBusterOf: null, // ↑確定待ちの飛ばした人情報
@@ -4169,14 +4421,6 @@ function defaultLogState(){
       billingMsg: null,         // 「購入を復元」結果などの短いメッセージ
       helpOpen: false,          // 「使い方」モーダル
       otherMenuOpen: false,     // 「その他」(利用規約・プライバシーポリシー・バージョン情報)モーダル
-      // ⚠️ デバッグメニュー(デバッグ:サインアウト・課金状態リセット)の表示解除
-      // フラグ。CloudSync.isAvailable()(ストアアプリ内)だけでは本番の
-      // App Store提出ビルドでも常にtrueになってしまい審査担当者・一般ユーザーの
-      // 目に触れてしまうため、加えてこのフラグも必要とする二重ガードにする。
-      // logState.uiはsaveLogState()の保存対象外なので、アプリを再起動すると
-      // 必ずfalseに戻る(=このセッション中、onAppTitleTap()で意図的に解除
-      // しない限り一切表示されない)。
-      devModeUnlocked: false,
       confirmDeleteAccount: false, // 「アカウントを削除」の誤タップ防止確認中か
       deletingAccount: false,
       deleteAccountErrorMsg: null,
@@ -4195,7 +4439,6 @@ function defaultLogState(){
       loginPromptOpen: false,      // 匿名のままでは困る操作をした時のログイン誘導モーダル
       loginPromptReason: null,
       notifyBanner: null,          // 「〇〇さんとの対局記録が追加されました」の簡易トースト
-      debugError: null,            // { context, detail } — 実機にXcode接続できない環境向けの画面上デバッグ表示
       addFriendOpen: false,        // 同卓者指定を介さない、単独の「フレンドを追加」モーダル
       addFriendSearchInput: '',
       addFriendSearchResult: null,
@@ -4301,45 +4544,55 @@ const logState = loadLogState();
 if (logState.hanchans.length > 0) logState.ui.settingsOpen = false;
 saveLogState(); // v1からの移行時などに、v2キーへ即座に書き直しておく
 applyTextSizeClass(); // 保存済みの文字サイズ設定を起動直後から反映する
+_observeChromeHeights(); // ヘッダー・下部ナビの実際の高さを計測し続ける(.stageのpadding用)
 
-// 起動時に必ずPlay Billingへ購入履歴を問い合わせて上書きする。ローカル保存の
-// isPremiumだけに頼ると、端末変更・再インストール時に無料枠へ戻ってしまうため。
-// (非ネイティブ環境ではrestorePurchases()がnullを返し、何も上書きしない。)
-Native.initAds();
-const _restorePurchasesOnBoot = (async () => {
-  const restored = await Native.restorePurchases();
-  if (restored !== null && restored !== logState.settings.isPremium) {
-    logState.settings.isPremium = restored;
+// 起動直後は保存済みのisPremium(ローカル値)でそのまま表示し、画面が
+// 切り替わるのを待たせない。裏でNative.checkOwnedStatus()(端末のローカル
+// レシートを読むだけで、ストアへは問い合わせない)を実行し、保存値と食い違う
+// 場合だけ更新する。
+//
+// _applyOwnedStatus(owned)の方針:
+// - owned===true: 未課金だった場合のみtrueに反映する(既存のisPremiumを保つ)。
+// - owned===false: レシートの読み込みが完了した上で「所有なし」と確定した
+//   場合のみ。課金済みの保存値をfalseに戻すのはこのケースだけで、読み込み前や
+//   通信エラー・タイムアウトでは起こらない(次の条件のnullを参照)。
+// - owned===null: 非ネイティブ環境・ストア未初期化・通信エラー等で判定できな
+//   かった場合。保存済みの値をそのまま維持し、絶対に未課金へ倒さない。
+function _applyOwnedStatus(owned){
+  if (owned !== null && owned !== logState.settings.isPremium) {
+    logState.settings.isPremium = owned;
     saveLogState();
     scheduleRenderApp();
   }
+}
+Native.initAds();
+const _checkOwnedStatusOnBoot = (async () => {
+  const owned = await Native.checkOwnedStatus();
+  _applyOwnedStatus(owned);
 })();
 // マルチプレイヤー(フレンド・卓)機能の起動処理。匿名認証を確立し、フレンド
 // 一覧を最新化し、前回終了時に進行中の卓があれば再購読する。
 CloudSync.init().then(async () => {
   scheduleRenderApp();
-  // 起動時の購入復元(上記)の結果が出揃うのを待ってから、自分のisPremiumを
-  // users/{uid}へ同期する(サインイン完了=account.uid確定を待つ必要があるため
-  // CloudSync.init()の完了後に行う。フレンドの表示名を金色にする機能・
-  // firestore.rulesの無料枠判定が参照する)。
-  await _restorePurchasesOnBoot;
+  // 起動時の購入状態チェック(上記)の結果が出揃うのを待ってから、自分の
+  // isPremiumをusers/{uid}へ同期する(サインイン完了=account.uid確定を
+  // 待つ必要があるためCloudSync.init()の完了後に行う。フレンドの表示名を
+  // 金色にする機能・firestore.rulesの無料枠判定が参照する)。
+  await _checkOwnedStatusOnBoot;
   CloudSync.syncPremiumStatus();
 });
 
 // ①: 「課金(広告削除・記録し放題)は端末に紐づき、アカウント(ユーザーネーム・
 // フレンド・対局履歴)とは独立して継続する」という設計を、アカウント削除・
-// デバッグサインアウトで新しい匿名UIDに切り替わった直後にも成立させる
-// ためのヘルパー。起動時(_restorePurchasesOnBoot + 上のCloudSync.init().then)
-// と同じ処理を、新しいUIDが確立した後にも行う。これにより、同じ端末で
-// 購入済みである限り、手動で「購入を復元」を押さなくても自動的に
-// 新しいアカウントへ課金特典が反映される。
+// ログインで新しい匿名UIDに切り替わった直後にも成立させるためのヘルパー。
+// 起動時(_checkOwnedStatusOnBoot + 上のCloudSync.init().then)と同じ処理を、
+// 新しいUIDが確立した後にも行う。これにより、同じ端末で購入済みである限り、
+// 手動で「購入を復元」を押さなくても自動的に新しいアカウントへ課金特典が
+// 反映される(こちらもcheckOwnedStatus()のみを使い、store.restorePurchases()
+// は呼ばない)。
 async function resyncPurchaseStateAfterReinit(){
-  const restored = await Native.restorePurchases();
-  if (restored !== null && restored !== logState.settings.isPremium) {
-    logState.settings.isPremium = restored;
-    saveLogState();
-    scheduleRenderApp();
-  }
+  const owned = await Native.checkOwnedStatus();
+  _applyOwnedStatus(owned);
   await CloudSync.syncPremiumStatus();
 }
 
@@ -4458,10 +4711,9 @@ function escapeHtml(str){
 }
 function escKey(str){ return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
 
-/* ---- 画面上デバッグ表示(Xcode/Macが無くコンソールを見られない環境向け) ----
-   console.errorだけでなく、実際のエラー内容(code/message等)をそのまま
-   画面上のバナーにも出す共通の仕組み。今後もcatchブロックから
-   showDebugError('文脈の説明', e) を呼ぶだけで使える。 ---- */
+// エラーオブジェクトから実際の内容(code/message等)を人間が読める文字列に
+// まとめる。showDebugError()のconsole.error出力や、_appendPermissionDeniedHint
+// 経由でユーザー向けエラーメッセージに付加する詳細テキストとして使う。
 function formatErrorForDisplay(err){
   if (err === undefined || err === null) return '(エラーオブジェクトなし: undefined/null)';
   if (typeof err === 'string') return err;
@@ -4494,19 +4746,7 @@ function _appendPermissionDeniedHint(text){
     + `3. 1・2のどちらでもない場合: 拒否されたドキュメントのパス(上記に表示)と、firestore.rules側の該当ルールの条件式(request.auth.uidの型・ドキュメントIDの形式など)を照らし合わせてご確認ください。`;
 }
 function showDebugError(context, err){
-  const detail = formatErrorForDisplay(err);
-  // ③(不具合修正・審査対策): 画面上の赤いデバッグバナーは、devModeUnlocked
-  // (アプリタイトルを7回連続タップして解除、logState.uiは保存対象外なので
-  // 再起動のたびに必ず未解除に戻る)が有効な時だけ表示する。無効な場合
-  // (=通常の本番利用時・審査時)は、内部ログ(console.error)には残しつつ、
-  // 画面上には一切出さない。以前はここにガードが無く、①②の修正作業中に
-  // 発生させたエラーも含め、一般ユーザー・審査担当者の画面にまで
-  // window.CdvPurchase.storeやFirestoreのパスといった内部実装の詳細が
-  // そのまま露出してしまっていた。
   console.error(`[showDebugError] ${context}:`, err);
-  if (!logState.ui.devModeUnlocked) return;
-  logState.ui.debugError = { context, detail };
-  scheduleRenderApp();
 }
 // cordova-plugin-purchase等のCordovaプラグイン向けの「登録済み一覧」相当。
 // Cordovaプラグインはwindow.Capacitor.Pluginsには現れない(Capacitorプラグイン
@@ -4531,43 +4771,14 @@ function cordovaPluginListInfo(){
     return `cordova.require('cordova/plugin_list')の取得に失敗しました: ${e && e.message}`;
   }
 }
-function dismissDebugError(){
-  logState.ui.debugError = null;
-  scheduleRenderApp();
-}
-async function copyDebugError(){
-  const d = logState.ui.debugError;
-  if (!d) return;
-  const text = `[${d.context}]\n${d.detail}`;
-  try {
-    await navigator.clipboard.writeText(text);
-    logState.ui.notifyBanner = 'エラー内容をコピーしました';
-  } catch (e) {
-    // クリップボードが使えない環境では諦めず、せめてバナーにそのまま流す
-    logState.ui.notifyBanner = text;
-  }
-  scheduleRenderApp();
-}
-function renderDebugError(){
-  const root = document.getElementById('debugErrorRoot');
-  if (!root) return;
-  const d = logState.ui.debugError;
-  if (!d) { root.innerHTML = ''; return; }
-  root.innerHTML = `
-    <div class="debug-error-banner">
-      <div class="debug-error-head">
-        <span>⚠️ デバッグ: ${escapeHtml(d.context)}</span>
-        <button class="history-close" onclick="dismissDebugError()">×</button>
-      </div>
-      <div class="debug-error-detail">${escapeHtml(d.detail)}</div>
-      <div class="debug-error-actions">
-        <button class="preset-btn" onclick="copyDebugError()">📋 コピー</button>
-      </div>
-    </div>`;
-}
 function formatMoney(n){
   const sign = n > 0 ? '+' : n < 0 ? '-' : '';
   return `${sign}${Math.abs(Math.round(n)).toLocaleString('ja-JP')}`;
+}
+// ゲーム代金(場代)のように符号を持たない、常に0以上の金額の表示用
+// (formatMoneyは収支の+/-符号つき表示のため、場代の金額そのものには使わない)。
+function formatYenPlain(n){
+  return Math.round(n || 0).toLocaleString('ja-JP');
 }
 function formatPt(n){
   const sign = n > 0 ? '+' : n < 0 ? '-' : '';
@@ -4578,15 +4789,32 @@ function formatPt(n){
 // 表示内容は従来通り)。下段はチップ分の内訳(🪙+符号付き金額)のみを、
 // 上段より一回り小さく・控えめな色で添える。チップを使っていない
 // (chipMoneyが0の)対局では下段を出さず、従来通り1段のままにする。
-function moneyStackInnerHtml(amount, chipMoney, mainClass){
+// gameFeePerPerson(対局履歴の詳細画面からのみ渡される。保存済みの対局に
+// ゲーム代金が設定されている場合の1人あたりの金額)がある場合は、さらに
+// 「場代」(精算の金額=amountとは別枠の行として表示)と「場代込み合計」の
+// 2行を追加する(進行中の対局・演出モードの発表カードではこの引数自体を
+// 渡さないため、常に従来通り2段のまま)。
+function moneyStackInnerHtml(amount, chipMoney, mainClass, gameFeePerPerson){
   const chipLine = chipMoney
     ? `<div class="money-chip-sub ${chipMoney>=0?'plus':'minus'}">🪙 ${formatMoney(chipMoney)}</div>`
     : '';
-  return `<div class="${mainClass}">${formatMoney(amount)}</div>${chipLine}`;
+  const feeLine = gameFeePerPerson
+    ? `<div class="money-fee-sub">🏮 場代 ${formatMoney(-gameFeePerPerson)}</div>
+       <div class="money-fee-total">場代込み合計 ${formatMoney(amount - gameFeePerPerson)}</div>`
+    : '';
+  return `<div class="${mainClass}">${formatMoney(amount)}</div>${chipLine}${feeLine}`;
 }
 
 /* ---- tab switching ---- */
-function setActiveTab(tab){ logState._activeTab = tab; scheduleRenderApp(); }
+function setActiveTab(tab){
+  logState._activeTab = tab;
+  // ⑧: 得点記録が3人打ちの対局から点数計算タブを開いた場合、三人麻雀を自動でONにする。
+  if (tab === 'calc' && logState.settings.playerCount === 3) {
+    state.sanma = true;
+    saveCalcState();
+  }
+  scheduleRenderApp();
+}
 
 /* ---- settings handlers ---- */
 function setPlayerCount(n){
@@ -4763,10 +4991,22 @@ function requestEndMatch(){
   if (isRoomViewerOnly()) return; // 対局の終了(確定保存)も代表入力者だけができる
   if (logState.hanchans.length === 0) return;
   logState.ui.confirmEndMatch = true;
+  logState.ui.endMatchGameFeeInput = ''; // 確認ダイアログを開くたびに空欄から始める
   scheduleRenderApp();
 }
 function cancelEndMatch(){
   logState.ui.confirmEndMatch = false;
+  scheduleRenderApp();
+}
+function setEndMatchGameFeeInput(value){
+  logState.ui.endMatchGameFeeInput = value;
+  scheduleRenderApp();
+}
+// 単位(100円/10円/1円)は次回以降の対局終了ダイアログでも引き継ぐ既定値として
+// ルール設定(logState.settings)に保存する(chipUnitYenと同じ扱い)。
+function setGameFeeRoundingUnit(unit){
+  logState.settings.gameFeeRoundingUnit = unit;
+  saveLogState();
   scheduleRenderApp();
 }
 function confirmEndMatch(){
@@ -4789,6 +5029,12 @@ function archiveCurrentMatch(){
   if (isRoomViewerOnly()) return;
   if (logState.hanchans.length === 0) return;
   const participantUids = activeParticipantUids();
+  // ゲーム代金(場代): 割る人数は控えメンバーを含めた参加者全員(withBenchNames)。
+  // 入力が空欄・0以下なら0円として扱う(従来通りの保存フローに進む)。
+  const gameFee = parseInt(logState.ui.endMatchGameFeeInput, 10) || 0;
+  const gameFeeRounding = logState.settings.gameFeeRoundingUnit || 100;
+  const gameFeePersonCount = withBenchNames(activePlayers(), logState.settings).length;
+  const gameFeePerPerson = calcGameFeePerPerson(gameFee, gameFeeRounding, gameFeePersonCount);
   const entry = {
     id: 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
     startedAt: logState.currentMatchStartedAt || new Date().toISOString(),
@@ -4797,6 +5043,7 @@ function archiveCurrentMatch(){
     settingsSnapshot: JSON.parse(JSON.stringify(logState.settings)),
     hanchans: JSON.parse(JSON.stringify(logState.hanchans)),
     chips: JSON.parse(JSON.stringify(logState.chips)),
+    gameFee, gameFeeRounding, gameFeePerPerson,
   };
   if (participantUids.length > 0) {
     entry.participantUids = participantUids;
@@ -4826,6 +5073,7 @@ function archiveCurrentMatch(){
   logState.ui.revealStep = 0;
   logState.ui.revealPeek = false;
   logState.ui.confirmEndMatch = false;
+  logState.ui.endMatchGameFeeInput = '';
   cancelEditHanchan_noRender();
   saveLogState();
   scheduleRenderApp();
@@ -5253,16 +5501,8 @@ async function submitUsername(){
   }
 }
 async function loginFromAccountModal(provider){
-  // ボタンのタップ自体がハンドラまで届いているかをまず画面上で確認できる
-  // ようにする(成功すればdismissDebugError()で消える)。
-  showDebugError(`ログインボタン(${provider})`, 'タップを検知しました。サインイン処理を呼び出します…');
   const ok = provider === 'google' ? await CloudSync.linkGoogle() : await CloudSync.linkApple();
-  if (ok) {
-    dismissDebugError();
-  } else if (logState.ui.debugError && logState.ui.debugError.context === `ログインボタン(${provider})`) {
-    // linkGoogle/linkAppleが例外も投げず詳細も出せなかった(=想定外の失敗経路)場合の最終フォールバック。
-    showDebugError(`ログインボタン(${provider})`, '処理は呼ばれましたが、詳細不明のまま失敗しました(例外なし・エラー情報なし)。');
-  }
+  if (!ok) console.error(`[loginFromAccountModal] ${provider}: login failed`);
   scheduleRenderApp();
 }
 
@@ -5893,6 +6133,31 @@ function setTextSize(size){
   applyTextSizeClass();
   scheduleRenderApp();
 }
+// ①(不具合修正): .title-row(ヘッダー)・#bottomNav(下部ナビ)の実際の高さは、
+// 文字サイズ設定(html.text-size-large/xlarge、rem基準でフォントサイズを
+// 125%/150%に拡大)によって伸び縮みする(ナビ: 標準68/大77/特大86px、
+// ヘッダー: 56/65/74px、実機未確認のため目安)。.stageのpadding-top/bottomを
+// 固定pxで確保していると、デフォルトの「大」でも画面最下部が隠れ、「特大」
+// ではさらに上部・下部とも大きく隠れてしまっていた。ResizeObserverで両要素の
+// 実際の高さ(どちらも自身のpaddingにenv(safe-area-inset-*)を含むため、
+// getBoundingClientRect().heightがそのままセーフエリア込みの高さになる)を
+// 測り、CSSカスタムプロパティ(--header-height/--bottom-nav-height)へ反映する
+// ことで、文字サイズの変更・画面回転のどちらでも.stageのpaddingが常に
+// 実際の高さに追従するようにする(.stage側は--header-height/
+// --bottom-nav-heightを参照する形に変更済み)。
+function _observeChromeHeights(){
+  const header = document.querySelector('.title-row');
+  const nav = document.getElementById('bottomNav');
+  if (!header || !nav || typeof ResizeObserver === 'undefined') return;
+  const ro = new ResizeObserver(() => {
+    const headerH = Math.ceil(header.getBoundingClientRect().height);
+    const navH = Math.ceil(nav.getBoundingClientRect().height);
+    if (headerH > 0) document.documentElement.style.setProperty('--header-height', `${headerH}px`);
+    if (navH > 0) document.documentElement.style.setProperty('--bottom-nav-height', `${navH}px`);
+  });
+  ro.observe(header);
+  ro.observe(nav);
+}
 function dismissNotifyBanner(){
   logState.ui.notifyBanner = null;
   scheduleRenderApp();
@@ -6208,7 +6473,10 @@ function renderHanchanLog(hanchansList, s, opts){
 // そのプレイヤー枠専用の結果受け取りリンクを送れるようにする(openHistoryLinkShare
 // 参照)。ライブ対局中の表示(renderStickyHeader)では渡さないため、既存の見た目・
 // 挙動は変わらない。新しいボタン要素は増やさず、既存のカード自体をタップ対象にする。
-function totalCardsHtml(order, totals, topMoney, participantLinks, shareMatchId){
+// gameFeePerPerson: 対局履歴の詳細画面(renderHistoryDetail)からだけ渡される。
+// 保存済みの対局にゲーム代金が設定されている場合、精算の金額(totals.money)
+// とは別行で「場代」「場代込み合計」を追加表示する(moneyStackInnerHtml参照)。
+function totalCardsHtml(order, totals, topMoney, participantLinks, shareMatchId, gameFeePerPerson){
   return `
     <div class="total-cards">
       ${order.map(p=>{
@@ -6218,7 +6486,7 @@ function totalCardsHtml(order, totals, topMoney, participantLinks, shareMatchId)
         return `
         <div class="total-card ${isTop?'top':''} ${shareable?'shareable':''}" ${shareable?`onclick="openHistoryLinkShare('${escKey(shareMatchId)}','${escKey(p)}')"`:''}>
           <div class="pname${premiumNameClass(p, participantLinks)}">${isTop?'<span class="crown">👑</span>':''}${escapeHtml(p)}${shareable?' <span class="share-hint">🔗</span>':''}</div>
-          ${moneyStackInnerHtml(totals.money[p], totals.chipMoney[p], 'pmoney')}
+          ${moneyStackInnerHtml(totals.money[p], totals.chipMoney[p], 'pmoney', gameFeePerPerson)}
           <div class="ppt">${formatPt(totals.pt[p])}pt</div>
         </div>`;
       }).join('')}
@@ -6299,9 +6567,26 @@ function renderEndMatchControls(isPresentationDone){
   if (isRoomViewerOnly()) return ''; // 対局の終了(確定保存)は代表入力者だけの操作
   if (logState.hanchans.length === 0) return '';
   if (logState.ui.confirmEndMatch) {
+    // 割る人数は、控えメンバーを含めた参加者全員(withBenchNames参照)。
+    const personCount = withBenchNames(activePlayers(), logState.settings).length;
+    const feeInput = logState.ui.endMatchGameFeeInput;
+    const fee = parseInt(feeInput, 10) || 0;
+    const unit = logState.settings.gameFeeRoundingUnit || 100;
+    const perPerson = calcGameFeePerPerson(fee, unit, personCount);
     return `
       <div class="end-match-confirm">
         <span>この対局を終了して履歴に保存しますか？</span>
+        <div class="settings-row">
+          <div class="lbl">ゲーム代金(合計・任意)</div>
+          <input class="num-input" type="number" step="100" inputmode="numeric" placeholder="例: 5000（空欄なら0円）"
+            value="${escapeHtml(feeInput)}" oninput="setEndMatchGameFeeInput(this.value)">
+          <div class="preset-row">
+            <button class="preset-btn ${unit===100?'active':''}" onclick="setGameFeeRoundingUnit(100)">100円単位</button>
+            <button class="preset-btn ${unit===10?'active':''}" onclick="setGameFeeRoundingUnit(10)">10円単位</button>
+            <button class="preset-btn ${unit===1?'active':''}" onclick="setGameFeeRoundingUnit(1)">1円単位</button>
+          </div>
+          ${fee > 0 ? `<div class="game-fee-preview">1人あたり ${formatYenPlain(perPerson)}円（${personCount}人で割り端数切り上げ）</div>` : ''}
+        </div>
         <div class="end-match-confirm-btns">
           <button class="preset-btn" onclick="cancelEndMatch()">キャンセル</button>
           <button class="preset-btn danger" onclick="confirmEndMatch()">終了して保存</button>
@@ -6525,6 +6810,26 @@ function renderHistoryDetail(id){
   const chipPlayers = withBenchNames(players, s);
   const chipSum = chipPlayers.reduce((sum,p)=> sum + (m.chips[p]||0), 0);
 
+  // ゲーム代金(場代)。既存の対局データ(この3項目が無い)は0円として扱う。
+  // 割る人数は、この対局終了時点の控えメンバーを含めた参加者全員
+  // (settingsSnapshot基準。archiveCurrentMatch時点の計算と揃える)。
+  const gameFee = m.gameFee || 0;
+  const gameFeeRounding = m.gameFeeRounding || 100;
+  const gameFeePerPerson = m.gameFeePerPerson || 0;
+  const gameFeePersonCount = withBenchNames(s.playerNames.slice(0, s.playerCount), s).length;
+  const gameFeeHtml = `
+    <div class="settings-row" style="margin-top:10px;">
+      <div class="lbl">ゲーム代金(合計)</div>
+      <input class="num-input" type="number" step="100" inputmode="numeric" placeholder="例: 5000（空欄なら0円）"
+        value="${gameFee || ''}" onchange="setArchiveGameFee('${escKey(id)}', this.value)">
+      <div class="preset-row">
+        <button class="preset-btn ${gameFeeRounding===100?'active':''}" onclick="setArchiveGameFeeRounding('${escKey(id)}', 100)">100円単位</button>
+        <button class="preset-btn ${gameFeeRounding===10?'active':''}" onclick="setArchiveGameFeeRounding('${escKey(id)}', 10)">10円単位</button>
+        <button class="preset-btn ${gameFeeRounding===1?'active':''}" onclick="setArchiveGameFeeRounding('${escKey(id)}', 1)">1円単位</button>
+      </div>
+      ${gameFeePerPerson > 0 ? `<div class="game-fee-preview">1人あたり ${formatYenPlain(gameFeePerPerson)}円（${gameFeePersonCount}人で割り端数切り上げ）</div>` : ''}
+    </div>`;
+
   const titleHtml = editingTitle
     ? `<input class="text-input" id="archiveTitleInput" value="${escapeHtml(m.title||'')}" placeholder="対局メモ・タイトル（例: 〇〇杯 第3戦）" onchange="saveArchiveTitle('${escKey(id)}', this.value)" onblur="saveArchiveTitle('${escKey(id)}', this.value)">`
     : `<div class="history-detail-title" onclick="startEditArchiveTitle('${escKey(id)}')">${m.title ? escapeHtml(m.title) : '📝 タイトル・メモを追加'}</div>`;
@@ -6543,9 +6848,10 @@ function renderHistoryDetail(id){
     <div class="history-detail">
       <div class="history-detail-title-row">${titleHtml}</div>
       <div class="history-detail-meta">${formatMatchDate(m.startedAt, m.endedAt)}・${players.map(p=>`<span class="${premiumNameClass(p, s.participantLinks).trim()}">${escapeHtml(p)}</span>`).join('・')}</div>
-      ${totalCardsHtml(order, totals, topMoney, s.participantLinks, CloudSync.isAvailable() ? id : null)}
+      ${totalCardsHtml(order, totals, topMoney, s.participantLinks, CloudSync.isAvailable() ? id : null, gameFeePerPerson)}
       ${CloudSync.isAvailable() && order.some(p => !s.participantLinks[p]) ? `<div class="history-reminder">💡 ゲストのプレイヤー名をタップすると、結果受け取りリンクを送れます</div>` : ''}
       ${chipSum !== 0 ? `<div class="check-banner bad" style="margin-top:8px;">⚠ チップ合計 ${chipSum>0?'+':''}${chipSum}枚（ゼロサムになっていません）</div>` : ''}
+      ${gameFeeHtml}
       ${renderHanchanLog(m.hanchans, settingsForCalc, { readOnly: true })}
       <div class="history-detail-actions">
         <button class="mentsu-add" onclick="shareMatchResult('${escKey(id)}')">📤 結果をシェア</button>
@@ -6566,6 +6872,31 @@ function saveArchiveTitle(id, value){
   const m = logState.matchHistory.find(x => x.id === id);
   if (m) m.title = (value || '').trim();
   logState.ui.editingArchiveTitleId = null;
+  saveLogState();
+  scheduleRenderApp();
+}
+// 保存済みの対局のゲーム代金(場代)を後から編集する。割る人数はこの対局
+// 終了時点のロースター+控え(settingsSnapshot基準、archiveCurrentMatch時点の
+// 計算と揃える)で固定し、現在の人数設定が変わっていても影響されない。
+function _recomputeArchiveGameFeePerPerson(m){
+  const s = m.settingsSnapshot;
+  const personCount = withBenchNames(s.playerNames.slice(0, s.playerCount), s).length;
+  m.gameFeePerPerson = calcGameFeePerPerson(m.gameFee || 0, m.gameFeeRounding || 100, personCount);
+}
+function setArchiveGameFee(id, value){
+  const m = logState.matchHistory.find(x => x.id === id);
+  if (!m) return;
+  const fee = parseInt(value, 10);
+  m.gameFee = (!fee || fee <= 0) ? 0 : fee;
+  _recomputeArchiveGameFeePerPerson(m);
+  saveLogState();
+  scheduleRenderApp();
+}
+function setArchiveGameFeeRounding(id, unit){
+  const m = logState.matchHistory.find(x => x.id === id);
+  if (!m) return;
+  m.gameFeeRounding = unit;
+  _recomputeArchiveGameFeePerPerson(m);
   saveLogState();
   scheduleRenderApp();
 }
@@ -6606,6 +6937,7 @@ function calcCareerStats(matchHistory, personKey){
   if (relevant.length === 0) return null;
 
   let games = 0, rankSum = 0, top1 = 0, top2 = 0, last = 0, tobiCount = 0, moneySum = 0, maxScore = -Infinity;
+  let gameFeeSum = 0; // 場代は半荘ごとではなく対局1件につき1人あたりの金額(gameFeePerPerson)を1回だけ加算する
   relevant.forEach(m => {
     const s = m.settingsSnapshot;
     const links = s.participantLinks;
@@ -6643,6 +6975,9 @@ function calcCareerStats(matchHistory, personKey){
     // (理論上ありうる)対局内改名のケースも含め、該当した全ての名前分を
     // 合算する(通常はmatchNamesの要素は高々1つ)。
     matchNames.forEach(n => { moneySum += ((m.chips && m.chips[n]) || 0) * s.chipUnitYen; });
+    // 場代はこの対局に参加していれば(matchNamesが非空なら)1対局につき1回だけ、
+    // 1人あたりの金額(gameFeePerPerson。無ければ0円=既存データ)を加算する。
+    if (matchNames.size > 0) gameFeeSum += m.gameFeePerPerson || 0;
   });
   if (games === 0) return null;
 
@@ -6656,6 +6991,8 @@ function calcCareerStats(matchHistory, personKey){
     maxScore: maxScore === -Infinity ? 0 : maxScore,
     avgMoneyPerHanchan: moneySum / games,
     totalMoney: moneySum,
+    totalGameFee: gameFeeSum,
+    totalMoneyWithFee: moneySum - gameFeeSum,
     tobiCount,
   };
 }
@@ -6682,6 +7019,9 @@ function renderCareerStatCard(name, st, playerCount){
       <div class="stat-row">飛んだ回数 <b>${st.tobiCount}回</b></div>
       <div class="stat-row">平均収支(半荘あたり) <b style="color:${moneyColor(st.avgMoneyPerHanchan)}">${formatMoney(st.avgMoneyPerHanchan)}</b></div>
       <div class="stat-row">通算収支 <b style="color:${moneyColor(st.totalMoney)}">${formatMoney(st.totalMoney)}</b></div>
+      ${st.totalGameFee > 0 ? `
+      <div class="stat-row">累計場代 <b style="color:var(--red-soft)">${formatMoney(-st.totalGameFee)}</b></div>
+      <div class="stat-row">場代込み累計収支 <b style="color:${moneyColor(st.totalMoneyWithFee)}">${formatMoney(st.totalMoneyWithFee)}</b></div>` : ''}
     </div>`;
 }
 // 選んだ人が参加した対局の中で最も多い卓の人数(3人打ち/4人打ち)を返す。
@@ -7392,112 +7732,6 @@ async function confirmDeleteAccountFromMenu(){
   }
 }
 
-// ⚠️ 一時的なデバッグ機能。各種バグ検証(ユーザーネーム設定・Google/Apple
-// ログイン等)を何度も繰り返し試すため、アプリを再起動せずに「未ログイン」
-// 状態へ手早く戻すためのもの。本リリース前に削除するか隠すこと
-// (renderOtherModal内の呼び出し元も合わせて)。
-// アカウント削除(confirmDeleteAccountFromMenu)とは異なり、クラウド側の
-// データ(ユーザーネーム・フレンド・対局記録)は一切削除しない。あくまで
-// この端末上のログインセッションをサインアウトし、ローカルのaccount/friends/
-// roomをリセットして、新しい匿名アカウントとして再初期化するだけ。
-async function debugSignOut(){
-  try {
-    const Auth = window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication;
-    if (Auth && Auth.signOut) {
-      await Auth.signOut();
-    }
-  } catch (e) {
-    showDebugError('デバッグ:サインアウト', e);
-    // signOut()自体が失敗しても、ローカル側のリセットは続行する
-    // (ローカルだけでも未ログイン状態から試せるようにするため)。
-  }
-  // ③: knownLinkedProviders(この端末でどのプロバイダをリンクした実績が
-  // あるか)だけは、サインアウトしても消さずに引き継ぐ。消してしまうと、
-  // このデバッグ:サインアウト→再ログインのテストサイクルのたびに
-  // linkWithX()が「必ず失敗するとわかっている1回目の認証UI」を毎回
-  // 律儀にやり直し、2段階認証などが二重に求められる不具合が再発する
-  // (confirmDeleteAccountFromMenuでの本当のアカウント削除とは異なり、
-  // ここではFirebase側のGoogle/Appleとの紐付け自体は消えていないため、
-  // 次にlinkWithGoogle/linkWithAppleを呼んでも必ずcredential-already-in-use
-  // になることがわかっている)。
-  const knownLinkedProviders = logState.account.knownLinkedProviders;
-  logState.account = defaultLogState().account;
-  logState.account.knownLinkedProviders = knownLinkedProviders;
-  logState.friends = [];
-  logState.room = null;
-  logState.ui.otherMenuOpen = false;
-  logState.ui.accountModalOpen = false;
-  logState.ui.usernameRequired = false; // ②: 匿名アカウントに戻るため、必須設定モーダルも解除する
-  logState.ui.notifyBanner = 'デバッグ:サインアウトしました。新しい匿名アカウントとして再初期化します。';
-  saveLogState();
-  scheduleRenderApp();
-  // ①: 新しい匿名UIDが確立したら、端末のストア購入状態を新UIDへ同期する。
-  CloudSync.init().then(resyncPurchaseStateAfterReinit); // 新しい匿名アカウントとして再初期化(ensureSignedIn()もこれを待つ)
-}
-
-// ⚠️ 一時的なデバッグ機能。Sandboxテスト環境では「購入履歴をクリア」が
-// App Store Connect上から行えないことがあり、正規の購入フロー(購入ボタン→
-// 決済→反映→プレミアム表示)を何度も検証するために、アプリ側で完結する
-// リセット手段として用意する。本リリース前に削除するか隠すこと
-// (renderOtherModal内の呼び出し元、およびonAppTitleTap/devModeUnlockedの
-// 仕組み自体も合わせて)。
-//
-// ⚠️ Apple/Googleのサーバー側に残っている実際の購入履歴・レシートには
-// 一切影響を与えない。そのため、このリセット後に「購入を復元」を押す、
-// または次回起動時の自動復元(_restorePurchasesOnBoot)が走ると、この
-// Sandboxテスターが既に購入済みであることが再度検出され、isPremiumは
-// 自動的にtrueへ戻る(これは正しい挙動であり、あくまで「アプリ側の
-// ローカル表示・キャッシュを一旦未購入状態に戻す」ためのものであることに
-// 注意)。
-async function debugResetPremiumStatus(){
-  logState.settings.isPremium = false;
-  saveLogState();
-  scheduleRenderApp();
-  // ログイン中であれば、users/{uid}.isPremiumもfalseへ同期する
-  // (syncPremiumStatus()自体が未サインイン/非対応環境ではベストエフォートで
-  // 何もしないため、ここでの追加のガードは不要)。
-  await CloudSync.syncPremiumStatus();
-  try {
-    // cordova-plugin-purchase側がローカルに保持している既知のトランザクション/
-    // レシート情報を、可能な範囲でリセットする。store.reset()はプラグインの
-    // バージョンによっては存在しない、または挙動が異なる可能性があるため、
-    // 存在する場合のみベストエフォートで呼ぶ(無くても致命的ではない。
-    // 次に「購入を復元」を押せばいずれにせよサーバー側の実際の状態で
-    // 上書きされる)。
-    const store = window.CdvPurchase && window.CdvPurchase.store;
-    if (store && typeof store.reset === 'function') await store.reset();
-  } catch (e) {
-    showDebugError('デバッグ:課金状態リセット', e);
-  }
-  logState.ui.notifyBanner = 'デバッグ:課金状態をリセットしました(ローカル・Firestoreのみ。Apple/Google側の購入履歴は変わりません)。';
-  scheduleRenderApp();
-}
-
-// ⚠️ 一時的なデバッグ機能。デバッグメニュー(デバッグ:サインアウト・課金
-// 状態リセット)は、CloudSync.isAvailable()(ストアアプリ内)が真であるだけの
-// 本番のApp Store提出ビルドでも表示されてしまわないよう、アプリタイトルを
-// 短時間に7回連続タップした時だけ表示解除する隠しジェスチャーにしている
-// (#appTitle要素のonclick。renderAppInner()はinnerHTMLだけを書き換えて
-// 要素自体は再作成しないため、この属性は再描画後も保持される)。
-// devModeUnlockedはlogState.ui配下(=保存対象外)のため、アプリを再起動する
-// たびに必ず未解除の状態に戻る。
-let _titleTapCount = 0;
-let _titleTapResetTimer = null;
-function onAppTitleTap(){
-  if (logState.ui.devModeUnlocked) return; // 解除済みなら何もしない(otherMenuOpen経由で毎回見えている)
-  clearTimeout(_titleTapResetTimer);
-  _titleTapCount++;
-  if (_titleTapCount >= 7) {
-    _titleTapCount = 0;
-    logState.ui.devModeUnlocked = true;
-    logState.ui.notifyBanner = 'デバッグメニューを表示しました(このセッション中のみ・再起動で自動的に元に戻ります)。';
-    scheduleRenderApp();
-    return;
-  }
-  // 1.5秒以内に次のタップが来なければ最初からやり直し(誤って部分的に
-  // 連打してしまった場合に、後から急に解除されて驚かないようにするため)。
-  _titleTapResetTimer = setTimeout(() => { _titleTapCount = 0; }, 1500);
-}
 function renderOtherModal(){
   const root = document.getElementById('otherModalRoot');
   if (!root) return;
@@ -7518,14 +7752,6 @@ function renderOtherModal(){
       </div>
     `
   );
-  // ⚠️ 一時的なデバッグ機能(debugSignOut/debugResetPremiumStatus参照)。
-  // CloudSync.isAvailable()に加えてdevModeUnlocked(アプリタイトル7回タップで
-  // 解除、再起動で必ず元に戻る)も真の時だけ表示する二重ガード
-  // (onAppTitleTap参照)。本リリース前に削除すること。
-  const debugToolsHtml = (!CloudSync.isAvailable() || !logState.ui.devModeUnlocked) ? '' : `
-    <button class="debug-signout-btn" onclick="debugSignOut()">デバッグ: サインアウト</button>
-    <button class="debug-signout-btn" onclick="debugResetPremiumStatus()">デバッグ: 課金状態をリセット</button>
-  `;
   root.innerHTML = `
     <div class="history-modal-overlay">
       <div class="history-modal">
@@ -7560,7 +7786,6 @@ function renderOtherModal(){
             </div>
           </div>
           ${deleteAccountHtml}
-          ${debugToolsHtml}
         </div>
       </div>
     </div>`;
@@ -8113,7 +8338,6 @@ function renderAppInner(){
   safeRender(renderDeletePresetConfirmModal, 'renderDeletePresetConfirmModal');
   safeRender(renderSubstituteModal, 'renderSubstituteModal');
   safeRender(renderNotifyBanner, 'renderNotifyBanner');
-  safeRender(renderDebugError, 'renderDebugError');
   safeRender(() => updateBannerState(onLog), 'updateBannerState');
 }
 
@@ -8128,13 +8352,20 @@ let _bannerShown = false;       // Native.showBanner()を呼んで表示を試�
 // CSS側だけ余白を確保すると、その余白に何も表示されない「隙間」が
 // トグルバーの下にできてしまうため。
 let _bannerAdLoaded = false;
-function updateBannerState(onLog){
+// ②(不具合修正): 「表示すべきでないか」の判定をupdateBannerState()と
+// bannerAdLoadedリスナー(initAds参照。読み込み完了時点で即座に同じ判定を
+// 行い、該当するならその場でhideBanner()する)の両方から同じロジックで
+// 呼べるよう、1箇所にまとめる。
+function _bannerShouldShow(onLog){
   const modalOpen = logState.ui.historyOpen || logState.ui.paywallOpen
     || logState.ui.accountModalOpen || logState.ui.friendPickerOpen
     || logState.ui.loginPromptOpen || logState.ui.friendsListOpen
     || logState.ui.addFriendOpen || logState.ui.helpOpen || logState.ui.otherMenuOpen
     || logState.ui.tiebreakDealerOpen;
-  const shouldShow = Native.isNativeApp() && onLog && !modalOpen && !isPremiumUnlocked();
+  return Native.isNativeApp() && onLog && !modalOpen && !isPremiumUnlocked();
+}
+function updateBannerState(onLog){
+  const shouldShow = _bannerShouldShow(onLog);
   const showSpacer = shouldShow && _bannerAdLoaded;
   document.body.classList.toggle('ad-banner-active', showSpacer);
   const nav = document.getElementById('bottomNav');
